@@ -1,6 +1,6 @@
 extern crate mqtt;
 
-use mqtt::client::MqttClient;
+use mqtt::client::mclient::MqttClient;
 use mqtt::{TopicFilter, QualityOfService};
 
 use std::thread;
