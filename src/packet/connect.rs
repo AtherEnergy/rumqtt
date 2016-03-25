@@ -34,7 +34,7 @@ impl ConnectPacket {
             protocol_name: ProtocolName(protoname),
             protocol_level: ProtocolLevel(level),
             flags: ConnectFlags::empty(),
-            keep_alive: KeepAlive(3),
+            keep_alive: KeepAlive(0),
             payload: ConnectPacketPayload::new(client_identifier),
         };
 
@@ -46,6 +46,10 @@ impl ConnectPacket {
     #[inline]
     fn calculate_remaining_length(&self) -> u32 {
         self.encoded_variable_headers_length() + self.payload().encoded_length()
+    }
+
+    pub fn set_keep_alive(&mut self, keep_alive: u16) {
+        self.keep_alive = KeepAlive(keep_alive);
     }
 
     pub fn set_user_name(&mut self, name: Option<String>) {

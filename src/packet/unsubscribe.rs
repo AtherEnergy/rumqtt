@@ -67,8 +67,7 @@ impl<'a> Packet<'a> for UnsubscribePacket {
                               fixed_header: FixedHeader)
                               -> Result<Self, PacketError<'a, Self>> {
         let packet_identifier: PacketIdentifier = try!(PacketIdentifier::decode(reader));
-        let payload: UnsubscribePacketPayload =
-            try!(UnsubscribePacketPayload::decode_with(reader,
+        let payload: UnsubscribePacketPayload = try!(UnsubscribePacketPayload::decode_with(reader,
                                                        Some(fixed_header.remaining_length -
                                                             packet_identifier.encoded_length()))
                      .map_err(PacketError::PayloadError));

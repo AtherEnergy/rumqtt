@@ -74,8 +74,7 @@ impl<'a> Packet<'a> for SubackPacket {
                               fixed_header: FixedHeader)
                               -> Result<Self, PacketError<'a, Self>> {
         let packet_identifier: PacketIdentifier = try!(PacketIdentifier::decode(reader));
-        let payload: SubackPacketPayload =
-            try!(SubackPacketPayload::decode_with(reader,
+        let payload: SubackPacketPayload = try!(SubackPacketPayload::decode_with(reader,
                                                   Some(fixed_header.remaining_length -
                                                        packet_identifier.encoded_length()))
                      .map_err(PacketError::PayloadError));
