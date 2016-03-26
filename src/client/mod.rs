@@ -1,5 +1,5 @@
-pub mod mclient;
-pub mod mconnect;
-pub mod mpublish;
-pub mod msubscribe;
-pub mod mcallbacks;
+pub mod client;
+pub mod connect;
+pub mod publish;
+pub mod subscribe;
+pub mod callbacks;

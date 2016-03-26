@@ -1,4 +1,6 @@
-use super::mclient::MqttClient;
+extern crate time;
+
+use super::client::MqttClient;
 use packet::*;
 use std::net::TcpStream;
 use std::thread;
@@ -8,36 +10,47 @@ use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::{Arc, Mutex};
 use control::variable_header::ConnectReturnCode;
 use std::str;
+use std::sync::atomic::Ordering;
+
+#[derive(Debug)]
+pub enum MqttErrors {
+    EncodeError,
+    WriteError,
+    Error, // std io errors
+    ConnAckError,
+}
 
 
 pub type SendableFn = Arc<Mutex<(Fn(&str, &str) + Send + Sync + 'static)>>;
 
 
 impl MqttClient {
-    pub fn connect(&mut self, host: &str) -> Result<&Self, i32> {
+    pub fn connect(&mut self, host: &str) -> Result<&Self, MqttErrors> {
+        // Create a TCP stream
         let mut stream = match TcpStream::connect(host) {
             Ok(result) => result,
             Err(_) => {
-                return Err(-1);
+                return Err(MqttErrors::Error);
             }
         };
 
         // Creating a mqtt connection packet
-        let mut conn = ConnectPacket::new("MQTT".to_owned(), self.id.clone());
-        conn.set_clean_session(self.clean_session);
+        let mut conn = ConnectPacket::new("MQTT".to_owned(), self.options.id.clone());
+        conn.set_clean_session(self.options.clean_session);
+        conn.set_keep_alive(self.options.keep_alive);
         let mut buf = Vec::new();
 
         match conn.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(-2);
+                return Err(MqttErrors::EncodeError);
             }
         };
 
         match stream.write_all(&buf[..]) { 
             Ok(result) => result,
             Err(_) => {
-                return Err(-3);
+                return Err(MqttErrors::Error);
             }
         };
 
@@ -46,26 +59,31 @@ impl MqttClient {
 
         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
 
-            return Err(-5);
+            return Err(MqttErrors::ConnAckError);
 
         } else {
             // If mqtt connection is successful, start a thread to send
             // ping responses and handle incoming messages
             let mut stream_clone = match stream.try_clone() {
                 Ok(s) => s,
-                Err(_) => return Err(-6),
+                Err(_) => return Err(MqttErrors::Error),
+            };
+            let mut stream_clone2 = match stream.try_clone() {
+                Ok(s) => s,
+                Err(_) => return Err(MqttErrors::Error),
             };
             self.stream = Some(stream);
 
             let (tx, rx): (Sender<SendableFn>, Receiver<SendableFn>) = mpsc::channel();
-            self.tx = Some(tx);
+            self.msg_callback = Some(tx);
 
+            let publish_queue = self.publish_queue.queue.clone();
+            let keep_alive = self.options.keep_alive;
+            // let last_ping_time = self.last_ping_time;
             thread::spawn(move || {
                 let mut current_message_callback: Option<SendableFn> = None;
                 let mut last_message_callback: Option<SendableFn> = None;
-
                 loop {
-
                     let message_callback = rx.try_recv();
 
                     current_message_callback = message_callback.ok().map(|cb| {
@@ -73,7 +91,7 @@ impl MqttClient {
                         cb
                     });
 
-
+                    // blocking
                     let packet = match VariablePacket::decode(&mut stream_clone) {
                         Ok(pk) => pk,
                         Err(err) => {
@@ -81,16 +99,15 @@ impl MqttClient {
                             continue;
                         }
                     };
-
-                    println!("#### {:?} ####", packet);
+                    // println!("#### {:?} ####", packet);
 
                     match &packet {
 
                         /// Receive ping reqests and send ping responses
-                        &VariablePacket::PingreqPacket(..) => {
+                        &VariablePacket::PingrespPacket(..) => {
                             println!("keep alive");
-                            let pingresp = PingrespPacket::new();
-                            pingresp.encode(&mut stream_clone).unwrap();
+                            // let pingresp = PingrespPacket::new();
+                            // pingresp.encode(&mut stream_clone).unwrap();
 
                             // TODO: Is encode sending ping responses to the broker ??
                         }
@@ -107,6 +124,27 @@ impl MqttClient {
                             }
 
                             println!("Subscribed!!!!!");
+                        }
+                        /// Receives suback packet and verifies it with sub packet id
+                        &VariablePacket::PubackPacket(ref ack) => {
+                            let pkid = ack.packet_identifier();
+                            let mut publish_queue = publish_queue.lock().unwrap();
+                            let mut split_index: Option<usize> = None;
+                            for (i, v) in publish_queue.iter().enumerate() {
+                                if v.0 == pkid {
+                                    split_index = Some(i);
+                                }
+                            }
+
+                            if split_index.is_some() {
+                                let split_index = split_index.unwrap();
+                                let mut list2 = publish_queue.split_off(split_index);
+                                list2.pop_front();
+                                publish_queue.append(&mut list2);
+                            }
+                            println!("pub ack for {}. queue --> {:?}",
+                                     ack.packet_identifier(),
+                                     *publish_queue);
                         }
                         /// Receives publish packet
                         &VariablePacket::PublishPacket(ref publ) => {
@@ -139,6 +177,32 @@ impl MqttClient {
                             // Ignore other packets in pub client
                         }
                     }
+
+                }
+            });
+
+
+            let last_ping_time = self.last_ping_time.load(Ordering::Relaxed);
+            // ping request thread. new thread since the above thread is blocking
+            thread::spawn(move || {
+
+                loop {
+                    // pingreq
+                    let current_timestamp = time::get_time().sec as usize;
+                    println!("current_timestamp = {:?}", current_timestamp);
+                    println!("nextping_timestamp = {:?}",
+                             last_ping_time + (keep_alive as f32 * 0.8) as usize);
+                    if keep_alive > 0 &&
+                       current_timestamp >= last_ping_time + (keep_alive as f32 * 0.8) as usize {
+                        println!("Sending PINGREQ");
+
+                        let pingreq_packet = PingreqPacket::new();
+
+                        let mut buf = Vec::new();
+                        pingreq_packet.encode(&mut buf).unwrap();
+                        stream_clone2.write_all(&buf[..]);
+                    }
+
                 }
             });
         }

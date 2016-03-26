@@ -1,5 +1,5 @@
 
-use super::mclient::MqttClient;
+use super::client::MqttClient;
 use {TopicFilter, QualityOfService, Encodable};
 use std::io::Write;
 use packet::SubscribePacket;

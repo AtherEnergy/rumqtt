@@ -1,4 +1,4 @@
-use super::mclient::MqttClient;
+use super::client::MqttClient;
 use std::sync::{Arc, Mutex};
 
 impl MqttClient {
@@ -8,7 +8,7 @@ impl MqttClient {
     {
         let callback = Arc::new(Mutex::new(callback));
 
-        match self.tx {
+        match self.msg_callback {
             Some(ref t) => t.send(callback),
             None => return Err(-10),
         };
