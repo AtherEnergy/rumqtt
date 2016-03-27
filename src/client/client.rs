@@ -27,7 +27,7 @@ pub struct MqttClient {
     pub stream: Option<TcpStream>,
     pub msg_callback: Option<Sender<SendableFn>>,
     pub publish_queue: PublishQueue,
-    pub last_ping_time: AtomicUsize,
+    pub last_ping_time: Arc<Mutex<i64>>,
 }
 
 impl Default for MqttClient {
@@ -46,7 +46,7 @@ impl Default for MqttClient {
                 current_pkid: AtomicUsize::new(1),
                 retry_time: 60,
             },
-            last_ping_time: AtomicUsize::new(0),
+            last_ping_time: Arc::new(Mutex::new(0)),
         }
     }
 }

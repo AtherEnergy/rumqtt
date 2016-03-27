@@ -105,7 +105,7 @@ impl MqttClient {
 
                         /// Receive ping reqests and send ping responses
                         &VariablePacket::PingrespPacket(..) => {
-                            println!("keep alive");
+                            println!("Received PINGRESP from broker");
                             // let pingresp = PingrespPacket::new();
                             // pingresp.encode(&mut stream_clone).unwrap();
 
@@ -182,18 +182,25 @@ impl MqttClient {
             });
 
 
-            let last_ping_time = self.last_ping_time.load(Ordering::Relaxed);
+
             // ping request thread. new thread since the above thread is blocking
+            let last_ping_time = self.last_ping_time.clone();
             thread::spawn(move || {
 
                 loop {
+                    let lpt: i64;
+
+                    {
+                        let last_ping_time = last_ping_time.lock().unwrap();
+                        lpt = *last_ping_time;
+                    }
                     // pingreq
-                    let current_timestamp = time::get_time().sec as usize;
+                    let current_timestamp = time::get_time().sec;
                     println!("current_timestamp = {:?}", current_timestamp);
                     println!("nextping_timestamp = {:?}",
-                             last_ping_time + (keep_alive as f32 * 0.8) as usize);
+                             lpt + (keep_alive as f32 * 0.8) as i64);
                     if keep_alive > 0 &&
-                       current_timestamp >= last_ping_time + (keep_alive as f32 * 0.8) as usize {
+                       current_timestamp >= lpt + (keep_alive as f32 * 0.8) as i64 {
                         println!("Sending PINGREQ");
 
                         let pingreq_packet = PingreqPacket::new();
@@ -201,6 +208,11 @@ impl MqttClient {
                         let mut buf = Vec::new();
                         pingreq_packet.encode(&mut buf).unwrap();
                         stream_clone2.write_all(&buf[..]);
+
+                        {
+                            let mut last_ping_time = last_ping_time.lock().unwrap();
+                            *last_ping_time = current_timestamp;
+                        }
                     }
 
                 }

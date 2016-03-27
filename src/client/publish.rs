@@ -50,7 +50,11 @@ impl MqttClient{
 
         match stream.write_all(&buf[..]) {
             Ok(result) => {
-                self.last_ping_time.store(time::get_time().sec as usize, Ordering::Relaxed);
+                // self.last_ping_time.store(time::get_time().sec as usize, Ordering::Relaxed);
+                {
+                    let mut last_ping_time = self.last_ping_time.lock().unwrap();
+                    *last_ping_time = time::get_time().sec;
+                }
                 match qos {
                     QualityOfService::Level1 => {
                         let mut publish_queue = self.publish_queue.queue.lock().unwrap();
