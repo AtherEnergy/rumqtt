@@ -7,24 +7,8 @@ use std::thread;
 use std::time::Duration;
 
 
-// #[test]
-// fn publish_test() {
-//     let mut client = MqttClient::new("id2");
-
-//     match client.connect("localhost:1883") {
-//         Ok(result) => println!("Connection successful"),
-//         Err(_) => panic!("Connectin error"),
-//     }
-
-//     for _ in 0..10 {
-//         client.publish("hello/world", "hello world", QualityOfService::Level1);
-//         thread::sleep(Duration::new(1, 0));
-//     }
-// }
-
-
 #[test]
-fn pingreq_test() {
+fn publish_test() {
     let mut client = MqttClient::new("id2").keep_alive(10);
 
     match client.connect("localhost:1883") {
@@ -32,8 +16,26 @@ fn pingreq_test() {
         Err(_) => panic!("Connectin error"),
     }
 
+    for _ in 0..10 {
+        client.publish("hello/world", "hello world", QualityOfService::Level1);
+        thread::sleep(Duration::new(1, 0));
+    }
+
     thread::sleep(Duration::new(30, 0));
 }
+
+
+// #[test]
+// fn pingreq_test() {
+//     let mut client = MqttClient::new("id2").keep_alive(10);
+
+//     match client.connect("localhost:1883") {
+//         Ok(result) => println!("Connection successful"),
+//         Err(_) => panic!("Connectin error"),
+//     }
+
+//     thread::sleep(Duration::new(30, 0));
+// }
 
 // // #[test]
 // fn subscribe_test() {

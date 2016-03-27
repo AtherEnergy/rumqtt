@@ -1,7 +1,7 @@
 extern crate time;
 
 use packet::{PublishPacket, QoSWithPacketIdentifier};
-use super::client::MqttClient;
+use super::client::{MqttClient, PublishMessage};
 use {TopicName, Encodable, QualityOfService};
 use std::io::Write;
 use std::sync::atomic::Ordering;
@@ -33,13 +33,9 @@ impl MqttClient{
         let mut pkid: u16 = 1;
         let qos_final = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
-            QualityOfService::Level1 => {
+            QualityOfService::Level1 | QualityOfService::Level2 => {
                 pkid = self.publish_queue.current_pkid.fetch_add(1, Ordering::SeqCst) as u16;
                 QoSWithPacketIdentifier::Level1(pkid)
-            }
-            QualityOfService::Level2 => {
-                pkid = self.publish_queue.current_pkid.fetch_add(1, Ordering::SeqCst) as u16;
-                QoSWithPacketIdentifier::Level2(pkid)
             }
         };
 
@@ -50,16 +46,16 @@ impl MqttClient{
 
         match stream.write_all(&buf[..]) {
             Ok(result) => {
-                // self.last_ping_time.store(time::get_time().sec as usize, Ordering::Relaxed);
-                {
-                    let mut last_ping_time = self.last_ping_time.lock().unwrap();
-                    *last_ping_time = time::get_time().sec;
-                }
+
                 match qos {
                     QualityOfService::Level1 => {
                         let mut publish_queue = self.publish_queue.queue.lock().unwrap();
                         let timestamp = time::get_time().sec;
-                        publish_queue.push_back((pkid, timestamp));
+                        publish_queue.push_back(PublishMessage {
+                            pkid: pkid,
+                            timestamp: timestamp,
+                            message: message.to_string(),
+                        });
                         println!("publish done. queue --> {:?}", *publish_queue);
                     }
                     _ => (),

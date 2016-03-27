@@ -131,7 +131,7 @@ impl MqttClient {
                             let mut publish_queue = publish_queue.lock().unwrap();
                             let mut split_index: Option<usize> = None;
                             for (i, v) in publish_queue.iter().enumerate() {
-                                if v.0 == pkid {
+                                if v.pkid == pkid {
                                     split_index = Some(i);
                                 }
                             }
@@ -184,24 +184,16 @@ impl MqttClient {
 
 
             // ping request thread. new thread since the above thread is blocking
-            let last_ping_time = self.last_ping_time.clone();
             thread::spawn(move || {
-
+                let mut last_ping_time = 0;
+                let mut next_ping_time = 0;
                 loop {
-                    let lpt: i64;
 
-                    {
-                        let last_ping_time = last_ping_time.lock().unwrap();
-                        lpt = *last_ping_time;
-                    }
+                    next_ping_time = last_ping_time + (keep_alive as f32 * 0.9) as i64;
                     // pingreq
                     let current_timestamp = time::get_time().sec;
-                    println!("current_timestamp = {:?}", current_timestamp);
-                    println!("nextping_timestamp = {:?}",
-                             lpt + (keep_alive as f32 * 0.8) as i64);
-                    if keep_alive > 0 &&
-                       current_timestamp >= lpt + (keep_alive as f32 * 0.8) as i64 {
-                        println!("Sending PINGREQ");
+
+                    if keep_alive > 0 && current_timestamp >= next_ping_time {
 
                         let pingreq_packet = PingreqPacket::new();
 
@@ -209,10 +201,7 @@ impl MqttClient {
                         pingreq_packet.encode(&mut buf).unwrap();
                         stream_clone2.write_all(&buf[..]);
 
-                        {
-                            let mut last_ping_time = last_ping_time.lock().unwrap();
-                            *last_ping_time = current_timestamp;
-                        }
+                        last_ping_time = current_timestamp;
                     }
 
                 }

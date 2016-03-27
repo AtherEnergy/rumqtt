@@ -9,6 +9,13 @@ use std::sync::atomic::AtomicUsize;
 
 pub type SendableFn = Arc<Mutex<(Fn(&str, &str) + Send + Sync + 'static)>>;
 
+#[derive(Debug)]
+pub struct PublishMessage {
+    pub pkid: u16,
+    pub message: String,
+    pub timestamp: i64,
+}
+
 pub struct MqttConnectionOptions {
     pub id: String,
     pub keep_alive: u16,
@@ -16,7 +23,7 @@ pub struct MqttConnectionOptions {
 }
 
 pub struct PublishQueue {
-    pub queue: Arc<Mutex<LinkedList<(u16, i64)>>>, // pkid and timestamp
+    pub queue: Arc<Mutex<LinkedList<PublishMessage>>>, // Queue for QoS 1 & 2
     pub length: u16,
     pub current_pkid: AtomicUsize,
     pub retry_time: u16,
@@ -27,7 +34,6 @@ pub struct MqttClient {
     pub stream: Option<TcpStream>,
     pub msg_callback: Option<Sender<SendableFn>>,
     pub publish_queue: PublishQueue,
-    pub last_ping_time: Arc<Mutex<i64>>,
 }
 
 impl Default for MqttClient {
@@ -46,7 +52,6 @@ impl Default for MqttClient {
                 current_pkid: AtomicUsize::new(1),
                 retry_time: 60,
             },
-            last_ping_time: Arc::new(Mutex::new(0)),
         }
     }
 }
