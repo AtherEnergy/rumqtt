@@ -1,7 +1,7 @@
 extern crate time;
 
 use packet::{PublishPacket, QoSWithPacketIdentifier};
-use super::client::{MqttClient, PublishMessage};
+use super::client::{MqttClient, MqttConnection, PublishMessage};
 use {TopicName, Encodable, QualityOfService};
 use std::io::Write;
 use std::sync::atomic::Ordering;
@@ -19,7 +19,15 @@ impl MqttClient{
                    qos: QualityOfService)
                    -> Result<&Self, PublishError> {
 
-        let mut stream = match self.stream {
+        let mut connection_guard = self.connection.lock().unwrap();
+
+        let MqttConnection{ref mut stream,
+             ref mut current_pkid,
+             ref mut queue,
+             ref mut length,
+             ref mut retry_time} = *connection_guard;
+
+        let mut stream = match *stream {
             Some(ref s) => s,
             None => return Err(PublishError::StreamError),
         };
@@ -34,7 +42,7 @@ impl MqttClient{
         let qos_final = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
             QualityOfService::Level1 | QualityOfService::Level2 => {
-                pkid = self.publish_queue.current_pkid.fetch_add(1, Ordering::SeqCst) as u16;
+                pkid = current_pkid.fetch_add(1, Ordering::SeqCst) as u16;
                 QoSWithPacketIdentifier::Level1(pkid)
             }
         };
@@ -49,14 +57,13 @@ impl MqttClient{
 
                 match qos {
                     QualityOfService::Level1 => {
-                        let mut publish_queue = self.publish_queue.queue.lock().unwrap();
                         let timestamp = time::get_time().sec;
-                        publish_queue.push_back(PublishMessage {
+                        queue.push_back(PublishMessage {
                             pkid: pkid,
                             timestamp: timestamp,
                             message: message.to_string(),
                         });
-                        println!("publish done. queue --> {:?}", *publish_queue);
+                        println!("publish done. queue --> {:?}", queue);
                     }
                     _ => (),
                 }

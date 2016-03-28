@@ -47,7 +47,7 @@ impl MqttClient {
             }
         };
 
-        match stream.write_all(&buf[..]) { 
+        match stream.write_all(&buf[..]) {
             Ok(result) => result,
             Err(_) => {
                 return Err(MqttErrors::Error);
@@ -63,7 +63,7 @@ impl MqttClient {
 
         } else {
             // If mqtt connection is successful, start a thread to send
-            // ping responses and handle incoming messages
+            // handle incoming messages
             let mut stream_clone = match stream.try_clone() {
                 Ok(s) => s,
                 Err(_) => return Err(MqttErrors::Error),
@@ -72,14 +72,20 @@ impl MqttClient {
                 Ok(s) => s,
                 Err(_) => return Err(MqttErrors::Error),
             };
-            self.stream = Some(stream);
+
+
+            {
+                let mut mqtt_connection = self.connection.lock().unwrap();
+                mqtt_connection.stream = Some(stream.try_clone().unwrap());
+            }
 
             let (tx, rx): (Sender<SendableFn>, Receiver<SendableFn>) = mpsc::channel();
             self.msg_callback = Some(tx);
 
-            let publish_queue = self.publish_queue.queue.clone();
+            // let publish_queue = self.publish_queue.queue.clone();
             let keep_alive = self.options.keep_alive;
             // let last_ping_time = self.last_ping_time;
+            let t1_mqtt_client = self.clone();
             thread::spawn(move || {
                 let mut current_message_callback: Option<SendableFn> = None;
                 let mut last_message_callback: Option<SendableFn> = None;
@@ -103,32 +109,20 @@ impl MqttClient {
 
                     match &packet {
 
-                        /// Receive ping reqests and send ping responses
-                        &VariablePacket::PingrespPacket(..) => {
-                            println!("Received PINGRESP from broker");
-                            // let pingresp = PingrespPacket::new();
-                            // pingresp.encode(&mut stream_clone).unwrap();
-
-                            // TODO: Is encode sending ping responses to the broker ??
-                        }
                         /// Receives disconnect packet
                         &VariablePacket::DisconnectPacket(..) => {
                             println!("### Received disconnect");
                             break;
                             // TODO: Do we need to notify main thread about this ?
                         }
-                        /// Receives suback packet and verifies it with sub packet id
-                        &VariablePacket::SubackPacket(ref ack) => {
-                            if ack.packet_identifier() != 11 {
-                                panic!("SUBACK packet identifier not match");
-                            }
 
-                            println!("Subscribed!!!!!");
-                        }
                         /// Receives suback packet and verifies it with sub packet id
                         &VariablePacket::PubackPacket(ref ack) => {
                             let pkid = ack.packet_identifier();
-                            let mut publish_queue = publish_queue.lock().unwrap();
+
+                            let mut connection = t1_mqtt_client.connection.lock().unwrap();
+                            let ref mut publish_queue = connection.queue;
+
                             let mut split_index: Option<usize> = None;
                             for (i, v) in publish_queue.iter().enumerate() {
                                 if v.pkid == pkid {
@@ -144,7 +138,7 @@ impl MqttClient {
                             }
                             println!("pub ack for {}. queue --> {:?}",
                                      ack.packet_identifier(),
-                                     *publish_queue);
+                                     publish_queue);
                         }
                         /// Receives publish packet
                         &VariablePacket::PublishPacket(ref publ) => {
@@ -184,6 +178,7 @@ impl MqttClient {
 
 
             // ping request thread. new thread since the above thread is blocking
+            // TODO: Check ping responses here. Do something if there is no response for a request
             thread::spawn(move || {
                 let mut last_ping_time = 0;
                 let mut next_ping_time = 0;

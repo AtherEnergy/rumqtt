@@ -9,7 +9,11 @@ impl MqttClient {
                      topics: Vec<(TopicFilter, QualityOfService)>)
                      -> Result<&Self, i32> {
 
-        let mut stream = match self.stream {
+
+        let mut connection = self.connection.lock().unwrap();
+        let ref stream = connection.stream;
+
+        let mut stream = match *stream {
             Some(ref s) => s,
             None => return Err(-10),
         };
