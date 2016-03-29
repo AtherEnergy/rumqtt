@@ -47,29 +47,34 @@ impl MqttClient{
             }
         };
 
-        let publish_packet = PublishPacket::new(topic, qos_final, message.as_bytes().to_vec());
+        let publish_packet = PublishPacket::new(topic.clone(),
+                                                qos_final,
+                                                message.as_bytes().to_vec());
+
+        match qos {
+            QualityOfService::Level1 => {
+                let timestamp = time::get_time().sec;
+                queue.push_back(PublishMessage {
+                    pkid: pkid,
+                    timestamp: timestamp,
+                    topic: topic.to_string(),
+                    message: message.to_string(),
+                });
+            }
+            _ => (),
+        };
 
         let mut buf = Vec::new();
         publish_packet.encode(&mut buf).unwrap();
 
         match stream.write_all(&buf[..]) {
             Ok(result) => {
-
-                match qos {
-                    QualityOfService::Level1 => {
-                        let timestamp = time::get_time().sec;
-                        queue.push_back(PublishMessage {
-                            pkid: pkid,
-                            timestamp: timestamp,
-                            message: message.to_string(),
-                        });
-                        println!("publish done. queue --> {:?}", queue);
-                    }
-                    _ => (),
-                }
+                println!("publish done. queue --> {:?}", queue);
                 result
             }
             Err(_) => {
+                println!("error publishing [pkid {:?}] message. but message is saved in queue",
+                         pkid);
                 return Err(PublishError::Error);
             }
         }

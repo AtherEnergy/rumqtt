@@ -12,6 +12,7 @@ pub type SendableFn = Arc<Mutex<(Fn(&str, &str) + Send + Sync + 'static)>>;
 #[derive(Debug)]
 pub struct PublishMessage {
     pub pkid: u16,
+    pub topic: String,
     pub message: String,
     pub timestamp: i64,
 }
@@ -49,7 +50,7 @@ impl Default for MqttConnection {
             queue: LinkedList::new(),
             length: 500,
             current_pkid: AtomicUsize::new(1),
-            retry_time: 60,
+            retry_time: 10,
         }
     }
 }
