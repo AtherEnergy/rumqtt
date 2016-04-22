@@ -1,17 +1,16 @@
-extern crate time;
-
+use mqtt::{Encodable, Decodable, QualityOfService};
+use mqtt::packet::*;
+use mqtt::control::variable_header::ConnectReturnCode;
 use super::client::{MqttClient, MqttConnection, MqttConnectionOptions};
-use packet::*;
 use std::net::TcpStream;
 use std::thread;
 use std::io::Write;
-use {Encodable, Decodable, QualityOfService};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::{Arc, Mutex};
-use control::variable_header::ConnectReturnCode;
 use std::str;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use time;
 
 #[derive(Debug)]
 pub enum MqttErrors {
@@ -159,7 +158,7 @@ impl MqttClient {
                         let msg = match str::from_utf8(&publ.payload()[..]) {
                             Ok(msg) => msg,
                             Err(err) => {
-                                error!("Failed to decode publish message {:?}", err);
+                                // error!("Failed to decode publish message {:?}", err);
                                 continue;
                             }
                         };
@@ -194,29 +193,29 @@ impl MqttClient {
         let mut t2_mqtt_client = self.clone();
         let mut t3_mqtt_client = self.clone(); //super ugly
         thread::spawn(move || {
-                loop {
-                    thread::sleep(Duration::new(5, 0)); //TODO change this sleep to retry time.
-                    let mut g_mqtt_connection = t2_mqtt_client.connection.lock().unwrap();
-                    let MqttConnection{ref mut queue, ref mut retry_time, ..} = *g_mqtt_connection;
+            loop {
+                thread::sleep(Duration::new(5, 0)); //TODO change this sleep to retry time.
+                let mut g_mqtt_connection = t2_mqtt_client.connection.lock().unwrap();
+                let MqttConnection { ref mut queue, ref mut retry_time, .. } = *g_mqtt_connection;
 
-                    let current_timestamp = time::get_time().sec;
-                    let mut split_index: Option<usize> = None;
-                    for (i, v) in queue.iter().enumerate() {
-                        if current_timestamp - v.timestamp > *retry_time as i64 {
-                            split_index = Some(i);
-                            println!("republishing pkid {:?} message ...", v.pkid);
-                            t3_mqtt_client.publish(&v.topic, &v.message, QualityOfService::Level1); //move this down ?
-                        }
-                    }
-
-                    if split_index.is_some() {
-                        let split_index = split_index.unwrap();
-                        let mut list2 = queue.split_off(split_index);
-                        list2.pop_front();
-                        queue.append(&mut list2);
+                let current_timestamp = time::get_time().sec;
+                let mut split_index: Option<usize> = None;
+                for (i, v) in queue.iter().enumerate() {
+                    if current_timestamp - v.timestamp > *retry_time as i64 {
+                        split_index = Some(i);
+                        println!("republishing pkid {:?} message ...", v.pkid);
+                        t3_mqtt_client.publish(&v.topic, &v.message, QualityOfService::Level1); //move this down ?
                     }
                 }
-            });
+
+                if split_index.is_some() {
+                    let split_index = split_index.unwrap();
+                    let mut list2 = queue.split_off(split_index);
+                    list2.pop_front();
+                    queue.append(&mut list2);
+                }
+            }
+        });
 
 
         // ping request thread. new thread since the above thread is blocking
@@ -246,7 +245,6 @@ impl MqttClient {
 
         Ok(self)
     }
-
 }
 
 impl MqttConnection {
@@ -282,7 +280,7 @@ impl MqttConnection {
         };
 
         let connack = ConnackPacket::decode(&mut stream).unwrap();
-        trace!("CONNACK {:?}", connack);
+        // trace!("CONNACK {:?}", connack);
 
         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
             Err(MqttErrors::ConnAckError)

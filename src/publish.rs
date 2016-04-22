@@ -1,8 +1,7 @@
-extern crate time;
-
-use packet::{PublishPacket, QoSWithPacketIdentifier};
+use time;
+use mqtt::packet::{PublishPacket, QoSWithPacketIdentifier};
 use super::client::{MqttClient, MqttConnection, PublishMessage};
-use {TopicName, Encodable, QualityOfService};
+use mqtt::{Encodable, Decodable, QualityOfService, TopicName};
 use std::io::Write;
 use std::sync::atomic::Ordering;
 
@@ -12,7 +11,7 @@ pub enum PublishError {
     StreamError,
 }
 
-impl MqttClient{
+impl MqttClient {
     pub fn publish(&mut self,
                    topic: &str,
                    message: &str,
@@ -21,11 +20,11 @@ impl MqttClient{
 
         let mut connection_guard = self.connection.lock().unwrap();
 
-        let MqttConnection{ref mut stream,
-             ref mut current_pkid,
-             ref mut queue,
-             ref mut length,
-             ref mut retry_time} = *connection_guard;
+        let MqttConnection { ref mut stream,
+                             ref mut current_pkid,
+                             ref mut queue,
+                             ref mut length,
+                             ref mut retry_time } = *connection_guard;
 
         let mut stream = match *stream {
             Some(ref s) => s,
@@ -41,7 +40,8 @@ impl MqttClient{
         let mut pkid: u16 = 1;
         let qos_final = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
-            QualityOfService::Level1 | QualityOfService::Level2 => {
+            QualityOfService::Level1 |
+            QualityOfService::Level2 => {
                 pkid = current_pkid.fetch_add(1, Ordering::SeqCst) as u16;
                 QoSWithPacketIdentifier::Level1(pkid)
             }
