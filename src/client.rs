@@ -2,7 +2,6 @@ extern crate time;
 
 use std::default::Default;
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::Sender;
 use std::net::TcpStream;
 use std::collections::LinkedList;
 use std::sync::atomic::AtomicUsize;
@@ -25,6 +24,22 @@ pub struct MqttConnectionOptions {
     pub clean_session: bool,
 }
 
+pub struct MqttConnection {
+    pub stream: Option<TcpStream>,
+    pub current_pkid: AtomicUsize,
+    pub queue: LinkedList<PublishMessage>, // Queue for QoS 1 & 2
+    pub length: u16,
+    pub retry_time: u16,
+    pub host: String,
+    pub options: MqttConnectionOptions,
+}
+
+#[derive(Clone)]
+pub struct MqttClient {
+    pub connection: Arc<Mutex<MqttConnection>>,
+    pub msg_callback: Option<SendableFn>,
+}
+
 impl Default for MqttConnectionOptions {
     fn default() -> MqttConnectionOptions {
         MqttConnectionOptions {
@@ -35,14 +50,6 @@ impl Default for MqttConnectionOptions {
     }
 }
 
-pub struct MqttConnection {
-    pub stream: Option<TcpStream>,
-    pub current_pkid: AtomicUsize,
-    pub queue: LinkedList<PublishMessage>, // Queue for QoS 1 & 2
-    pub length: u16,
-    pub retry_time: u16,
-}
-
 impl Default for MqttConnection {
     fn default() -> MqttConnection {
         MqttConnection {
@@ -51,22 +58,15 @@ impl Default for MqttConnection {
             length: 500,
             current_pkid: AtomicUsize::new(1),
             retry_time: 10,
+            host: "".to_string(),
+            options: MqttConnectionOptions { ..Default::default() },
         }
     }
-}
-
-#[derive(Clone)]
-pub struct MqttClient {
-    pub options: MqttConnectionOptions,
-    pub connection: Arc<Mutex<MqttConnection>>,
-    pub msg_callback: Option<Sender<SendableFn>>,
 }
 
 impl Default for MqttClient {
     fn default() -> MqttClient {
         MqttClient {
-            // connection options
-            options: MqttConnectionOptions { ..Default::default() },
             // thread safe connection
             connection: Arc::new(Mutex::new(MqttConnection { ..Default::default() })),
             // thread safe callback
@@ -95,8 +95,10 @@ impl MqttConnectionOptions {
 
     pub fn create_client(self) -> MqttClient {
         MqttClient {
-            options: self,
-            connection: Arc::new(Mutex::new(MqttConnection { ..Default::default() })),
+            connection: Arc::new(Mutex::new(MqttConnection {
+                options: self,
+                ..Default::default()
+            })),
             msg_callback: None,
         }
     }

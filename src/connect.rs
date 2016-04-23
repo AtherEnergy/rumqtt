@@ -1,14 +1,12 @@
 use mqtt::{Encodable, Decodable, QualityOfService};
 use mqtt::packet::*;
 use mqtt::control::variable_header::ConnectReturnCode;
-use super::client::{MqttClient, MqttConnection, MqttConnectionOptions};
+use super::client::{MqttClient, MqttConnection};
 use std::net::TcpStream;
 use std::thread;
 use std::io::Write;
-use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::{Arc, Mutex};
 use std::str;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use time;
 
@@ -27,170 +25,58 @@ pub type SendableFn = Arc<Mutex<(Fn(&str, &str) + Send + Sync + 'static)>>;
 impl MqttClient {
     pub fn connect(&mut self, host: &str) -> Result<&Self, MqttErrors> {
 
-        let mut stream_clone: TcpStream;
-        let mut stream_clone2: TcpStream;
+        // Connect using underlying connection object. Scoped since this
+        // connection object will be used in other threads
         {
             let ref mut mqtt_connection = *self.connection.lock().unwrap();
-            match mqtt_connection.connect(host, self.options.clone()) {
-                Ok(_) => {
-                    stream_clone = match mqtt_connection.stream {
-                        Some(ref s) => s.try_clone().unwrap(),
-                        None => return Err(MqttErrors::Error),
-                    };
-
-                    stream_clone2 = match mqtt_connection.stream {
-                        Some(ref s) => s.try_clone().unwrap(),
-                        None => return Err(MqttErrors::Error),
-                    };
-
-                }
+            match mqtt_connection.connect(host) {
+                Ok(_) => (),
                 Err(_) => return Err(MqttErrors::Error),
             }
         }
 
-        let (tx, rx): (Sender<SendableFn>, Receiver<SendableFn>) = mpsc::channel();
-        self.msg_callback = Some(tx);
+        let _client_pkt_hndlr_thrd = self.clone();
 
-        // let publish_queue = self.publish_queue.queue.clone();
-        let keep_alive = self.options.keep_alive;
-        // let last_ping_time = self.last_ping_time;
-        let t1_mqtt_client = self.clone();
-        let mut t7_mqtt_client = self.clone();
-        let h = host.to_string();
-        let options = self.options.clone();
-
+        // incoming packet handler and reconnection thread
         thread::spawn(move || {
-            let mut current_message_callback: Option<SendableFn> = None;
-            let mut last_message_callback: Option<SendableFn> = None;
-            let mut connect_retry_count = 0;
-            loop {
-                let message_callback = rx.try_recv();
 
-                current_message_callback = message_callback.ok().map(|cb| {
-                    last_message_callback = Some(cb.clone());
-                    cb
-                });
-
-                // blocking
-                let packet = match VariablePacket::decode(&mut stream_clone) {
-                    Ok(pk) => pk,
-                    Err(err) => {
-                        println!("error in receiving packet {:?}", err);
-                        if connect_retry_count < 2 {
-                            connect_retry_count += 1;
-                            thread::sleep(Duration::new(1, 0));
-                            continue;
-                        }
-
-                        // connection retry loop
-                        loop {
-                            println!("trying to reconnect ..");
-                            let ref mut connection = *t7_mqtt_client.connection
-                                                                    .lock()
-                                                                    .unwrap();
-                            match connection.connect(&h, options.clone()) {
-                                Ok(result) => {
-                                    connect_retry_count = 0;
-                                    println!("reconnection successful ...");
-                                    break;
-                                }
-                                Err(_) => {
-                                    thread::sleep(Duration::new(3, 0));
-                                    continue;
-                                }
-                            }
-                        }
-
-
-                        // reset current connections stream with new one
-                        {
-                            let ref mut connection = *t7_mqtt_client.connection
-                                                                    .lock()
-                                                                    .unwrap();
-                            stream_clone = match connection.stream {
-                                Some(ref mut s) => s.try_clone().unwrap(),
-                                None => continue,
-                            };
-                        }
-
-                        continue;
-
-                    }
+            // get updated underlying stream after reconnection
+            'reconnection: loop {
+                // get underlying tcpstream clone from connection object
+                let mut _stream_pkt_hndlr_thrd = {
+                    let ref connection = *_client_pkt_hndlr_thrd.connection.lock().unwrap();
+                    let stream = match connection.stream {
+                        Some(ref s) => s,
+                        None => panic!("No stream found in the connectino"),
+                    };
+                    stream.try_clone().unwrap()
                 };
 
-                // // println!("#### {:?} ####", packet);
-
-                match &packet {
-
-                    /// Receives disconnect packet
-                    &VariablePacket::DisconnectPacket(..) => {
-                        println!("### Received disconnect");
-                        break;
-                        // TODO: Do we need to notify main thread about this ?
-                    }
-
-                    /// Receives puback packet and verifies it with sub packet id
-                    &VariablePacket::PubackPacket(ref ack) => {
-                        let pkid = ack.packet_identifier();
-
-                        let mut connection = t1_mqtt_client.connection.lock().unwrap();
-                        let ref mut publish_queue = connection.queue;
-
-                        let mut split_index: Option<usize> = None;
-                        for (i, v) in publish_queue.iter().enumerate() {
-                            if v.pkid == pkid {
-                                split_index = Some(i);
+                loop {
+                    // blocking
+                    let packet = match VariablePacket::decode(&mut _stream_pkt_hndlr_thrd) {
+                        Ok(pk) => pk,
+                        Err(err) => {
+                            println!("error in receiving packet {:?}", err);
+                            let mut connection = _client_pkt_hndlr_thrd.connection.lock().unwrap();
+                            if connection.retry(3) {
+                                continue 'reconnection;
+                            } else {
+                                // do an on weird callback here so that user can handle disconnection
+                                unimplemented!();
+                                continue; //remove this later
                             }
+
                         }
-
-                        if split_index.is_some() {
-                            let split_index = split_index.unwrap();
-                            let mut list2 = publish_queue.split_off(split_index);
-                            list2.pop_front();
-                            publish_queue.append(&mut list2);
-                        }
-                        println!("pub ack for {}. queue --> {:?}",
-                                 ack.packet_identifier(),
-                                 publish_queue);
-                    }
-                    /// Receives publish packet
-                    &VariablePacket::PublishPacket(ref publ) => {
-                        let msg = match str::from_utf8(&publ.payload()[..]) {
-                            Ok(msg) => msg,
-                            Err(err) => {
-                                // error!("Failed to decode publish message {:?}", err);
-                                continue;
-                            }
-                        };
-                        // println!("PUBLISH ({}): {}", publ.topic_name(), msg);
-
-                        match current_message_callback {
-                            Some(ref cb) => {
-                                let callback = cb.lock().unwrap();
-                                (*callback)(publ.topic_name(), msg)
-                            }
-                            None => {
-                                match last_message_callback {
-                                    Some(ref cb) => {
-                                        let callback = cb.lock().unwrap();
-                                        (*callback)(publ.topic_name(), msg)
-
-                                    }
-                                    None => (),
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        // Ignore other packets in pub client
-                    }
-                }
-
-            }
+                    };
+                    _client_pkt_hndlr_thrd.handle_packet(&packet);
+                } // packet handle
+            } // reconnection
         });
 
+
         // This thread goes through entire queue to republish timedout publishes
-        let mut t2_mqtt_client = self.clone();
+        let t2_mqtt_client = self.clone();
         let mut t3_mqtt_client = self.clone(); //super ugly
         thread::spawn(move || {
             loop {
@@ -218,40 +104,110 @@ impl MqttClient {
         });
 
 
+        let _client_ping_thrd = self.clone();
+        let keep_alive = {
+            let connection = self.connection.lock().unwrap();
+            connection.options.keep_alive
+        };
+
         // ping request thread. new thread since the above thread is blocking
         // TODO: Check ping responses here. Do something if there is no response for a request
-        thread::spawn(move || {
-            let mut last_ping_time = 0;
-            let mut next_ping_time = 0;
-            loop {
-
-                next_ping_time = last_ping_time + (keep_alive as f32 * 0.9) as i64;
-                // pingreq
-                let current_timestamp = time::get_time().sec;
-
-                if keep_alive > 0 && current_timestamp >= next_ping_time {
-
+        if keep_alive > 0 {
+            thread::spawn(move || {
+                let sleep_time = (keep_alive as f32 * 0.8) as u64;
+                loop {
                     let pingreq_packet = PingreqPacket::new();
-
                     let mut buf = Vec::new();
+
                     pingreq_packet.encode(&mut buf).unwrap();
-                    stream_clone2.write_all(&buf[..]);
 
-                    last_ping_time = current_timestamp;
+                    {
+                        let ref connection = *_client_ping_thrd.connection.lock().unwrap();
+                        let mut stream = match connection.stream {
+                            Some(ref s) => s,
+                            None => panic!("No stream found in the connectino"),
+                        };
+                        stream.write_all(&buf[..]);
+                    }
+                    thread::sleep(Duration::new(sleep_time, 0));
                 }
-            }
-        });
-
+            });
+        }
 
         Ok(self)
+    }
+
+
+    // TODO: Add appropriate return
+    fn handle_packet(&self, packet: &VariablePacket) {
+        // println!("#### {:?} ####", packet);
+
+        match packet {
+
+            /// Receives disconnect packet
+            &VariablePacket::DisconnectPacket(..) => {
+                // TODO: Do we need to notify main thread about this ?
+            }
+
+            /// Receives puback packet and verifies it with sub packet id
+            &VariablePacket::PubackPacket(ref ack) => {
+                let pkid = ack.packet_identifier();
+
+                let mut connection = self.connection.lock().unwrap();
+                let ref mut publish_queue = connection.queue;
+
+                let mut split_index: Option<usize> = None;
+                for (i, v) in publish_queue.iter().enumerate() {
+                    if v.pkid == pkid {
+                        split_index = Some(i);
+                    }
+                }
+
+                if split_index.is_some() {
+                    let split_index = split_index.unwrap();
+                    let mut list2 = publish_queue.split_off(split_index);
+                    list2.pop_front();
+                    publish_queue.append(&mut list2);
+                }
+                println!("pub ack for {}. queue --> {:?}",
+                         ack.packet_identifier(),
+                         publish_queue);
+            }
+
+            /// Receives publish packet
+            &VariablePacket::PublishPacket(ref publ) => {
+                let msg = match str::from_utf8(&publ.payload()[..]) {
+                    Ok(msg) => msg,
+                    Err(_) => {
+                        // error!("Failed to decode publish message {:?}", err);
+                        return;
+                    }
+                };
+
+                let ref message_callback = self.msg_callback;
+                match message_callback.as_ref() {
+                    Some(ref cb) => {
+                        let callback = cb.lock().unwrap();
+                        (*callback)(publ.topic_name(), msg)
+                    }
+                    None => (),
+                };
+            }
+
+            _ => {
+                // Ignore other packets in pub client
+            }
+
+        }
     }
 }
 
 impl MqttConnection {
-    fn connect(&mut self,
-               host: &str,
-               connection_options: MqttConnectionOptions)
-               -> Result<&Self, MqttErrors> {
+    fn connect(&mut self, host: &str) -> Result<&Self, MqttErrors> {
+
+        self.host = host.to_string();
+        let ref connection_options = self.options;
+
         let mut stream = match TcpStream::connect(host) {
             Ok(result) => result,
             Err(_) => {
@@ -288,5 +244,25 @@ impl MqttConnection {
             self.stream = Some(stream);
             Ok(self)
         }
+    }
+
+    fn retry(&mut self, count: i32) -> bool {
+
+        for _ in 0..count {
+            println!("trying to reconnect ..");
+            let host = self.host.clone();
+            match self.connect(&host) {
+                Ok(_) => {
+                    println!("reconnection successful ...");
+                    break;
+                }
+                Err(_) => {
+                    thread::sleep(Duration::new(3, 0));
+                    continue;
+                }
+            }
+        }
+
+        true
     }
 }

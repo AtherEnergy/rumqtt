@@ -1,8 +1,7 @@
-
 use super::client::MqttClient;
-use {TopicFilter, QualityOfService, Encodable};
+use mqtt::{TopicFilter, QualityOfService, Encodable};
 use std::io::Write;
-use packet::SubscribePacket;
+use mqtt::packet::SubscribePacket;
 
 impl MqttClient {
     pub fn subscribe(&mut self,
@@ -10,7 +9,7 @@ impl MqttClient {
                      -> Result<&Self, i32> {
 
 
-        let mut connection = self.connection.lock().unwrap();
+        let connection = self.connection.lock().unwrap();
         let ref stream = connection.stream;
 
         let mut stream = match *stream {

@@ -1,7 +1,7 @@
 use time;
 use mqtt::packet::{PublishPacket, QoSWithPacketIdentifier};
 use super::client::{MqttClient, MqttConnection, PublishMessage};
-use mqtt::{Encodable, Decodable, QualityOfService, TopicName};
+use mqtt::{Encodable, QualityOfService, TopicName};
 use std::io::Write;
 use std::sync::atomic::Ordering;
 
@@ -20,11 +20,8 @@ impl MqttClient {
 
         let mut connection_guard = self.connection.lock().unwrap();
 
-        let MqttConnection { ref mut stream,
-                             ref mut current_pkid,
-                             ref mut queue,
-                             ref mut length,
-                             ref mut retry_time } = *connection_guard;
+        let MqttConnection { ref mut stream, ref mut current_pkid, ref mut queue, .. } =
+            *connection_guard;
 
         let mut stream = match *stream {
             Some(ref s) => s,
