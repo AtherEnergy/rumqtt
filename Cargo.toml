@@ -6,3 +6,7 @@ version = "0.1.0"
 [dependencies]
 mqtt-protocol = "*"
 time = "*"
+rand = "*"
+
+[dependencies.mioco]
+git = "https://github.com/dpc/mioco.git"

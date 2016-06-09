@@ -1,105 +1,105 @@
-extern crate time;
+use std::collections::{HashMap, VecDeque};
+use std::io::{Write, ErrorKind};
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::time::{Duration, Instant};
+use {ReconnectMethod, ClientState};
+use std::thread;
+use rand::{self, Rng};
+use error::{Error, Result};
 
-use std::default::Default;
-use std::sync::{Arc, Mutex};
-use std::net::TcpStream;
-use std::collections::LinkedList;
-use std::sync::atomic::AtomicUsize;
-
-pub type SendableFn = Arc<Mutex<(Fn(&str, &str) + Send + Sync + 'static)>>;
-
-#[derive(Debug)]
-pub struct PublishMessage {
-    pub pkid: u16,
-    pub topic: String,
-    pub message: String,
-    pub timestamp: i64,
+// #[derive(Clone)]
+pub struct ClientOptions {
+    keep_alive: Option<Duration>,
+    clean_session: bool,
+    client_id: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    reconnect: ReconnectMethod,
 }
 
+pub struct Client {
+    addr: SocketAddr,
+    state: ClientState,
+    // netopt: NetworkOptions,
+    opts: ClientOptions,
+    // conn: Connection,
+    session_present: bool,
 
-#[derive(Clone)]
-pub struct MqttConnectionOptions {
-    pub id: String,
-    pub keep_alive: u16,
-    pub clean_session: bool,
+    // Queues
+    last_flush: Instant,
+    await_ping: bool,
 }
 
-pub struct MqttConnection {
-    pub stream: Option<TcpStream>,
-    pub current_pkid: AtomicUsize,
-    pub queue: LinkedList<PublishMessage>, // Queue for QoS 1 & 2
-    pub length: u16,
-    pub retry_time: u16,
-    pub host: String,
-    pub options: MqttConnectionOptions,
-}
-
-#[derive(Clone)]
-pub struct MqttClient {
-    pub connection: Arc<Mutex<MqttConnection>>,
-    pub msg_callback: Option<SendableFn>,
-}
-
-impl Default for MqttConnectionOptions {
-    fn default() -> MqttConnectionOptions {
-        MqttConnectionOptions {
-            id: "".to_string(),
-            keep_alive: 0,
+impl ClientOptions {
+    pub fn new() -> ClientOptions {
+        ClientOptions {
+            keep_alive: Some(Duration::new(30, 0)),
             clean_session: true,
+            client_id: None,
+            username: None,
+            password: None,
+            reconnect: ReconnectMethod::ForeverDisconnect,
         }
     }
-}
 
-impl Default for MqttConnection {
-    fn default() -> MqttConnection {
-        MqttConnection {
-            stream: None,
-            queue: LinkedList::new(),
-            length: 500,
-            current_pkid: AtomicUsize::new(1),
-            retry_time: 10,
-            host: "".to_string(),
-            options: MqttConnectionOptions { ..Default::default() },
-        }
-    }
-}
-
-impl Default for MqttClient {
-    fn default() -> MqttClient {
-        MqttClient {
-            // thread safe connection
-            connection: Arc::new(Mutex::new(MqttConnection { ..Default::default() })),
-            // thread safe callback
-            msg_callback: None,
-        }
-    }
-}
-
-impl MqttConnectionOptions {
-    pub fn new(id: &str) -> MqttConnectionOptions {
-        let mut options = MqttConnectionOptions { ..Default::default() };
-        options.id = id.to_string();
-        options
-    }
-
-    // TODO: Implement keep_alive in lower layers
-    pub fn keep_alive(mut self, val: u16) -> Self {
-        self.keep_alive = val;
+    pub fn set_keep_alive(&mut self, secs: u16) -> &mut ClientOptions {
+        self.keep_alive = Some(Duration::new(secs as u64, 0));
         self
     }
 
-    pub fn clean_session(mut self, val: bool) -> Self {
-        self.clean_session = val;
+    pub fn set_client_id(&mut self, client_id: String) -> &mut ClientOptions {
+        self.client_id = Some(client_id);
         self
     }
 
-    pub fn create_client(self) -> MqttClient {
-        MqttClient {
-            connection: Arc::new(Mutex::new(MqttConnection {
-                options: self,
-                ..Default::default()
-            })),
-            msg_callback: None,
+    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut ClientOptions {
+        self.clean_session = clean_session;
+        self
+    }
+
+
+    pub fn generate_client_id(&mut self) -> &mut ClientOptions {
+        let mut rng = rand::thread_rng();
+        let id = rng.gen::<u32>();
+        self.client_id = Some(format!("mqttc_{}", id));
+        self
+    }
+
+    pub fn set_username(&mut self, username: String) -> &mut ClientOptions {
+        self.username = Some(username);
+        self
+    }
+
+    pub fn set_password(&mut self, password: String) -> &mut ClientOptions {
+        self.password = Some(password);
+        self
+    }
+
+    pub fn set_reconnect(&mut self, reconnect: ReconnectMethod) -> &mut ClientOptions {
+        self.reconnect = reconnect;
+        self
+    }
+
+    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<Client> {
+        if self.client_id == None {
+            self.generate_client_id();
         }
+
+        let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
+
+        let mut client = Client {
+            addr: addr,
+            state: ClientState::Disconnected,
+            // netopt: netopt,
+            opts: self,
+            // conn: conn,
+            session_present: false,
+
+            // Queues
+            last_flush: Instant::now(),
+            await_ping: false,
+        };
+
+        Ok(client)
     }
 }
