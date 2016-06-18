@@ -1,12 +1,8 @@
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
 use error::{Error, Result};
-use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
 use std::collections::VecDeque;
-use std::thread;
 use std::io::{Read, Write};
 use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService};
