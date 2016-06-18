@@ -181,7 +181,7 @@ impl Client {
                 select!(
                         r:stream => {
                             let packet = match VariablePacket::decode(&mut stream) {
-                            Ok(pk) => pk,
+                                Ok(pk) => pk,
                                 Err(err) => {
                                     // maybe size=0 while reading indicating socket close at broker end
                                     error!("Error in receiving packet {:?}", err);
@@ -189,22 +189,8 @@ impl Client {
                                 }
                             };
                             trace!("PACKET {:?}", packet);
-                            match &packet {
-                                &VariablePacket::SubackPacket(ref ack) => {
-                                    if ack.packet_identifier() != 10 {
-                                        error!("SUBACK packet identifier not match");
-                                    }
-                                    else {
-                                        println!("Subscribed!");
-                                    }
-                                },
-
-                                &VariablePacket::PingrespPacket(ref ack) => {
-                                    client.await_ping = false;
-                                },
-
-                                _ => {}
-                            }
+                            client.handle_packet(&packet);
+                            
                         },
                         r:timer => {
                             info!("PING REQ");
@@ -220,6 +206,25 @@ impl Client {
             Ok(())
         }); //mioco end
 
+    }
+
+    fn handle_packet(&mut self, packet: &VariablePacket) {
+        match packet {
+            &VariablePacket::SubackPacket(ref ack) => {
+                if ack.packet_identifier() != 10 {
+                    error!("SUBACK packet identifier not match");
+                }
+                else {
+                    println!("Subscribed!");
+                }
+            },
+
+            &VariablePacket::PingrespPacket(ref ack) => {
+                self.await_ping = false;
+            },
+
+            _ => {}
+        }
     }
 
 
