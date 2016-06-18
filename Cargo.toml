@@ -6,3 +6,6 @@ version = "0.1.0"
 [dependencies]
 mqtt-protocol = "*"
 time = "*"
+rand = "*"
+log = "*"
+mioco = "*"
