@@ -4,5 +4,10 @@ extern crate log;
 extern crate mioco;
 extern crate mqtt;
 
-mod error;
+pub mod error;
 pub mod client;
+
+pub use client::{Client, ClientOptions};
+
+
+

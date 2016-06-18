@@ -15,6 +15,8 @@ pub enum Error {
     UnsupportedFeature,
     UnrecognizedPacket,
     ConnectionAbort,
+    IncommingStorageAbsent,
+    OutgoingStorageAbsent,
     HandshakeFailed,
     ProtocolViolation,
     Disconnected,

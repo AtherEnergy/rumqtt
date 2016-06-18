@@ -12,76 +12,65 @@ use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService};
 use mqtt::packet::*;
 
-pub struct MqttClientOptions {
+
+// #[derive(Clone)]
+pub struct ClientOptions {
     keep_alive: Option<u16>,
     clean_session: bool,
     client_id: Option<String>,
-    retry_time: u32,
-    ca_cert: Option<PathBuf>,
-    client_cert: Option<PathBuf>,
-    client_key: Option<PathBuf>,
-    publish_queue_limit: u32,
+    username: Option<String>,
+    password: Option<String>,
+    reconnect: ReconnectMethod,
 }
 
-impl MqttClientOptions {
-    pub fn new() -> Self {
-        MqttClientOptions {
+
+impl ClientOptions {
+    pub fn new() -> ClientOptions {
+        ClientOptions {
             keep_alive: Some(5),
             clean_session: true,
             client_id: None,
-            retry_time: 60,
-            ca_cert: None,
-            client_cert: None,
-            client_key: None,
-            publish_queue_limit: 50,
+            username: None,
+            password: None,
+            reconnect: ReconnectMethod::ForeverDisconnect,
         }
     }
 
-    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
+    pub fn set_keep_alive(&mut self, secs: u16) -> &mut ClientOptions {
         self.keep_alive = Some(secs);
         self
     }
 
-
-    pub fn set_retry_time(&mut self, secs: u32) -> &mut Self {
-        self.retry_time = secs;
-        self
-    }
-
-    pub fn set_client_id(&mut self, client_id: String) -> &mut Self {
+    pub fn set_client_id(&mut self, client_id: String) -> &mut ClientOptions {
         self.client_id = Some(client_id);
         self
     }
 
-    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
+    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut ClientOptions {
         self.clean_session = clean_session;
         self
     }
 
-    pub fn set_ca_crt(&mut self, path: PathBuf) -> &mut Self {
-        self.ca_cert = Some(path);
-        self
-    }
 
-    pub fn set_client_crt(&mut self, path: PathBuf) -> &mut Self {
-        self.client_cert = Some(path);
-        self
-    }
-
-    pub fn set_client_key(&mut self, path: PathBuf) -> &mut Self {
-        self.client_key = Some(path);
-        self
-    }
-
-    pub fn set_publish_queue_limit(&mut self, limit: u32) -> &mut Self {
-        self.publish_queue_limit = limit;
-        self
-    }
-
-    pub fn generate_client_id(&mut self) -> &mut Self {
+    pub fn generate_client_id(&mut self) -> &mut ClientOptions {
         let mut rng = rand::thread_rng();
         let id = rng.gen::<u32>();
         self.client_id = Some(format!("mqttc_{}", id));
+        self
+    }
+
+    pub fn set_username(&mut self, username: String) -> &mut ClientOptions {
+        self.username = Some(username);
+        self
+    }
+
+    pub fn set_password(&mut self, password: String) -> &mut ClientOptions {
+        self.password = Some(password);
+        self
+    }
+
+    pub fn set_reconnect(&mut self, reconnect: ReconnectMethod) -> &mut ClientOptions {
+        self.reconnect = reconnect;
         self
     }
 
@@ -102,6 +91,9 @@ impl MqttClientOptions {
             stream: stream,
             session_present: false,
             last_flush: Instant::now(),
+            
+            await_ping: false,
+
         };
 
         // Send CONNECT then wait CONNACK
@@ -149,10 +141,11 @@ pub enum ReconnectMethod {
 pub struct Client {
     addr: SocketAddr,
     state: MqttClientState,
-    opts: MqttClientOptions,
+    opts: ClientOptions,
     stream: TcpStream,
     session_present: bool,
     last_flush: Instant,
+    await_ping: bool,
 }
 
 impl Client {
