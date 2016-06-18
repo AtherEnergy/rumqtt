@@ -9,3 +9,6 @@ time = "*"
 rand = "*"
 log = "*"
 mioco = "*"
+
+[dev-dependencies]
+env_logger = "0.3"

@@ -7,7 +7,8 @@ use std::io::{Read, Write};
 use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService};
 use mqtt::packet::*;
-
+use mioco::timer::Timer;
+use mioco;
 
 // #[derive(Clone)]
 pub struct ClientOptions {
@@ -77,14 +78,14 @@ impl ClientOptions {
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
 
-        info!(" Connecting to {}", addr);
-        let stream = try!(self._reconnect(addr));
+        //info!(" Connecting to {}", addr);
+        //let stream = try!(self._reconnect(addr));
 
         let mut client = Client {
             addr: addr,
             state: MqttClientState::Disconnected,
             opts: self,
-            stream: stream,
+            stream: None,
             session_present: false,
             last_flush: Instant::now(),
             
@@ -92,18 +93,9 @@ impl ClientOptions {
 
         };
 
-        // Send CONNECT then wait CONNACK
-        //try!(client._handshake());
-
         Ok(client)
     }
 
-    fn _reconnect(&self,
-                  addr: SocketAddr)
-                  -> Result<TcpStream> {
-        let stream = try!(TcpStream::connect(&addr));
-        Ok(stream)
-    }
 
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
         let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.client_id.clone().unwrap());
@@ -138,38 +130,76 @@ pub struct Client {
     addr: SocketAddr,
     state: MqttClientState,
     opts: ClientOptions,
-    stream: TcpStream,
+    stream: Option<TcpStream>,
     session_present: bool,
     last_flush: Instant,
     await_ping: bool,
 }
 
 impl Client {
-    fn _handshake(&mut self) -> Result<()> {
-        self.state = MqttClientState::Handshake;
-        // send CONNECT
-        try!(self._connect());
-        // wait CONNACK
-        //let _ = try!(self.await());
-        Ok(())
+
+    pub fn await(&mut self) {
+        let keep_alive = self.opts.keep_alive.unwrap() as i64;
+        let addr = self.addr;
+
+        mioco::start (move || {
+            let mut stream = Client::_reconnect(addr).unwrap();
+            let mut buf = [0u8; 1024 * 16];
+
+            loop {
+                let mut timer = Timer::new();
+                timer.set_timeout(keep_alive * 1000);
+                select!(
+                    r:stream => {
+                        let size = stream.read(&mut buf).unwrap();
+                        if size == 0 {
+                            /* eof */
+                            break;
+                        }
+                    },
+                    r:timer => {
+                        info!("PING REQ");
+                    },
+                );
+            }
+        });
     }
 
-    fn _connect(&mut self) -> Result<()> {
-        let connect = try!(self.opts._generate_connect_packet());
-        self._write_packet(connect);
-        self._flush()
+
+    fn _reconnect(addr: SocketAddr)
+                  -> Result<TcpStream> {
+         // Send CONNECT then wait CONNACK
+        //try!(client._handshake());
+        let stream = try!(TcpStream::connect(&addr));
+        Ok(stream)
     }
 
-    fn _flush(&mut self) -> Result<()> {
-        // TODO: in case of disconnection, trying to reconnect
-        try!(self.stream.flush());
-        self.last_flush = Instant::now();
-        Ok(())
-    }
 
-    #[inline]
-    fn _write_packet(&mut self, packet: Vec<u8>) {
-        trace!("{:?}", packet);
-        self.stream.write_all(&packet).unwrap();
-    }
+    // fn _handshake(&mut self) -> Result<()> {
+    //     self.state = MqttClientState::Handshake;
+    //     // send CONNECT
+    //     try!(self._connect());
+    //     // wait CONNACK
+    //     //let _ = try!(self.await());
+    //     Ok(())
+    // }
+
+    // fn _connect(&mut self) -> Result<()> {
+    //     let connect = try!(self.opts._generate_connect_packet());
+    //     self._write_packet(connect);
+    //     self._flush()
+    // }
+
+    // fn _flush(&mut self) -> Result<()> {
+    //     // TODO: in case of disconnection, trying to reconnect
+    //     try!(self.stream.flush());
+    //     self.last_flush = Instant::now();
+    //     Ok(())
+    // }
+
+    // #[inline]
+    // fn _write_packet(&mut self, packet: Vec<u8>) {
+    //     trace!("{:?}", packet);
+    //     self.stream.write_all(&packet).unwrap();
+    // }
 }
