@@ -24,6 +24,7 @@ pub enum Error {
     ConnectionRefused(i32),
     Io(io::Error),
     InvalidCert(String),
+    NoStreamError,
 }
 
 impl From<io::Error> for Error {

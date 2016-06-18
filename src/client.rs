@@ -7,10 +7,11 @@ use std::io::{Read, Write};
 use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService};
 use mqtt::packet::*;
+use mqtt::control::variable_header::ConnectReturnCode;
 use mioco::timer::Timer;
 use mioco;
 
-// #[derive(Clone)]
+#[derive(Clone)]
 pub struct ClientOptions {
     keep_alive: Option<u16>,
     clean_session: bool,
@@ -78,8 +79,8 @@ impl ClientOptions {
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
 
-        //info!(" Connecting to {}", addr);
-        //let stream = try!(self._reconnect(addr));
+        // info!(" Connecting to {}", addr);
+        // let stream = try!(self._reconnect(addr));
 
         let mut client = Client {
             addr: addr,
@@ -88,9 +89,7 @@ impl ClientOptions {
             stream: None,
             session_present: false,
             last_flush: Instant::now(),
-            
             await_ping: false,
-
         };
 
         Ok(client)
@@ -98,12 +97,27 @@ impl ClientOptions {
 
 
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
-        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.client_id.clone().unwrap());
+        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(),
+                                                    self.client_id.clone().unwrap());
         connect_packet.set_clean_session(self.clean_session);
         connect_packet.set_keep_alive(self.keep_alive.unwrap());
 
         let mut buf = Vec::new();
         match connect_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_pingreq_packet(&self) -> Result<Vec<u8>> {
+        let pingreq_packet = PingreqPacket::new();
+        let mut buf = Vec::new();
+
+        pingreq_packet.encode(&mut buf).unwrap();
+        match pingreq_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
                 return Err(Error::MqttEncodeError);
@@ -117,13 +131,13 @@ impl ClientOptions {
 pub enum MqttClientState {
     Handshake,
     Connected,
-    Disconnected
+    Disconnected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconnectMethod {
     ForeverDisconnect,
-    ReconnectAfter(Duration)
+    ReconnectAfter(Duration),
 }
 
 pub struct Client {
@@ -137,69 +151,142 @@ pub struct Client {
 }
 
 impl Client {
-
     pub fn await(&mut self) {
-        let keep_alive = self.opts.keep_alive.unwrap() as i64;
-        let addr = self.addr;
+        // let keep_alive = self.opts.keep_alive.unwrap() as i64;
+        // let addr = self.addr;
+        let mut client = Client {
+            addr: self.addr,
+            state: MqttClientState::Disconnected,
+            opts: self.opts.clone(),
+            stream: None,
+            session_present: self.session_present,
+            last_flush: Instant::now(),
+            await_ping: false,
+        };
 
-        mioco::start (move || {
-            let mut stream = Client::_reconnect(addr).unwrap();
-            let mut buf = [0u8; 1024 * 16];
+        mioco::start(move || {
+            let mut stream = Self::_reconnect(client.addr).unwrap();
+            client.stream = Some(stream.try_clone().unwrap());
+
+            // Mqtt connect packet send + connack packet await
+            match client._handshake() {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            };
 
             loop {
                 let mut timer = Timer::new();
-                timer.set_timeout(keep_alive * 1000);
+                timer.set_timeout(client.opts.keep_alive.unwrap() as i64 * 1000);
+
                 select!(
-                    r:stream => {
-                        let size = stream.read(&mut buf).unwrap();
-                        if size == 0 {
-                            /* eof */
-                            break;
-                        }
-                    },
-                    r:timer => {
-                        info!("PING REQ");
-                    },
+                        r:stream => {
+                            let packet = match VariablePacket::decode(&mut stream) {
+                            Ok(pk) => pk,
+                                Err(err) => {
+                                    // maybe size=0 while reading indicating socket close at broker end
+                                    error!("Error in receiving packet {:?}", err);
+                                    continue;
+                                }
+                            };
+                            trace!("PACKET {:?}", packet);
+                            match &packet {
+                                &VariablePacket::SubackPacket(ref ack) => {
+                                    if ack.packet_identifier() != 10 {
+                                        error!("SUBACK packet identifier not match");
+                                    }
+                                    else {
+                                        println!("Subscribed!");
+                                    }
+                                },
+
+                                &VariablePacket::PingrespPacket(ref ack) => {
+                                    client.await_ping = false;
+                                },
+
+                                _ => {}
+                            }
+                        },
+                        r:timer => {
+                            info!("PING REQ");
+                            if !client.await_ping {
+                                let _ = client.ping();
+                            } else {
+                                panic!("awaiting for previous ping resp");
+                            }
+                        },
+
                 );
-            }
-        });
+            } //loop end
+            Ok(())
+        }); //mioco end
+
     }
 
 
-    fn _reconnect(addr: SocketAddr)
-                  -> Result<TcpStream> {
-         // Send CONNECT then wait CONNACK
-        //try!(client._handshake());
+    fn _reconnect(addr: SocketAddr) -> Result<TcpStream> {
+        // Raw tcp connect
         let stream = try!(TcpStream::connect(&addr));
         Ok(stream)
     }
 
 
-    // fn _handshake(&mut self) -> Result<()> {
-    //     self.state = MqttClientState::Handshake;
-    //     // send CONNECT
-    //     try!(self._connect());
-    //     // wait CONNACK
-    //     //let _ = try!(self.await());
-    //     Ok(())
-    // }
+    fn _handshake(&mut self) -> Result<()> {
+        self.state = MqttClientState::Handshake;
+        // send CONNECT
+        try!(self._connect());
 
-    // fn _connect(&mut self) -> Result<()> {
-    //     let connect = try!(self.opts._generate_connect_packet());
-    //     self._write_packet(connect);
-    //     self._flush()
-    // }
+        // wait CONNACK
+        let stream = match self.stream {
+            Some(ref mut s) => s,
+            None => return Err(Error::NoStreamError),
+        };
+        let connack = ConnackPacket::decode(stream).unwrap();
+        trace!("CONNACK {:?}", connack);
 
-    // fn _flush(&mut self) -> Result<()> {
-    //     // TODO: in case of disconnection, trying to reconnect
-    //     try!(self.stream.flush());
-    //     self.last_flush = Instant::now();
-    //     Ok(())
-    // }
+        if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
+            panic!("Failed to connect to server, return code {:?}", connack.connect_return_code());
+        } else {
+            self.state = MqttClientState::Connected;
+        }
 
-    // #[inline]
-    // fn _write_packet(&mut self, packet: Vec<u8>) {
-    //     trace!("{:?}", packet);
-    //     self.stream.write_all(&packet).unwrap();
-    // }
+        Ok(())
+    }
+
+    fn _connect(&mut self) -> Result<()> {
+        let connect = try!(self.opts._generate_connect_packet());
+        try!(self._write_packet(connect));
+        self._flush()
+    }
+
+    pub fn ping(&mut self) -> Result<()> {
+        debug!("       Pingreq");
+        let ping = try!(self.opts._generate_pingreq_packet());
+        self.await_ping = true;
+        try!(self._write_packet(ping));
+        self._flush()
+    }
+
+    fn _flush(&mut self) -> Result<()> {
+        // TODO: in case of disconnection, trying to reconnect
+        let stream = match self.stream {
+            Some(ref mut s) => s,
+            None => return Err(Error::NoStreamError),
+        };
+
+        try!(stream.flush());
+        self.last_flush = Instant::now();
+        Ok(())
+    }
+
+    #[inline]
+    fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
+        trace!("{:?}", packet);
+        let stream = match self.stream {
+            Some(ref mut s) => s,
+            None => return Err(Error::NoStreamError),
+        };
+
+        stream.write_all(&packet).unwrap();
+        Ok(())
+    }
 }
