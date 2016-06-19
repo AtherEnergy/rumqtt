@@ -207,6 +207,8 @@ impl Proxy {
 impl ProxyClient {
     fn handle_packet(&mut self, packet: &VariablePacket) {
         match packet {
+            &VariablePacket::ConnackPacket(ref pubrec) => {}
+
             &VariablePacket::SubackPacket(ref ack) => {
                 if ack.packet_identifier() != 10 {
                     error!("SUBACK packet identifier not match");
@@ -259,6 +261,14 @@ impl ProxyClient {
                     }
                 };
             }
+
+            &VariablePacket::PubrecPacket(ref pubrec) => {}
+
+            &VariablePacket::PubrelPacket(ref pubrel) => {}
+
+            &VariablePacket::PubcompPacket(ref pubcomp) => {}
+
+            &VariablePacket::UnsubackPacket(ref pubrec) => {}
 
             _ => {}
         }
