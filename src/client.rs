@@ -128,6 +128,8 @@ pub struct ProxyClient {
     session_present: bool,
     last_flush: Instant,
     await_ping: bool,
+
+    //TODO: declare all necessary queues here
 }
 
 pub struct Client {
