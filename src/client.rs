@@ -4,6 +4,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use error::{Error, Result};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
+use std::str;
 use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
@@ -79,7 +80,8 @@ impl ClientOptions {
         }
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
-        let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter, QualityOfService)>>();
+        let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter,
+                                                                     QualityOfService)>>();
         // info!(" Connecting to {}", addr);
         // let stream = try!(self._reconnect(addr));
 
@@ -91,9 +93,7 @@ impl ClientOptions {
             subscribe_recv: sub_recv,
         };
 
-        let client = Client {
-            subscribe_send: sub_send
-        };
+        let client = Client { subscribe_send: sub_send };
 
         Ok((proxy, client))
     }
@@ -117,7 +117,7 @@ pub struct Proxy {
     opts: ClientOptions,
     stream: Option<TcpStream>,
     session_present: bool,
-    subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>> 
+    subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>>,
 }
 
 pub struct ProxyClient {
@@ -130,8 +130,8 @@ pub struct ProxyClient {
     await_ping: bool,
 }
 
-pub struct Client{
-    subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>   
+pub struct Client {
+    subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>,
 }
 
 impl Client {
@@ -175,14 +175,14 @@ impl Proxy {
                             let packet = match VariablePacket::decode(&mut stream) {
                                 Ok(pk) => pk,
                                 Err(err) => {
-                                    // maybe size=0 while reading indicating socket close at broker end
+                // maybe size=0 while reading indicating socket close at broker end
                                     error!("Error in receiving packet {:?}", err);
                                     continue;
                                 }
                             };
                             trace!("PACKET {:?}", packet);
                             proxy_client.handle_packet(&packet);
-                            
+
                         },
                         r:timer => {
                             info!("PING REQ");
@@ -192,15 +192,15 @@ impl Proxy {
                                 panic!("awaiting for previous ping resp");
                             }
                         },
-                        // r:subscribe_recv => {
-                        //     info!("subscribe request");
-                        // },
+                // r:subscribe_recv => {
+                //     info!("subscribe request");
+                // },
                 );
             } //loop end
             Ok(())
         }); //mioco end
 
-    }   
+    }
 }
 
 
@@ -210,15 +210,55 @@ impl ProxyClient {
             &VariablePacket::SubackPacket(ref ack) => {
                 if ack.packet_identifier() != 10 {
                     error!("SUBACK packet identifier not match");
-                }
-                else {
+                } else {
                     println!("Subscribed!");
                 }
-            },
+            }
 
             &VariablePacket::PingrespPacket(..) => {
                 self.await_ping = false;
-            },
+            }
+
+            /// Receives disconnect packet
+            &VariablePacket::DisconnectPacket(..) => {
+                // TODO
+            }
+
+            /// Receives puback packet and verifies it with sub packet id
+            &VariablePacket::PubackPacket(ref ack) => {
+                let pkid = ack.packet_identifier();
+
+                // let mut connection = self.connection.lock().unwrap();
+                // let ref mut publish_queue = connection.queue;
+
+                // let mut split_index: Option<usize> = None;
+                // for (i, v) in publish_queue.iter().enumerate() {
+                //     if v.pkid == pkid {
+                //         split_index = Some(i);
+                //     }
+                // }
+
+                // if split_index.is_some() {
+                //     let split_index = split_index.unwrap();
+                //     let mut list2 = publish_queue.split_off(split_index);
+                //     list2.pop_front();
+                //     publish_queue.append(&mut list2);
+                // }
+                // println!("pub ack for {}. queue --> {:?}",
+                //         ack.packet_identifier(),
+                //         publish_queue);
+            }
+
+            /// Receives publish packet
+            &VariablePacket::PublishPacket(ref publ) => {
+                let msg = match str::from_utf8(&publ.payload()[..]) {
+                    Ok(msg) => msg,
+                    Err(err) => {
+                        error!("Failed to decode publish message {:?}", err);
+                        return;
+                    }
+                };
+            }
 
             _ => {}
         }
@@ -246,7 +286,8 @@ impl ProxyClient {
         trace!("CONNACK {:?}", connack);
 
         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
-            panic!("Failed to connect to server, return code {:?}", connack.connect_return_code());
+            panic!("Failed to connect to server, return code {:?}",
+                   connack.connect_return_code());
         } else {
             self.state = MqttClientState::Connected;
         }
@@ -322,7 +363,9 @@ impl ProxyClient {
         Ok(buf)
     }
 
-    fn _generate_subscribe_packet(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<Vec<u8>> {
+    fn _generate_subscribe_packet(&self,
+                                  topics: Vec<(TopicFilter, QualityOfService)>)
+                                  -> Result<Vec<u8>> {
         let subscribe_packet = SubscribePacket::new(11, topics);
         let mut buf = Vec::new();
 
