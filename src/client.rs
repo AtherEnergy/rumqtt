@@ -5,11 +5,12 @@ use error::{Error, Result};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use mioco::tcp::TcpStream;
-use mqtt::{Encodable, Decodable, QualityOfService};
+use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::ConnectReturnCode;
 use mioco::timer::Timer;
 use mioco;
+use mioco::sync::mpsc::{Sender, Receiver};
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -72,58 +73,29 @@ impl ClientOptions {
         self
     }
 
-    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<Client> {
+    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<(Proxy, Client)> {
         if self.client_id == None {
             self.generate_client_id();
         }
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
-
+        let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter, QualityOfService)>>();
         // info!(" Connecting to {}", addr);
         // let stream = try!(self._reconnect(addr));
 
-        let mut client = Client {
+        let proxy = Proxy {
             addr: addr,
-            state: MqttClientState::Disconnected,
             opts: self,
             stream: None,
             session_present: false,
-            last_flush: Instant::now(),
-            await_ping: false,
+            subscribe_recv: sub_recv,
         };
 
-        Ok(client)
-    }
-
-
-    fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
-        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(),
-                                                    self.client_id.clone().unwrap());
-        connect_packet.set_clean_session(self.clean_session);
-        connect_packet.set_keep_alive(self.keep_alive.unwrap());
-
-        let mut buf = Vec::new();
-        match connect_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncodeError);
-            }
+        let client = Client {
+            subscribe_send: sub_send
         };
-        Ok(buf)
-    }
 
-    fn _generate_pingreq_packet(&self) -> Result<Vec<u8>> {
-        let pingreq_packet = PingreqPacket::new();
-        let mut buf = Vec::new();
-
-        pingreq_packet.encode(&mut buf).unwrap();
-        match pingreq_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncodeError);
-            }
-        };
-        Ok(buf)
+        Ok((proxy, client))
     }
 }
 
@@ -140,7 +112,15 @@ pub enum ReconnectMethod {
     ReconnectAfter(Duration),
 }
 
-pub struct Client {
+pub struct Proxy {
+    addr: SocketAddr,
+    opts: ClientOptions,
+    stream: Option<TcpStream>,
+    session_present: bool,
+    subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>> 
+}
+
+pub struct ProxyClient {
     addr: SocketAddr,
     state: MqttClientState,
     opts: ClientOptions,
@@ -150,11 +130,20 @@ pub struct Client {
     await_ping: bool,
 }
 
+pub struct Client{
+    subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>   
+}
+
 impl Client {
-    pub fn await(&mut self) {
-        // let keep_alive = self.opts.keep_alive.unwrap() as i64;
-        // let addr = self.addr;
-        let mut client = Client {
+    pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) {
+        info!("Subscribing");
+        self.subscribe_send.send(topics);
+    }
+}
+
+impl Proxy {
+    pub fn await(self) {
+        let mut proxy_client = ProxyClient {
             addr: self.addr,
             state: MqttClientState::Disconnected,
             opts: self.opts.clone(),
@@ -163,21 +152,24 @@ impl Client {
             last_flush: Instant::now(),
             await_ping: false,
         };
+        let subscribe_recv = self.subscribe_recv;
 
         mioco::start(move || {
-            let mut stream = Self::_reconnect(client.addr).unwrap();
-            client.stream = Some(stream.try_clone().unwrap());
+            let addr = proxy_client.addr;
+            let mut stream = proxy_client._reconnect(addr).unwrap();
+            proxy_client.stream = Some(stream.try_clone().unwrap());
 
             // Mqtt connect packet send + connack packet await
-            match client._handshake() {
+            match proxy_client._handshake() {
                 Ok(_) => (),
                 Err(e) => return Err(e),
             };
 
-            loop {
-                let mut timer = Timer::new();
-                timer.set_timeout(client.opts.keep_alive.unwrap() as i64 * 1000);
+            let mut timer = Timer::new();
 
+            loop {
+                timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
+                // let subscribe_recv = subscribe_recv;
                 select!(
                         r:stream => {
                             let packet = match VariablePacket::decode(&mut stream) {
@@ -189,25 +181,30 @@ impl Client {
                                 }
                             };
                             trace!("PACKET {:?}", packet);
-                            client.handle_packet(&packet);
+                            proxy_client.handle_packet(&packet);
                             
                         },
                         r:timer => {
                             info!("PING REQ");
-                            if !client.await_ping {
-                                let _ = client.ping();
+                            if !proxy_client.await_ping {
+                                let _ = proxy_client.ping();
                             } else {
                                 panic!("awaiting for previous ping resp");
                             }
                         },
-
+                        // r:subscribe_recv => {
+                        //     info!("subscribe request");
+                        // },
                 );
             } //loop end
             Ok(())
         }); //mioco end
 
-    }
+    }   
+}
 
+
+impl ProxyClient {
     fn handle_packet(&mut self, packet: &VariablePacket) {
         match packet {
             &VariablePacket::SubackPacket(ref ack) => {
@@ -219,7 +216,7 @@ impl Client {
                 }
             },
 
-            &VariablePacket::PingrespPacket(ref ack) => {
+            &VariablePacket::PingrespPacket(..) => {
                 self.await_ping = false;
             },
 
@@ -228,7 +225,7 @@ impl Client {
     }
 
 
-    fn _reconnect(addr: SocketAddr) -> Result<TcpStream> {
+    fn _reconnect(&mut self, addr: SocketAddr) -> Result<TcpStream> {
         // Raw tcp connect
         let stream = try!(TcpStream::connect(&addr));
         Ok(stream)
@@ -258,14 +255,14 @@ impl Client {
     }
 
     fn _connect(&mut self) -> Result<()> {
-        let connect = try!(self.opts._generate_connect_packet());
+        let connect = try!(self._generate_connect_packet());
         try!(self._write_packet(connect));
         self._flush()
     }
 
     pub fn ping(&mut self) -> Result<()> {
         debug!("       Pingreq");
-        let ping = try!(self.opts._generate_pingreq_packet());
+        let ping = try!(self._generate_pingreq_packet());
         self.await_ping = true;
         try!(self._write_packet(ping));
         self._flush()
@@ -293,5 +290,49 @@ impl Client {
 
         stream.write_all(&packet).unwrap();
         Ok(())
+    }
+
+    fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
+        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(),
+                                                    self.opts.client_id.clone().unwrap());
+        connect_packet.set_clean_session(self.opts.clean_session);
+        connect_packet.set_keep_alive(self.opts.keep_alive.unwrap());
+
+        let mut buf = Vec::new();
+        match connect_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_pingreq_packet(&self) -> Result<Vec<u8>> {
+        let pingreq_packet = PingreqPacket::new();
+        let mut buf = Vec::new();
+
+        pingreq_packet.encode(&mut buf).unwrap();
+        match pingreq_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_subscribe_packet(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<Vec<u8>> {
+        let subscribe_packet = SubscribePacket::new(11, topics);
+        let mut buf = Vec::new();
+
+        subscribe_packet.encode(&mut buf).unwrap();
+        match subscribe_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
     }
 }

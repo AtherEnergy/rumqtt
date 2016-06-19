@@ -20,14 +20,24 @@ fn publish_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(10);
+    client_options.set_keep_alive(5);
 
-    let mut client = match client_options.connect("localhost:1883") {
+    let (proxy, mut client) = match client_options.connect("localhost:1883") {
         Ok(c) => c,
         Err(_) => panic!("Connectin error"),
     };
     
-    client.await();
+    thread::spawn(move || {
+        proxy.await();
+    });
+
+    let topics: Vec<(TopicFilter, QualityOfService)> =
+        vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
+              QualityOfService::Level0)];
+
+    client.subscribe(topics);
+
+    thread::sleep(Duration::new(20, 0));
 }
 
 
