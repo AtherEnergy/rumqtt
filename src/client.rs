@@ -2,13 +2,14 @@ use std::time::{Duration, Instant};
 use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
 use error::{Error, Result};
+use message::Message;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::str;
 use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
-use mqtt::control::variable_header::ConnectReturnCode;
+use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mioco::timer::Timer;
 use mioco;
 use mioco::sync::mpsc::{Sender, Receiver};
@@ -129,7 +130,13 @@ pub struct ProxyClient {
     last_flush: Instant,
     await_ping: bool,
 
-    //TODO: declare all necessary queues here
+    // Queues
+    incomming_pub: VecDeque<Box<Message>>, // QoS 1
+    incomming_rec: VecDeque<Box<Message>>, // QoS 2
+    incomming_rel: VecDeque<PacketIdentifier>, // QoS 2
+    outgoing_ack: VecDeque<Box<Message>>, // QoS 1
+    outgoing_rec: VecDeque<Box<Message>>, // QoS 2
+    outgoing_comp: VecDeque<PacketIdentifier>, // QoS 2
 }
 
 pub struct Client {
@@ -153,7 +160,15 @@ impl Proxy {
             session_present: self.session_present,
             last_flush: Instant::now(),
             await_ping: false,
+            // Queues
+            incomming_pub: VecDeque::new(),
+            incomming_rec: VecDeque::new(),
+            incomming_rel: VecDeque::new(),
+            outgoing_ack: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_comp: VecDeque::new(),
         };
+
         let subscribe_recv = self.subscribe_recv;
 
         mioco::start(move || {

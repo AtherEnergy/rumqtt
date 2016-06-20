@@ -25,6 +25,7 @@ pub enum Error {
     Io(io::Error),
     InvalidCert(String),
     NoStreamError,
+    TopicNameError,
 }
 
 impl From<io::Error> for Error {

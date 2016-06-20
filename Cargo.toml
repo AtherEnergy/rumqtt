@@ -4,7 +4,7 @@ name = "amqtt"
 version = "0.1.0"
 
 [dependencies]
-mqtt-protocol = "*"
+mqtt-protocol = {git = "https://github.com/kteza1/mqtt-rs.git"}
 time = "*"
 rand = "*"
 log = "*"
