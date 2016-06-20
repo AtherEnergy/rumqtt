@@ -22,7 +22,7 @@ fn publish_test() {
     let mut client_options = ClientOptions::new();
     client_options.set_keep_alive(10);
 
-    let (proxy, mut subscriber) = match client_options.connect("localhost:1883") {
+    let (proxy, mut subscriber, _) = match client_options.connect("localhost:1883") {
         Ok(c) => c,
         Err(_) => panic!("Connectin error"),
     };

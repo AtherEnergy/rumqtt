@@ -13,6 +13,8 @@ use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mioco::timer::Timer;
 use mioco;
 use mioco::sync::mpsc::{Sender, Receiver};
+use std::sync;
+use std::sync::mpsc;
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -75,7 +77,7 @@ impl ClientOptions {
         self
     }
 
-    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<(Proxy, Subscriber)> {
+    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<(Proxy, Subscriber, Publisher)> {
         if self.client_id == None {
             self.generate_client_id();
         }
@@ -84,6 +86,7 @@ impl ClientOptions {
         let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter,
                                                                      QualityOfService)>>();
         let (msg_send, msg_recv) = mioco::sync::mpsc::channel::<Message>();
+        let (pub_send, pub_recv) = sync::mpsc::sync_channel::<i32>(10);
 
         let proxy = Proxy {
             addr: addr,
@@ -92,11 +95,12 @@ impl ClientOptions {
             session_present: false,
             subscribe_recv: sub_recv,
             message_send: msg_send,
+            pub_recv: pub_recv,
         };
 
         let subscriber = Subscriber { subscribe_send: sub_send, message_recv: msg_recv };
-
-        Ok((proxy, subscriber))
+        let publisher = Publisher {pub_send: pub_send};
+        Ok((proxy, subscriber, publisher))
     }
 }
 
@@ -120,6 +124,7 @@ pub struct Proxy {
     session_present: bool,
     subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>>,
     message_send: Sender<Message>,
+    pub_recv: mpsc::Receiver<i32>
 }
 
 pub struct ProxyClient {
@@ -141,7 +146,7 @@ pub struct ProxyClient {
 }
 
 pub struct Publisher {
-
+    pub_send: mpsc::SyncSender<i32>
 }
 
 pub struct Subscriber {
@@ -183,6 +188,7 @@ impl Proxy {
 
         let subscribe_recv = self.subscribe_recv;
         let message_send = self.message_send;
+        let pub_recv = self.pub_recv;
 
         mioco::start(move || {
             let addr = proxy_client.addr;
@@ -242,6 +248,12 @@ impl Proxy {
                                 proxy_client._subscribe(topics);
                             }
                         },
+
+                        // r:pub_recv => {
+                        //     if let Ok(m) = pub_recv.try_recv() {
+                        //         info!("pub received = {:?}", m);
+                        //     }
+                        // },
                 );
             } //loop end
             Ok(())
