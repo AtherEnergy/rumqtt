@@ -10,11 +10,13 @@ use mioco::tcp::TcpStream;
 use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
+use mqtt::topic_name::TopicName;
 use mioco::timer::Timer;
 use mioco;
 use mioco::sync::mpsc::{Sender, Receiver};
 use std::sync;
 use std::sync::mpsc;
+use std::io::Cursor;
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -98,8 +100,11 @@ impl ClientOptions {
             pub_recv: pub_recv,
         };
 
-        let subscriber = Subscriber { subscribe_send: sub_send, message_recv: msg_recv };
-        let publisher = Publisher {pub_send: pub_send};
+        let subscriber = Subscriber {
+            subscribe_send: sub_send,
+            message_recv: msg_recv,
+        };
+        let publisher = Publisher { pub_send: pub_send };
         Ok((proxy, subscriber, publisher))
     }
 }
@@ -124,7 +129,7 @@ pub struct Proxy {
     session_present: bool,
     subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>>,
     message_send: Sender<Message>,
-    pub_recv: mpsc::Receiver<i32>
+    pub_recv: mpsc::Receiver<i32>,
 }
 
 pub struct ProxyClient {
@@ -134,6 +139,7 @@ pub struct ProxyClient {
     stream: Option<TcpStream>,
     session_present: bool,
     last_flush: Instant,
+    last_pid: PacketIdentifier,
     await_ping: bool,
 
     // Queues
@@ -146,7 +152,7 @@ pub struct ProxyClient {
 }
 
 pub struct Publisher {
-    pub_send: mpsc::SyncSender<i32>
+    pub_send: mpsc::SyncSender<i32>,
 }
 
 pub struct Subscriber {
@@ -176,6 +182,7 @@ impl Proxy {
             stream: None,
             session_present: self.session_present,
             last_flush: Instant::now(),
+            last_pid: PacketIdentifier(0),
             await_ping: false,
             // Queues
             incomming_pub: VecDeque::new(),
@@ -202,10 +209,10 @@ impl Proxy {
             };
 
             let mut pingreq_timer = Timer::new();
-            //let mut retry_timer = Timer::new();
+            // let mut retry_timer = Timer::new();
             loop {
                 pingreq_timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
-                //retry_timer.set_timeout(10 * 1000); 
+                // retry_timer.set_timeout(10 * 1000);
                 select!(
                     r:pingreq_timer => {
                             info!("@PING REQ");
@@ -220,7 +227,7 @@ impl Proxy {
                             let packet = match VariablePacket::decode(&mut stream) {
                                 Ok(pk) => pk,
                                 Err(err) => {
-                                    // maybe size=0 while reading indicating socket close at broker end
+                // maybe size=0 while reading indicating socket close at broker end
                                     error!("Error in receiving packet {:?}", err);
                                     continue;
                                 }
@@ -233,14 +240,14 @@ impl Proxy {
                                         message_send.send(*m);
                                     }
                                 },
-                                Err(err) => panic!("error in handling packet. {:?}", err),         
+                                Err(err) => panic!("error in handling packet. {:?}", err),
                             };
                         },
 
-                        // r:retry_timer => {  // TODO: Why isn't this working?
-                        //     info!("@PUBLIST RETRY");
-                        // },
-                        
+                // r:retry_timer => {  // TODO: Why isn't this working?
+                //     info!("@PUBLIST RETRY");
+                // },
+
                         r:subscribe_recv => {
                             info!("@SUBSCRIBE REQUEST");
                             if let Ok(topics) = subscribe_recv.try_recv(){
@@ -249,11 +256,11 @@ impl Proxy {
                             }
                         },
 
-                        // r:pub_recv => {
-                        //     if let Ok(m) = pub_recv.try_recv() {
-                        //         info!("pub received = {:?}", m);
-                        //     }
-                        // },
+                // r:pub_recv => {
+                //     if let Ok(m) = pub_recv.try_recv() {
+                //         info!("pub received = {:?}", m);
+                //     }
+                // },
                 );
             } //loop end
             Ok(())
@@ -265,7 +272,7 @@ impl Proxy {
 impl ProxyClient {
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
         match packet {
-            &VariablePacket::ConnackPacket(ref pubrec) => {Ok(None)}
+            &VariablePacket::ConnackPacket(ref pubrec) => Ok(None),
 
             &VariablePacket::SubackPacket(ref ack) => {
                 if ack.packet_identifier() != 10 {
@@ -328,15 +335,15 @@ impl ProxyClient {
                 self._handle_message(message)
             }
 
-            &VariablePacket::PubrecPacket(ref pubrec) => {Ok(None)}
+            &VariablePacket::PubrecPacket(ref pubrec) => Ok(None),
 
-            &VariablePacket::PubrelPacket(ref pubrel) => {Ok(None)}
+            &VariablePacket::PubrelPacket(ref pubrel) => Ok(None),
 
-            &VariablePacket::PubcompPacket(ref pubcomp) => {Ok(None)}
+            &VariablePacket::PubcompPacket(ref pubcomp) => Ok(None),
 
-            &VariablePacket::UnsubackPacket(ref pubrec) => {Ok(None)}
+            &VariablePacket::UnsubackPacket(ref pubrec) => Ok(None),
 
-            _ => {Ok(None)} //TODO: Replace this with panic later
+            _ => Ok(None), //TODO: Replace this with panic later
         }
     }
 
@@ -347,12 +354,8 @@ impl ProxyClient {
                message.payload.len());
         match message.qos {
             QoSWithPacketIdentifier::Level0 => Ok(Some(message)),
-            QoSWithPacketIdentifier::Level1(_) => {
-                Ok(Some(message))
-            }
-            QoSWithPacketIdentifier::Level2(_) => {
-                Ok(None)
-            }
+            QoSWithPacketIdentifier::Level1(_) => Ok(Some(message)),
+            QoSWithPacketIdentifier::Level2(_) => Ok(None),
         }
     }
 
@@ -378,7 +381,7 @@ impl ProxyClient {
 
         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
             panic!("Failed to connect to server, return code {:?}",
-                   connack.connect_return_code());
+                    connack.connect_return_code());
         } else {
             self.state = MqttClientState::Connected;
         }
@@ -405,7 +408,39 @@ impl ProxyClient {
         let subscribe_packet = try!(self._generate_subscribe_packet(topics));
         try!(self._write_packet(subscribe_packet));
         self._flush()
-        //TODO: sync wait for suback here
+        // TODO: sync wait for suback here
+    }
+
+    fn _publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
+        debug!("---> Publish");
+        let topic = try!(TopicName::new(topic.to_string()));
+
+        let qos = match qos {
+            QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
+            QualityOfService::Level1 |
+            QualityOfService::Level2 => {
+                let PacketIdentifier(next_pid) = self._next_pid();
+                QoSWithPacketIdentifier::Level1(next_pid)
+            }
+        };
+        let publish_packet = try!(self._generate_publish_packet(topic, qos, payload));
+        let mut decode_buf = Cursor::new(publish_packet.clone());
+        let message = try!(Message::from_pub(&PublishPacket::decode(&mut decode_buf).unwrap())); //TODO: Ugly
+
+        match message.qos {
+            QoSWithPacketIdentifier::Level0 => (),
+            QoSWithPacketIdentifier::Level1(pid) => self.outgoing_ack.push_back(message.clone()),
+            QoSWithPacketIdentifier::Level2(pid) => ()
+        }
+
+        debug!("       Publish {:?} {:?} > {} bytes",
+                message.qos,
+                message.topic.to_string(),
+                message.payload.len());
+
+        try!(self._write_packet(publish_packet));
+        self._flush()
+
     }
 
     fn _flush(&mut self) -> Result<()> {
@@ -453,7 +488,7 @@ impl ProxyClient {
         let mut buf = Vec::new();
 
         pingreq_packet.encode(&mut buf).unwrap();
-        match pingreq_packet.encode(&mut buf) {
+        match pingreq_packet.encode(&mut buf) { //TODO: Embed all Mqtt errors to rumqtt errors and use try! here and all generate packets
             Ok(result) => result,
             Err(_) => {
                 return Err(Error::MqttEncodeError);
@@ -463,12 +498,13 @@ impl ProxyClient {
     }
 
     fn _generate_subscribe_packet(&self,
-                                  topics: Vec<(TopicFilter, QualityOfService)>)
-                                  -> Result<Vec<u8>> {
+                                    topics: Vec<(TopicFilter, QualityOfService)>)
+                                    -> Result<Vec<u8>> {
         let subscribe_packet = SubscribePacket::new(11, topics);
         let mut buf = Vec::new();
 
         subscribe_packet.encode(&mut buf).unwrap();
+
         match subscribe_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
@@ -476,5 +512,29 @@ impl ProxyClient {
             }
         };
         Ok(buf)
+    }
+
+    fn _generate_publish_packet(&self,
+                                topic: TopicName,
+                                qos: QoSWithPacketIdentifier,
+                                payload: Vec<u8>) -> Result<Vec<u8>>{
+        let publish_packet = PublishPacket::new(topic, qos, payload);
+        let mut buf = Vec::new();
+
+        publish_packet.encode(&mut buf).unwrap();
+        match publish_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    #[inline]
+    fn _next_pid(&mut self) -> PacketIdentifier {
+        let PacketIdentifier(pid) = self.last_pid;
+        self.last_pid = PacketIdentifier(pid + 1);
+        self.last_pid
     }
 }
