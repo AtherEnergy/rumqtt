@@ -75,7 +75,7 @@ impl ClientOptions {
         self
     }
 
-    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<(Proxy, Client)> {
+    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<(Proxy, Subscriber)> {
         if self.client_id == None {
             self.generate_client_id();
         }
@@ -83,8 +83,7 @@ impl ClientOptions {
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
         let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter,
                                                                      QualityOfService)>>();
-        // info!(" Connecting to {}", addr);
-        // let stream = try!(self._reconnect(addr));
+        let (msg_send, msg_recv) = mioco::sync::mpsc::channel::<Message>();
 
         let proxy = Proxy {
             addr: addr,
@@ -92,11 +91,12 @@ impl ClientOptions {
             stream: None,
             session_present: false,
             subscribe_recv: sub_recv,
+            message_send: msg_send,
         };
 
-        let client = Client { subscribe_send: sub_send };
+        let subscriber = Subscriber { subscribe_send: sub_send, message_recv: msg_recv };
 
-        Ok((proxy, client))
+        Ok((proxy, subscriber))
     }
 }
 
@@ -119,6 +119,7 @@ pub struct Proxy {
     stream: Option<TcpStream>,
     session_present: bool,
     subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>>,
+    message_send: Sender<Message>,
 }
 
 pub struct ProxyClient {
@@ -139,14 +140,25 @@ pub struct ProxyClient {
     outgoing_comp: VecDeque<PacketIdentifier>, // QoS 2
 }
 
-pub struct Client {
-    subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>,
+pub struct Publisher {
+
 }
 
-impl Client {
+pub struct Subscriber {
+    subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>,
+    message_recv: Receiver<Message>,
+}
+
+impl Subscriber {
     pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) {
-        info!("Subscribing");
+        debug!("---> Subscribing");
         self.subscribe_send.send(topics);
+    }
+
+    pub fn receive(&self) -> Result<Message> {
+        debug!("Receive message wait <---");
+        let message = try!(self.message_recv.recv());
+        Ok(message)
     }
 }
 
@@ -170,6 +182,7 @@ impl Proxy {
         };
 
         let subscribe_recv = self.subscribe_recv;
+        let message_send = self.message_send;
 
         mioco::start(move || {
             let addr = proxy_client.addr;
@@ -182,49 +195,65 @@ impl Proxy {
                 Err(e) => return Err(e),
             };
 
-            let mut timer = Timer::new();
-
+            let mut pingreq_timer = Timer::new();
+            //let mut retry_timer = Timer::new();
             loop {
-                timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
-                // let subscribe_recv = subscribe_recv;
+                pingreq_timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
+                //retry_timer.set_timeout(10 * 1000); 
                 select!(
-                        r:stream => {
-                            let packet = match VariablePacket::decode(&mut stream) {
-                                Ok(pk) => pk,
-                                Err(err) => {
-                // maybe size=0 while reading indicating socket close at broker end
-                                    error!("Error in receiving packet {:?}", err);
-                                    continue;
-                                }
-                            };
-                            trace!("PACKET {:?}", packet);
-                            proxy_client.handle_packet(&packet);
-
-                        },
-                        r:timer => {
-                            info!("PING REQ");
+                    r:pingreq_timer => {
+                            info!("@PING REQ");
                             if !proxy_client.await_ping {
                                 let _ = proxy_client.ping();
                             } else {
                                 panic!("awaiting for previous ping resp");
                             }
                         },
-                // r:subscribe_recv => {
-                //     info!("subscribe request");
-                // },
+
+                        r:stream => {
+                            let packet = match VariablePacket::decode(&mut stream) {
+                                Ok(pk) => pk,
+                                Err(err) => {
+                                    // maybe size=0 while reading indicating socket close at broker end
+                                    error!("Error in receiving packet {:?}", err);
+                                    continue;
+                                }
+                            };
+
+                            trace!("PACKET {:?}", packet);
+                            match proxy_client.handle_packet(&packet){
+                                Ok(message) => {
+                                    if let Some(m) = message {
+                                        message_send.send(*m);
+                                    }
+                                },
+                                Err(err) => panic!("error in handling packet. {:?}", err),         
+                            };
+                        },
+
+                        // r:retry_timer => {  // TODO: Why isn't this working?
+                        //     info!("@PUBLIST RETRY");
+                        // },
+                        
+                        r:subscribe_recv => {
+                            info!("@SUBSCRIBE REQUEST");
+                            if let Ok(topics) = subscribe_recv.try_recv(){
+                                info!("request = {:?}", topics);
+                                proxy_client._subscribe(topics);
+                            }
+                        },
                 );
             } //loop end
             Ok(())
         }); //mioco end
-
     }
 }
 
 
 impl ProxyClient {
-    fn handle_packet(&mut self, packet: &VariablePacket) {
+    fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
         match packet {
-            &VariablePacket::ConnackPacket(ref pubrec) => {}
+            &VariablePacket::ConnackPacket(ref pubrec) => {Ok(None)}
 
             &VariablePacket::SubackPacket(ref ack) => {
                 if ack.packet_identifier() != 10 {
@@ -232,15 +261,19 @@ impl ProxyClient {
                 } else {
                     println!("Subscribed!");
                 }
+
+                Ok(None)
             }
 
             &VariablePacket::PingrespPacket(..) => {
                 self.await_ping = false;
+                Ok(None)
             }
 
             /// Receives disconnect packet
             &VariablePacket::DisconnectPacket(..) => {
                 // TODO
+                Ok(None)
             }
 
             /// Receives puback packet and verifies it with sub packet id
@@ -266,31 +299,50 @@ impl ProxyClient {
                 // println!("pub ack for {}. queue --> {:?}",
                 //         ack.packet_identifier(),
                 //         publish_queue);
+
+                Ok(None)
             }
 
             /// Receives publish packet
             &VariablePacket::PublishPacket(ref publ) => {
-                let msg = match str::from_utf8(&publ.payload()[..]) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        error!("Failed to decode publish message {:?}", err);
-                        return;
-                    }
-                };
+                // let msg = match str::from_utf8(&publ.payload()[..]) {
+                //     Ok(msg) => msg,
+                //     Err(err) => {
+                //         error!("Failed to decode publish message {:?}", err);
+                //         return;
+                //     }
+                // };
+                let message = try!(Message::from_pub(publ));
+                self._handle_message(message)
             }
 
-            &VariablePacket::PubrecPacket(ref pubrec) => {}
+            &VariablePacket::PubrecPacket(ref pubrec) => {Ok(None)}
 
-            &VariablePacket::PubrelPacket(ref pubrel) => {}
+            &VariablePacket::PubrelPacket(ref pubrel) => {Ok(None)}
 
-            &VariablePacket::PubcompPacket(ref pubcomp) => {}
+            &VariablePacket::PubcompPacket(ref pubcomp) => {Ok(None)}
 
-            &VariablePacket::UnsubackPacket(ref pubrec) => {}
+            &VariablePacket::UnsubackPacket(ref pubrec) => {Ok(None)}
 
-            _ => {}
+            _ => {Ok(None)} //TODO: Replace this with panic later
         }
     }
 
+    fn _handle_message(&mut self, message: Box<Message>) -> Result<Option<Box<Message>>> {
+        debug!("       Publish {:?} {:?} < {:?} bytes",
+               message.qos,
+               message.topic.to_string(),
+               message.payload.len());
+        match message.qos {
+            QoSWithPacketIdentifier::Level0 => Ok(Some(message)),
+            QoSWithPacketIdentifier::Level1(_) => {
+                Ok(Some(message))
+            }
+            QoSWithPacketIdentifier::Level2(_) => {
+                Ok(None)
+            }
+        }
+    }
 
     fn _reconnect(&mut self, addr: SocketAddr) -> Result<TcpStream> {
         // Raw tcp connect
@@ -328,12 +380,20 @@ impl ProxyClient {
         self._flush()
     }
 
-    pub fn ping(&mut self) -> Result<()> {
-        debug!("       Pingreq");
+    fn ping(&mut self) -> Result<()> {
+        debug!("---> Pingreq");
         let ping = try!(self._generate_pingreq_packet());
         self.await_ping = true;
         try!(self._write_packet(ping));
         self._flush()
+    }
+
+    fn _subscribe(&mut self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
+        debug!("---> Subscribe");
+        let subscribe_packet = try!(self._generate_subscribe_packet(topics));
+        try!(self._write_packet(subscribe_packet));
+        self._flush()
+        //TODO: sync wait for suback here
     }
 
     fn _flush(&mut self) -> Result<()> {

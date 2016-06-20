@@ -1,5 +1,6 @@
 use std::result;
 use std::io;
+use std::sync::mpsc;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -26,10 +27,17 @@ pub enum Error {
     InvalidCert(String),
     NoStreamError,
     TopicNameError,
+    Mpsc(mpsc::RecvError),
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::Io(err)
+    }
+}
+
+impl From<mpsc::RecvError> for Error {
+    fn from(err: mpsc::RecvError) -> Error {
+        Error::Mpsc(err)
     }
 }

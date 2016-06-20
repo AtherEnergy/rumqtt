@@ -20,9 +20,9 @@ fn publish_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5);
+    client_options.set_keep_alive(10);
 
-    let (proxy, mut client) = match client_options.connect("localhost:1883") {
+    let (proxy, mut subscriber) = match client_options.connect("localhost:1883") {
         Ok(c) => c,
         Err(_) => panic!("Connectin error"),
     };
@@ -35,9 +35,16 @@ fn publish_test() {
         vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
               QualityOfService::Level0)];
 
-    client.subscribe(topics);
+    subscriber.subscribe(topics);
 
-    thread::sleep(Duration::new(20, 0));
+    thread::spawn(move || {
+        loop {
+            let message = subscriber.receive().unwrap();
+            println!("@@@ {:?}", message);
+        }
+    });
+    
+    thread::sleep(Duration::new(40, 0));
 }
 
 
