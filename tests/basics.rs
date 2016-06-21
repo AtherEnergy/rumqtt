@@ -20,9 +20,9 @@ fn publish_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(10);
+    client_options.set_keep_alive(60);
 
-    let (proxy, mut subscriber, _) = match client_options.connect("localhost:1883") {
+    let (proxy, mut subscriber, publisher) = match client_options.connect("localhost:1883") {
         Ok(c) => c,
         Err(_) => panic!("Connectin error"),
     };
@@ -43,8 +43,13 @@ fn publish_test() {
             println!("@@@ {:?}", message);
         }
     });
+
+    for i in 0..10 {
+        publisher.publish("hello/rust", QualityOfService::Level0, "hello rust".as_bytes().to_vec());
+        thread::sleep(Duration::new(2, 0));
+    }
     
-    thread::sleep(Duration::new(40, 0));
+    thread::sleep(Duration::new(60, 0));
 }
 
 

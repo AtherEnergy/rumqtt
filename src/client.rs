@@ -14,7 +14,7 @@ use mqtt::topic_name::TopicName;
 use mioco::timer::Timer;
 use mioco;
 use mioco::sync::mpsc::{Sender, Receiver};
-use std::sync;
+use std::sync::{self, Arc};
 use std::sync::mpsc;
 use std::io::Cursor;
 
@@ -88,7 +88,7 @@ impl ClientOptions {
         let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter,
                                                                      QualityOfService)>>();
         let (msg_send, msg_recv) = mioco::sync::mpsc::channel::<Message>();
-        let (pub_send, pub_recv) = sync::mpsc::sync_channel::<i32>(10);
+        let (pub_send, pub_recv) = sync::mpsc::sync_channel::<Message>(10);
 
         let proxy = Proxy {
             addr: addr,
@@ -129,7 +129,7 @@ pub struct Proxy {
     session_present: bool,
     subscribe_recv: Receiver<Vec<(TopicFilter, QualityOfService)>>,
     message_send: Sender<Message>,
-    pub_recv: mpsc::Receiver<i32>,
+    pub_recv: mpsc::Receiver<Message>,
 }
 
 pub struct ProxyClient {
@@ -152,7 +152,26 @@ pub struct ProxyClient {
 }
 
 pub struct Publisher {
-    pub_send: mpsc::SyncSender<i32>,
+    pub_send: mpsc::SyncSender<Message>,
+}
+
+impl Publisher {
+    pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) {
+        let topic = TopicName::new(topic.to_string()).unwrap(); //TODO: Remove unwrap here
+        let qos = match qos {
+            QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
+            QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
+            QualityOfService::Level2 =>  QoSWithPacketIdentifier::Level2(0)
+        };
+        let message = Message {
+            topic: topic,
+            retain: false, //TODO: Verify this
+            qos: qos,
+            payload: Arc::new(payload),
+        };
+
+        self.pub_send.send(message);
+    }
 }
 
 pub struct Subscriber {
@@ -195,7 +214,8 @@ impl Proxy {
 
         let subscribe_recv = self.subscribe_recv;
         let message_send = self.message_send;
-        let pub_recv = self.pub_recv;
+        let pub_recv_dummy = self.pub_recv;
+        let (pub_send, pub_recv) = mioco::sync::mpsc::channel::<Message>();
 
         mioco::start(move || {
             let addr = proxy_client.addr;
@@ -208,13 +228,28 @@ impl Proxy {
                 Err(e) => return Err(e),
             };
 
+            // Had to reroute this way for using
+            // synchronous channels functionality
+            // TODO: remove this once there is synchronous channels
+            // in mioco
+            mioco::spawn(move || {
+
+                loop {
+                    if let Ok(message) = pub_recv_dummy.recv() {
+                        info!("message = {:?}", message);
+                        pub_send.send(message);
+                    }
+                }
+                
+            });
+
             let mut pingreq_timer = Timer::new();
             // let mut retry_timer = Timer::new();
             loop {
                 pingreq_timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
                 // retry_timer.set_timeout(10 * 1000);
                 select!(
-                    r:pingreq_timer => {
+                        r:pingreq_timer => {
                             info!("@PING REQ");
                             if !proxy_client.await_ping {
                                 let _ = proxy_client.ping();
@@ -227,7 +262,8 @@ impl Proxy {
                             let packet = match VariablePacket::decode(&mut stream) {
                                 Ok(pk) => pk,
                                 Err(err) => {
-                // maybe size=0 while reading indicating socket close at broker end
+                                    // maybe size=0 while reading indicating socket 
+                                    // close at broker end
                                     error!("Error in receiving packet {:?}", err);
                                     continue;
                                 }
@@ -244,10 +280,6 @@ impl Proxy {
                             };
                         },
 
-                // r:retry_timer => {  // TODO: Why isn't this working?
-                //     info!("@PUBLIST RETRY");
-                // },
-
                         r:subscribe_recv => {
                             info!("@SUBSCRIBE REQUEST");
                             if let Ok(topics) = subscribe_recv.try_recv(){
@@ -256,11 +288,12 @@ impl Proxy {
                             }
                         },
 
-                // r:pub_recv => {
-                //     if let Ok(m) = pub_recv.try_recv() {
-                //         info!("pub received = {:?}", m);
-                //     }
-                // },
+                        r:pub_recv => {
+                            if let Ok(m) = pub_recv.try_recv() {
+                                info!("pub received = {:?}", m);
+                                proxy_client._publish(m);
+                            }
+                        },
                 );
             } //loop end
             Ok(())
@@ -411,21 +444,22 @@ impl ProxyClient {
         // TODO: sync wait for suback here
     }
 
-    fn _publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
+    fn _publish(&mut self, message: Message) -> Result<()> {
         debug!("---> Publish");
-        let topic = try!(TopicName::new(topic.to_string()));
 
-        let qos = match qos {
-            QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
-            QualityOfService::Level1 |
-            QualityOfService::Level2 => {
+        let qos = match message.qos.clone() {
+            QoSWithPacketIdentifier::Level0 => QoSWithPacketIdentifier::Level0,
+            QoSWithPacketIdentifier::Level1(_) |
+            QoSWithPacketIdentifier::Level2(_) => {
                 let PacketIdentifier(next_pid) = self._next_pid();
-                QoSWithPacketIdentifier::Level1(next_pid)
+                QoSWithPacketIdentifier::Level1(next_pid) //TODO: why only Level1
             }
         };
-        let publish_packet = try!(self._generate_publish_packet(topic, qos, payload));
-        let mut decode_buf = Cursor::new(publish_packet.clone());
-        let message = try!(Message::from_pub(&PublishPacket::decode(&mut decode_buf).unwrap())); //TODO: Ugly
+        let message = message.transform(Some(qos.clone()));
+        let topic = message.topic.clone();
+        let ref payload = *message.payload;
+
+        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
