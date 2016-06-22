@@ -29,6 +29,7 @@ pub enum Error {
     NoStreamError,
     TopicNameError,
     Mpsc(mpsc::RecvError),
+    NoReconnectTry
 }
 
 impl From<io::Error> for Error {

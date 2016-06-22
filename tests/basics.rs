@@ -1,10 +1,10 @@
-extern crate amqtt;
+extern crate rumqtt;
 extern crate mqtt;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
-use amqtt::ClientOptions;
+use rumqtt::{ClientOptions, ReconnectMethod};
 use mqtt::{TopicFilter, QualityOfService};
 
 use std::thread;
@@ -16,12 +16,12 @@ use std::time::Duration;
 /// Add handling in client if pingresp isn't received for a ping request
 #[test]
 fn publish_test() {
-    // USAGE: RUST_LOG=amqtt cargo test -- --nocapture
+    // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
     client_options.set_keep_alive(60);
-
+    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
     let (proxy, mut subscriber, publisher) = match client_options.connect("localhost:1883") {
         Ok(c) => c,
         Err(_) => panic!("Connectin error"),
@@ -31,21 +31,22 @@ fn publish_test() {
         proxy.await();
     });
 
-    let topics: Vec<(TopicFilter, QualityOfService)> =
-        vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
-              QualityOfService::Level0)];
+    // let topics: Vec<(TopicFilter, QualityOfService)> =
+    //     vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
+    //           QualityOfService::Level0)];
 
-    subscriber.subscribe(topics);
+    // subscriber.subscribe(topics);
 
-    thread::spawn(move || {
-        loop {
-            let message = subscriber.receive().unwrap();
-            println!("@@@ {:?}", message);
-        }
-    });
+    // thread::spawn(move || {
+    //     loop {
+    //         let message = subscriber.receive().unwrap();
+    //         println!("@@@ {:?}", message);
+    //     }
+    // });
 
-    for i in 0..10 {
-        publisher.publish("hello/rust", QualityOfService::Level0, "hello rust".as_bytes().to_vec());
+    for i in 0..1 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("hello/rust", QualityOfService::Level0, payload.into_bytes());
         thread::sleep(Duration::new(2, 0));
     }
     

@@ -1,6 +1,6 @@
 [package]
 authors = ["kteza1 <k.teza1@gmail.com>"]
-name = "amqtt"
+name = "rumqtt"
 version = "0.1.0"
 
 [dependencies]
