@@ -14,7 +14,7 @@ use mqtt::topic_name::TopicName;
 use mioco::timer::Timer;
 use mioco;
 use mioco::sync::mpsc::{Sender, Receiver};
-use std::sync::{self, Arc};
+use std::sync::{self, Arc, Mutex};
 use std::sync::mpsc;
 use std::io::Cursor;
 use std::thread;
@@ -147,7 +147,7 @@ pub struct ProxyClient {
     incomming_pub: VecDeque<Box<Message>>, // QoS 1
     incomming_rec: VecDeque<Box<Message>>, // QoS 2
     incomming_rel: VecDeque<PacketIdentifier>, // QoS 2
-    outgoing_ack: VecDeque<Box<Message>>, // QoS 1
+    outgoing_ack: Arc<Mutex<VecDeque<Box<Message>>>>, // QoS 1
     outgoing_rec: VecDeque<Box<Message>>, // QoS 2
     outgoing_comp: VecDeque<PacketIdentifier>, // QoS 2
 }
@@ -210,7 +210,7 @@ impl Proxy {
             incomming_pub: VecDeque::new(),
             incomming_rec: VecDeque::new(),
             incomming_rel: VecDeque::new(),
-            outgoing_ack: VecDeque::new(),
+            outgoing_ack: Arc::new(Mutex::new(VecDeque::new())), //TODO: Remove Arc<Mutex> once select has sync channels
             outgoing_rec: VecDeque::new(),
             outgoing_comp: VecDeque::new(),
         };
@@ -223,7 +223,6 @@ impl Proxy {
         mioco::start(move || {
             let addr = proxy_client.addr;
             let mut stream = proxy_client._reconnect(addr).unwrap();
-            proxy_client.stream = Some(stream.try_clone().unwrap());
 
             // Mqtt connect packet send + connack packet await
             match proxy_client._handshake() {
@@ -235,22 +234,34 @@ impl Proxy {
             // synchronous channels functionality
             // TODO: remove this once there is synchronous channels
             // in mioco
+            let outgoing_ack = proxy_client.outgoing_ack.clone();
             mioco::spawn(move || {
-
+                let mut outgoing_ack = outgoing_ack.lock().unwrap();
                 loop {
-                    if let Ok(message) = pub_recv_dummy.recv() {
-                        //info!("message = {:?}", message);
-                        pub_send.send(message);
-                    }
+                    if outgoing_ack.len() < 10 {
+                        if let Ok(message) = pub_recv_dummy.recv() {
+                            //info!("message = {:?}", message);
+                            pub_send.send(message);
+                        }
+                    }else{
+                        thread::sleep(Duration::new(3, 0));
+                    }                                                                                                                                           
                 }
                 
             });
 
             let mut pingreq_timer = Timer::new();
             // let mut retry_timer = Timer::new();
+            
+            // let stream = match proxy_client.stream {
+            //     Some(ref mut s) => s,
+            //     None => return Err(Error::NoStreamError),
+            // };
+
             loop {
                 pingreq_timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
                 // retry_timer.set_timeout(10 * 1000);
+                
                 select!(
                         r:pingreq_timer => {
                             match proxy_client.state {
@@ -426,6 +437,7 @@ impl ProxyClient {
     fn _reconnect(&mut self, addr: SocketAddr) -> Result<TcpStream> {
         // Raw tcp connect
         let stream = try!(TcpStream::connect(&addr));
+        self.stream = Some(stream.try_clone().unwrap());
         Ok(stream)
     }
 
@@ -506,7 +518,10 @@ impl ProxyClient {
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(pid) => self.outgoing_ack.push_back(message.clone()),
+            QoSWithPacketIdentifier::Level1(pid) => {
+                let mut outgoing_ack = self.outgoing_ack.lock().unwrap();
+                outgoing_ack.push_back(message.clone());
+            },
             QoSWithPacketIdentifier::Level2(pid) => ()
         }
 

@@ -2,6 +2,7 @@ use std::result;
 use std::io;
 use std::sync::mpsc;
 use mqtt::topic_name::TopicNameError;
+use mqtt::packet::{Packet, PacketError};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -29,7 +30,8 @@ pub enum Error {
     NoStreamError,
     TopicNameError,
     Mpsc(mpsc::RecvError),
-    NoReconnectTry
+    NoReconnectTry,
+    MqttPacketError,
 }
 
 impl From<io::Error> for Error {
