@@ -4,11 +4,14 @@ name = "rumqtt"
 version = "0.1.0"
 
 [dependencies]
-mqtt-protocol = {git = "https://github.com/kteza1/mqtt-rs.git"}
-time = "*"
-rand = "*"
 log = "*"
+mio = "*"
 mioco = "*"
+rand = "*"
+time = "*"
+
+[dependencies.mqtt-protocol]
+git = "https://github.com/kteza1/mqtt-rs.git"
 
 [dev-dependencies]
 env_logger = "0.3"
