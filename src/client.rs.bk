@@ -378,24 +378,25 @@ impl ProxyClient {
         match self.opts.reconnect {
             ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
             ReconnectMethod::ReconnectAfter(dur) => {
-                loop {
-                    info!("  Will try Reconnect in {} seconds", dur.as_secs());
-                    thread::sleep(dur);
-                    match TcpStream::connect(&self.addr) {
-                        Ok(stream) => {
-                            self.stream = stream;
-                        }
-                        Err(err) => {
-                            panic!("Error creating new stream {:?}", err);
-                        }
+                 loop {
+                info!("  Will try Reconnect in {} seconds", dur.as_secs());
+                thread::sleep(dur);
+                match TcpStream::connect(&self.addr) {
+                    Ok(stream) => {
+                        self.stream = stream;
                     }
-
-                    // Mqtt connect packet send + connack packet await
-                    match self._connect() {
-                        Ok(_) => break,
-                        Err(_) => continue,
+                    Err(err) => {
+                        panic!("Error creating new stream {:?}", err);
                     }
                 }
+
+               
+                    match self._connect() {
+                        Ok(_) => break
+                    }
+                }
+                // Mqtt connect packet send + connack packet await
+                try!(self._connect());
                 Ok(())
             }
         }

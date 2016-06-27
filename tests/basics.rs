@@ -10,47 +10,58 @@ use mqtt::{TopicFilter, QualityOfService};
 use std::thread;
 use std::time::Duration;
 
-
-/// Test publishes along with ping requests and responses
-/// Observe if the boker is getting ping requests with in keep_alive time
-/// Add handling in client if pingresp isn't received for a ping request
 #[test]
-fn publish_test() {
+fn timeout_test() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(60);
+    client_options.set_keep_alive(3);
     client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let (proxy, mut subscriber, publisher) = match client_options.connect("localhost:1883") {
-        Ok(c) => c,
-        Err(_) => panic!("Connectin error"),
-    };
-    
-    thread::spawn(move || {
-        proxy.await();
-    });
-
-    // let topics: Vec<(TopicFilter, QualityOfService)> =
-    //     vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
-    //           QualityOfService::Level0)];
-
-    // subscriber.subscribe(topics);
-
-    // thread::spawn(move || {
-    //     loop {
-    //         let message = subscriber.receive().unwrap();
-    //         println!("@@@ {:?}", message);
-    //     }
-    // });
-
-    for i in 0..1 {
-        let payload = format!("{}. hello rust", i);
-        publisher.publish("hello/rust", QualityOfService::Level0, payload.into_bytes());
-        thread::sleep(Duration::new(2, 0));
-    }
-    
+    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
+    proxy_client.await();
     thread::sleep(Duration::new(60, 0));
+}
+/// Test publishes along with ping requests and responses
+/// Observe if the boker is getting ping requests with in keep_alive time
+/// Add handling in client if pingresp isn't received for a ping request
+// #[test]
+fn publish_test() {
+//     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
+//     env_logger::init().unwrap();
+
+//     let mut client_options = ClientOptions::new();
+//     client_options.set_keep_alive(60);
+//     client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
+//     let (proxy, mut subscriber, publisher) = match client_options.connect("localhost:1883") {
+//         Ok(c) => c,
+//         Err(_) => panic!("Connectin error"),
+//     };
+    
+//     thread::spawn(move || {
+//         proxy.await();
+//     });
+
+//     // let topics: Vec<(TopicFilter, QualityOfService)> =
+//     //     vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
+//     //           QualityOfService::Level0)];
+
+//     // subscriber.subscribe(topics);
+
+//     // thread::spawn(move || {
+//     //     loop {
+//     //         let message = subscriber.receive().unwrap();
+//     //         println!("@@@ {:?}", message);
+//     //     }
+//     // });
+
+//     for i in 0..1 {
+//         let payload = format!("{}. hello rust", i);
+//         publisher.publish("hello/rust", QualityOfService::Level0, payload.into_bytes());
+//         thread::sleep(Duration::new(2, 0));
+//     }
+    
+//     thread::sleep(Duration::new(60, 0));
 }
 
 

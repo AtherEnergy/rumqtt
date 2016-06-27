@@ -4,9 +4,11 @@ name = "rumqtt"
 version = "0.1.0"
 
 [dependencies]
+chan = "*"
 log = "*"
 mio = "*"
 mioco = "*"
+net2 = "*"
 rand = "*"
 time = "*"
 
