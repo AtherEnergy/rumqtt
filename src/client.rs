@@ -206,16 +206,16 @@ impl Handler for ProxyClient {
                         self._unbind();
 
                         if let Err(e) = self._try_reconnect() {
-                            error!("Reconnect error --> {:?}", e);
+                            error!("No Reconnect try --> {:?}", e);
                             return;
                         }
+
                         event_loop.reregister(&self.stream,
                                               Token(1),
                                               EventSet::readable(),
                                               PollOpt::edge());
 
                         // Mqtt connect packet send
-                        thread::sleep(Duration::new(0, 100000));
                         match self._connect() {
                             Ok(_) => {
                                 if let Some(keep_alive) = self.opts.keep_alive {
@@ -307,10 +307,10 @@ impl ProxyClient {
 
         thread::spawn(move || {
             event_loop.register(&self.stream,
-                          Token(1),
-                          EventSet::readable(),
-                          PollOpt::edge())
-                .unwrap();
+                                Token(1),
+                                EventSet::readable(),
+                                PollOpt::edge())
+                      .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
                 event_loop.timeout_ms(123, keep_alive as u64 * 900);
@@ -321,15 +321,14 @@ impl ProxyClient {
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
-        match packet {
-            &VariablePacket::ConnackPacket(ref connack) => {
-                match self.state {
-
-                    MqttClientState::Handshake => {
-
+        match self.state {
+            MqttClientState::Handshake => {
+                match packet {
+                    &VariablePacket::ConnackPacket(ref connack) => {
                         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
-                            error!("Failed to connect to server, return code {:?}",
-                                   connack.connect_return_code());
+
+                            error!("Failed to connect, err {:?}", connack.connect_return_code());
+
                             match self._try_reconnect() {
                                 Ok(_) => Ok(None), //sent connect packet
                                 Err(e) => Err(Error::NoReconnectTry), //no conn packet sent
@@ -339,88 +338,58 @@ impl ProxyClient {
                             Ok(None)
                         }
                     }
+                    _ => Ok(None),
+                }
+            }
 
-                    MqttClientState::Connected => {
-                        debug!("Already connected");
+            MqttClientState::Connected => {
+                match packet {
+                    &VariablePacket::SubackPacket(ref ack) => {
+                        if ack.packet_identifier() != 10 {
+                            error!("SUBACK packet identifier not match");
+                        } else {
+                            println!("Subscribed!");
+                        }
+
                         Ok(None)
                     }
-                    MqttClientState::Disconnected => {
-                        error!("Invalid state at this point");
-                        Err(Error::ConnectionAbort)
+
+                    &VariablePacket::PingrespPacket(..) => {
+                        self.await_ping = false;
+                        Ok(None)
                     }
+
+                    /// Receives disconnect packet
+                    &VariablePacket::DisconnectPacket(..) => {
+                        // TODO
+                        Ok(None)
+                    }
+
+                    /// Receives puback packet and verifies it with sub packet id
+                    &VariablePacket::PubackPacket(ref puback) => {
+                        let pkid = puback.packet_identifier();
+                        Ok(None)
+                    }
+
+                    /// Receives publish packet
+                    &VariablePacket::PublishPacket(ref publ) => {
+                        let message = try!(Message::from_pub(publ));
+                        self._handle_message(message)
+                    }
+
+                    &VariablePacket::PubrecPacket(ref pubrec) => Ok(None),
+
+                    &VariablePacket::PubrelPacket(ref pubrel) => Ok(None),
+
+                    &VariablePacket::PubcompPacket(ref pubcomp) => Ok(None),
+
+                    &VariablePacket::UnsubackPacket(ref pubrec) => Ok(None),
+
+                    _ => Ok(None), //TODO: Replace this with panic later
                 }
             }
 
-            &VariablePacket::SubackPacket(ref ack) => {
-                if ack.packet_identifier() != 10 {
-                    error!("SUBACK packet identifier not match");
-                } else {
-                    println!("Subscribed!");
-                }
-
-                Ok(None)
-            }
-
-            &VariablePacket::PingrespPacket(..) => {
-                self.await_ping = false;
-                Ok(None)
-            }
-
-            /// Receives disconnect packet
-            &VariablePacket::DisconnectPacket(..) => {
-                // TODO
-                Ok(None)
-            }
-
-            /// Receives puback packet and verifies it with sub packet id
-            &VariablePacket::PubackPacket(ref ack) => {
-                let pkid = ack.packet_identifier();
-
-                // let mut connection = self.connection.lock().unwrap();
-                // let ref mut publish_queue = connection.queue;
-
-                // let mut split_index: Option<usize> = None;
-                // for (i, v) in publish_queue.iter().enumerate() {
-                //     if v.pkid == pkid {
-                //         split_index = Some(i);
-                //     }
-                // }
-
-                // if split_index.is_some() {
-                //     let split_index = split_index.unwrap();
-                //     let mut list2 = publish_queue.split_off(split_index);
-                //     list2.pop_front();
-                //     publish_queue.append(&mut list2);
-                // }
-                // println!("pub ack for {}. queue --> {:?}",
-                //         ack.packet_identifier(),
-                //         publish_queue);
-
-                Ok(None)
-            }
-
-            /// Receives publish packet
-            &VariablePacket::PublishPacket(ref publ) => {
-                // let msg = match str::from_utf8(&publ.payload()[..]) {
-                //     Ok(msg) => msg,
-                //     Err(err) => {
-                //         error!("Failed to decode publish message {:?}", err);
-                //         return;
-                //     }
-                // };
-                let message = try!(Message::from_pub(publ));
-                self._handle_message(message)
-            }
-
-            &VariablePacket::PubrecPacket(ref pubrec) => Ok(None),
-
-            &VariablePacket::PubrelPacket(ref pubrel) => Ok(None),
-
-            &VariablePacket::PubcompPacket(ref pubcomp) => Ok(None),
-
-            &VariablePacket::UnsubackPacket(ref pubrec) => Ok(None),
-
-            _ => Ok(None), //TODO: Replace this with panic later
+            MqttClientState::Disconnected => Err(Error::ConnectionAbort),
         }
     }
 
@@ -451,6 +420,7 @@ impl ProxyClient {
                 thread::sleep(dur);
                 match TcpStream::connect(&self.addr) {
                     Ok(stream) => {
+                        println!("stream = {:?}", stream);
                         self.stream = stream;
                     }
                     Err(err) => {
@@ -493,6 +463,7 @@ impl ProxyClient {
                 QoSWithPacketIdentifier::Level1(next_pid) //TODO: why only Level1
             }
         };
+
         let message = message.transform(Some(qos.clone()));
         let topic = message.topic.clone();
         let ref payload = *message.payload;
@@ -752,18 +723,3 @@ impl ProxyClient {
 //                                 proxy_client._subscribe(topics);
 //                             }
 //                         },
-
-//                         r:pub_recv => {
-//                             if let Ok(m) = pub_recv.try_recv() {
-//                                 info!("----------> HANDLER PUBLISH\n{:?}", m);
-//                                 proxy_client._publish(m);
-//                             }
-//                         },
-//                 );
-//             } //loop end
-//             Ok(())
-//         }); //mioco end
-
-//         Ok(())
-//     }
-// }

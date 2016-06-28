@@ -10,7 +10,7 @@ use mqtt::{TopicFilter, QualityOfService};
 use std::thread;
 use std::time::Duration;
 
-//#[test]
+#[test]
 fn timeout_test() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
@@ -30,7 +30,7 @@ fn timeout_test() {
 /// Test publishes along with ping requests and responses
 /// Observe if the boker is getting ping requests with in keep_alive time
 /// Add handling in client if pingresp isn't received for a ping request
-#[test]
+// #[test]
 fn publish_test() {
     env_logger::init().unwrap();
 
