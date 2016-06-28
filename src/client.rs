@@ -17,6 +17,7 @@ use std::sync::mpsc;
 use std::io::Cursor;
 use std::thread;
 use chan;
+use std::net::Shutdown;
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -184,14 +185,27 @@ impl Handler for ProxyClient {
                         // maybe size=0 while reading indicating socket
                         // close at broker end
                         error!("Error in receiving packet {:?}", err);
-                        self.state = MqttClientState::Disconnected;
+                        self._unbind();
+
                         if let Err(e) = self._try_reconnect() {
                             error!("Reconnect error --> {:?}", e);
+                            return;
                         }
                         event_loop.reregister(&self.stream,
                                               Token(1),
                                               EventSet::readable(),
                                               PollOpt::edge());
+
+                        // Mqtt connect packet send
+                        thread::sleep(Duration::new(0, 100000));
+                        match self._connect() {
+                            Ok(_) => {
+                                if let Some(keep_alive) = self.opts.keep_alive {
+                                    event_loop.timeout_ms(123, keep_alive as u64 * 900);
+                                }
+                            }
+                            Err(e) => debug!("Error Reconnecting --> {:?}", e),
+                        }
                         return;
 
                     }
@@ -214,19 +228,29 @@ impl Handler for ProxyClient {
     }
 
     fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timeout: Self::Timeout) {
+        
+        println!("client state --> {:?}, await_ping --> {}",
+                 self.state,
+                 self.await_ping);
+
         match self.state {
-            MqttClientState::Connected | MqttClientState::Handshake => {
-                info!("@PING REQ");
+            MqttClientState::Connected => {
                 if !self.await_ping {
                     let _ = self.ping();
                 } else {
                     panic!("awaiting for previous ping resp");
                 }
+
                 if let Some(keep_alive) = self.opts.keep_alive {
-                    event_loop.timeout_ms(123, (keep_alive - 1) as u64 * 1000);
+                    event_loop.timeout_ms(123, keep_alive as u64 * 900);
                 }
             }
-            MqttClientState::Disconnected => {}
+
+            MqttClientState::Disconnected |
+            MqttClientState::Handshake => {
+                debug!("I won't ping. Client is in disconnected/handshake state")
+            }
+
         }
     }
 }
@@ -239,12 +263,12 @@ impl ProxyClient {
 
             let mut event_loop = EventLoop::new().unwrap();
             event_loop.register(&self.stream,
-                                Token(1),
-                                EventSet::readable(),
-                                PollOpt::edge())
-                      .unwrap();
+                          Token(1),
+                          EventSet::readable(),
+                          PollOpt::edge())
+                .unwrap();
             if let Some(keep_alive) = self.opts.keep_alive {
-                event_loop.timeout_ms(123, keep_alive as u64 * 1000);
+                event_loop.timeout_ms(123, keep_alive as u64 * 900);
             }
             event_loop.run(&mut self).unwrap();
         });
@@ -378,22 +402,14 @@ impl ProxyClient {
         match self.opts.reconnect {
             ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
             ReconnectMethod::ReconnectAfter(dur) => {
-                loop {
-                    info!("  Will try Reconnect in {} seconds", dur.as_secs());
-                    thread::sleep(dur);
-                    match TcpStream::connect(&self.addr) {
-                        Ok(stream) => {
-                            self.stream = stream;
-                        }
-                        Err(err) => {
-                            panic!("Error creating new stream {:?}", err);
-                        }
+                info!("  Will try Reconnect in {} seconds", dur.as_secs());
+                thread::sleep(dur);
+                match TcpStream::connect(&self.addr) {
+                    Ok(stream) => {
+                        self.stream = stream;
                     }
-
-                    // Mqtt connect packet send + connack packet await
-                    match self._connect() {
-                        Ok(_) => break,
-                        Err(_) => continue,
+                    Err(err) => {
+                        panic!("Error creating new stream {:?}", err);
                     }
                 }
                 Ok(())
@@ -402,15 +418,20 @@ impl ProxyClient {
     }
 
     fn ping(&mut self) -> Result<()> {
-        debug!("---> Pingreq");
         let ping = try!(self._generate_pingreq_packet());
         self.await_ping = true;
         try!(self._write_packet(ping));
         self._flush()
     }
 
+    fn _unbind(&mut self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+        self.await_ping = false;
+        self.state = MqttClientState::Disconnected;
+        info!("  Disconnected {}", self.opts.client_id.clone().unwrap());
+    }
+
     fn _subscribe(&mut self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
-        debug!("---> Subscribe");
         let subscribe_packet = try!(self._generate_subscribe_packet(topics));
         try!(self._write_packet(subscribe_packet));
         self._flush()
@@ -458,7 +479,7 @@ impl ProxyClient {
 
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
-        trace!("@@@ WRITING PACKET\n{:?}", packet);
+        // trace!("@@@ WRITING PACKET\n{:?}", packet);
         try!(self.stream.write_all(&packet));
         Ok(())
     }
@@ -483,7 +504,6 @@ impl ProxyClient {
         let pingreq_packet = PingreqPacket::new();
         let mut buf = Vec::new();
 
-        pingreq_packet.encode(&mut buf).unwrap();
         match pingreq_packet.encode(&mut buf) {
             // TODO: Embed all Mqtt errors to rumqtt errors and
             // use try! here and all generate packets
@@ -520,7 +540,6 @@ impl ProxyClient {
         let publish_packet = PublishPacket::new(topic, qos, payload);
         let mut buf = Vec::new();
 
-        publish_packet.encode(&mut buf).unwrap();
         match publish_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {

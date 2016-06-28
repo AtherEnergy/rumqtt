@@ -16,11 +16,15 @@ fn timeout_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(3);
+    client_options.set_keep_alive(5);
     client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
     let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
-    proxy_client.await();
-    thread::sleep(Duration::new(60, 0));
+    match proxy_client.await() {
+        Ok(_) => (),
+        Err(e) => panic!("Await Error --> {:?}", e),
+    };
+
+    thread::sleep(Duration::new(120, 0));
 }
 /// Test publishes along with ping requests and responses
 /// Observe if the boker is getting ping requests with in keep_alive time
