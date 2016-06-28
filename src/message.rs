@@ -33,6 +33,14 @@ impl Message {
         }))
     }
 
+    pub fn get_pkid(&self) -> Option<u16> {
+        match self.qos {
+            QoSWithPacketIdentifier::Level0 => None,
+            QoSWithPacketIdentifier::Level1(pkid) => Some(pkid),
+            QoSWithPacketIdentifier::Level2(pkid) => Some(pkid),
+        }
+    }
+
     // pub fn from_last_will(last_will: LastWill) -> Box<Message> {
     //     let topic = TopicPath::from(last_will.topic);
 

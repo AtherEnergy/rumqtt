@@ -98,7 +98,7 @@ impl ClientOptions {
             session_present: false,
             // State
             last_flush: Instant::now(),
-            last_pid: PacketIdentifier(0),
+            last_pkid: PacketIdentifier(0),
             await_ping: false,
             state: MqttClientState::Disconnected,
             opts: self,
@@ -177,7 +177,7 @@ pub struct ProxyClient {
     stream: TcpStream,
     session_present: bool,
     last_flush: Instant,
-    last_pid: PacketIdentifier,
+    last_pkid: PacketIdentifier,
     await_ping: bool,
     // Channels
     pub_recv: Option<chan::Receiver<Message>>,
@@ -459,8 +459,8 @@ impl ProxyClient {
             QoSWithPacketIdentifier::Level0 => QoSWithPacketIdentifier::Level0,
             QoSWithPacketIdentifier::Level1(_) |
             QoSWithPacketIdentifier::Level2(_) => {
-                let PacketIdentifier(next_pid) = self._next_pid();
-                QoSWithPacketIdentifier::Level1(next_pid) //TODO: why only Level1
+                let PacketIdentifier(next_pkid) = self._next_pkid();
+                QoSWithPacketIdentifier::Level1(next_pkid) //TODO: why only Level1
             }
         };
 
@@ -474,8 +474,8 @@ impl ProxyClient {
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(pid) => self.outgoing_ack.push_back(message.clone()),
-            QoSWithPacketIdentifier::Level2(pid) => (),
+            QoSWithPacketIdentifier::Level1(pkid) => self.outgoing_ack.push_back(message.clone()),
+            QoSWithPacketIdentifier::Level2(pkid) => (),
         }
 
         debug!("       Publish {:?} {:?} > {} bytes",
@@ -566,10 +566,10 @@ impl ProxyClient {
     }
 
     #[inline]
-    fn _next_pid(&mut self) -> PacketIdentifier {
-        let PacketIdentifier(pid) = self.last_pid;
-        self.last_pid = PacketIdentifier(pid + 1);
-        self.last_pid
+    fn _next_pkid(&mut self) -> PacketIdentifier {
+        let PacketIdentifier(pkid) = self.last_pkid;
+        self.last_pkid = PacketIdentifier(pkid + 1);
+        self.last_pkid
     }
 }
 
