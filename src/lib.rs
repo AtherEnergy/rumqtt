@@ -6,7 +6,6 @@ extern crate mio;
 extern crate mqtt;
 #[macro_use]
 extern crate chan;
-extern crate net2;
 
 pub mod error;
 mod message;

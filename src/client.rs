@@ -88,11 +88,9 @@ impl ClientOptions {
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
         let stream = TcpStream::connect(&addr).unwrap();
 
-        // let (conn_ack_sender, conn_ack_receiver) = chan::sync(0);
         // let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter,
         //                                                              QualityOfService)>>();
         // let (msg_send, msg_recv) = mioco::sync::mpsc::channel::<Message>();
-        // let (pub_send, pub_recv) = sync::mpsc::sync_channel::<Message>(10);
 
         let mut proxy = ProxyClient {
             addr: addr,
@@ -105,9 +103,9 @@ impl ClientOptions {
             state: MqttClientState::Disconnected,
             opts: self,
 
-            // Synchronization
-            // conn_ack_sender: conn_ack_sender,
-            //
+            // Channels
+            pub_recv: None,
+
             // Queues
             incomming_pub: VecDeque::new(),
             incomming_rec: VecDeque::new(),
@@ -116,12 +114,7 @@ impl ClientOptions {
             outgoing_rec: VecDeque::new(),
             outgoing_comp: VecDeque::new(),
         };
-        // proxy._handshake();
-        // let subscriber = Subscriber {
-        //     subscribe_send: sub_send,
-        //     message_recv: msg_recv,
-        // };
-        // let publisher = Publisher { pub_send: pub_send };
+
         // Ok((proxy, subscriber, publisher))
         Ok(proxy)
     }
@@ -139,6 +132,33 @@ pub enum ReconnectMethod {
     ForeverDisconnect,
     ReconnectAfter(Duration),
 }
+
+pub struct Publisher {
+    pub_send: chan::Sender<Message>,
+    mio_notifier: Sender<bool>,
+}
+
+impl Publisher {
+    pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) {
+
+        let topic = TopicName::new(topic.to_string()).unwrap(); //TODO: Remove unwrap here
+        let qos = match qos {
+            QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
+            QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
+            QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
+        };
+        let message = Message {
+            topic: topic,
+            retain: false, // TODO: Verify this
+            qos: qos,
+            payload: Arc::new(payload),
+        };
+
+        self.pub_send.send(message);
+        self.mio_notifier.send(true);
+    }
+}
+
 
 // pub struct Proxy {
 //     addr: SocketAddr,
@@ -159,10 +179,8 @@ pub struct ProxyClient {
     last_flush: Instant,
     last_pid: PacketIdentifier,
     await_ping: bool,
-
-    // Synchronization
-    // conn_ack_sender: chan::Sender<bool>,
-    //
+    // Channels
+    pub_recv: Option<chan::Receiver<Message>>,
     // Queues
     incomming_pub: VecDeque<Box<Message>>, // QoS 1
     incomming_rec: VecDeque<Box<Message>>, // QoS 2
@@ -228,7 +246,7 @@ impl Handler for ProxyClient {
     }
 
     fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timeout: Self::Timeout) {
-        
+
         println!("client state --> {:?}, await_ping --> {}",
                  self.state,
                  self.await_ping);
@@ -253,26 +271,53 @@ impl Handler for ProxyClient {
 
         }
     }
+
+    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: bool) {
+        if self.outgoing_ack.len() < 5 {
+            let message = {
+                match self.pub_recv {
+                    Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                    None => panic!("No publish recv channel"),
+                }
+            };
+
+            self.outgoing_ack.push_back(Box::new(message.clone()));
+            self._publish(message);
+        }
+    }
 }
 
 impl ProxyClient {
-    pub fn await(mut self) -> Result<()> {
+    pub fn await(mut self) -> Result<(Publisher, i32)> {
         try!(self._connect());
 
-        thread::spawn(move || {
+        // let subscriber = Subscriber {
+        //     subscribe_send: sub_send,
+        //     message_recv: msg_recv,
+        // };
+        let mut event_loop = EventLoop::new().unwrap();
+        let mio_notify = event_loop.channel();
 
-            let mut event_loop = EventLoop::new().unwrap();
+        let (pub_send, pub_recv) = chan::sync::<Message>(10);
+        let publisher = Publisher {
+            pub_send: pub_send,
+            mio_notifier: mio_notify.clone(),
+        };
+        self.pub_recv = Some(pub_recv);
+
+        thread::spawn(move || {
             event_loop.register(&self.stream,
                           Token(1),
                           EventSet::readable(),
                           PollOpt::edge())
                 .unwrap();
+
             if let Some(keep_alive) = self.opts.keep_alive {
                 event_loop.timeout_ms(123, keep_alive as u64 * 900);
             }
             event_loop.run(&mut self).unwrap();
         });
-        Ok(())
+        Ok((publisher, 0))
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
@@ -557,31 +602,6 @@ impl ProxyClient {
     }
 }
 
-pub struct Publisher {
-    pub_send: mpsc::SyncSender<Message>,
-}
-
-// impl Publisher {
-//     pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) {
-
-//         debug!("++++++++++> CLIENT PUBLISH");
-//         let topic = TopicName::new(topic.to_string()).unwrap(); //TODO: Remove unwrap here
-//         let qos = match qos {
-//             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
-//             QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
-//             QualityOfService::Level2 =>  QoSWithPacketIdentifier::Level2(0)
-//         };
-//         let message = Message {
-//             topic: topic,
-//             retain: false, //TODO: Verify this
-//             qos: qos,
-//             payload: Arc::new(payload),
-//         };
-
-//         self.pub_send.send(message);
-//     }
-// }
-
 // pub struct Subscriber {
 //     subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>,
 //     message_recv: Receiver<Message>,
@@ -743,55 +763,6 @@ pub struct Publisher {
 //             } //loop end
 //             Ok(())
 //         }); //mioco end
-
-//         Ok(())
-//     }
-// }
-
-
-// impl ProxyClient {
-
-
-//     fn _reconnect(&mut self, addr: SocketAddr) -> Result<TcpStream> {
-//         // Raw tcp connect
-//         let stream = try!(TcpStream::connect(&addr));
-//         self.stream = Some(stream.try_clone().unwrap());
-//         Ok(stream)
-//     }
-
-//     fn _try_reconnect(&mut self) -> Result<()> {
-//         match self.opts.reconnect {
-//             ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
-//             ReconnectMethod::ReconnectAfter(dur) => {
-//                 info!("  Will try Reconnect in {} seconds", dur.as_secs());
-//                 thread::sleep(dur);
-//                 // Mqtt connect packet send + connack packet await
-//                 try!(self._handshake());
-//                 Ok(())
-//             }
-//         }
-//     }
-
-
-//     fn _handshake(&mut self) -> Result<()> {
-//         self.state = MqttClientState::Handshake;
-//         // send CONNECT
-//         try!(self._connect());
-
-//         // wait CONNACK
-//         let stream = match self.stream {
-//             Some(ref mut s) => s,
-//             None => return Err(Error::NoStreamError),
-//         };
-//         let connack = ConnackPacket::decode(stream).unwrap();
-//         trace!("CONNACK {:?}", connack);
-
-//         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
-//             panic!("Failed to connect to server, return code {:?}",
-//                     connack.connect_return_code());
-//         } else {
-//             self.state = MqttClientState::Connected;
-//         }
 
 //         Ok(())
 //     }
