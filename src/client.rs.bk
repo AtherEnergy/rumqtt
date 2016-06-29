@@ -4,7 +4,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use error::{Error, Result};
 use message::Message;
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::{Write};
 use std::str;
 use mio::tcp::TcpStream;
 use mio::*;
@@ -12,7 +12,7 @@ use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mqtt::topic_name::TopicName;
-use std::sync::Arc;
+use std::sync::{Arc};
 use std::thread;
 use chan;
 use std::net::Shutdown;
@@ -288,8 +288,8 @@ impl Handler for ProxyClient {
                             };
 
                             // Add next packet id to message and publish
-                            let PacketIdentifier(pkid) = self._next_pkid();
-                            message.set_pkid(pkid);
+                            let PacketIdentifier(pkid) = self._next_pkid(); 
+                            message.set_pkid(pkid);   
                             self._publish(message);
                         }
                     }
@@ -323,10 +323,10 @@ impl ProxyClient {
 
         thread::spawn(move || {
             event_loop.register(&self.stream,
-                          Token(1),
-                          EventSet::readable(),
-                          PollOpt::edge())
-                .unwrap();
+                                Token(1),
+                                EventSet::readable(),
+                                PollOpt::edge())
+                      .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
                 event_loop.timeout_ms(123, keep_alive as u64 * 900);
@@ -383,13 +383,9 @@ impl ProxyClient {
 
                     /// Receives puback packet and verifies it with sub packet id
                     &VariablePacket::PubackPacket(ref puback) => {
-                        debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
-                               puback,
-                               self.outgoing_ack);
+                        debug!("*** puback --> {:?}\n @@@ queue --> {:#?}", puback, self.outgoing_ack);
                         let pkid = puback.packet_identifier();
-                        match self.outgoing_ack
-                            .iter()
-                            .position(|ref x| x.get_pkid() == Some(pkid)) {
+                        match self.outgoing_ack.iter().position(|ref x| x.get_pkid() == Some(pkid))  {
                             Some(i) => self.outgoing_ack.remove(i),
                             None => panic!("Oopssss..unsolicited ack"),
                         };
