@@ -10,8 +10,8 @@ use mqtt::{TopicFilter, QualityOfService};
 use std::thread;
 use std::time::Duration;
 
-#[test]
-fn timeout_test() {
+//#[test]
+fn pingreq_reconnect_test() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
 
@@ -31,7 +31,7 @@ fn timeout_test() {
 /// Observe if the boker is getting ping requests with in keep_alive time
 /// Add handling in client if pingresp isn't received for a ping request
 // #[test]
-fn publish_test() {
+fn publish_qos0_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
@@ -47,6 +47,29 @@ fn publish_test() {
     for i in 0..100 {
         let payload = format!("{}. hello rust", i);
         publisher.publish("hello/rust", QualityOfService::Level0, payload.into_bytes());
+        thread::sleep(Duration::new(1, 0));
+    }
+
+    thread::sleep(Duration::new(120, 0));
+}
+
+#[test]
+fn publish_qos1_test() {
+    env_logger::init().unwrap();
+
+    let mut client_options = ClientOptions::new();
+    client_options.set_keep_alive(5);
+    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
+    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
+
+    let (publisher, _) = match proxy_client.await() {
+        Ok((publisher, _)) => (publisher, ..),
+        Err(e) => panic!("Await Error --> {:?}", e),
+    };
+
+    for i in 0..100 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("hello/rust", QualityOfService::Level1, payload.into_bytes());
         thread::sleep(Duration::new(1, 0));
     }
 

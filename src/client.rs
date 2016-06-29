@@ -133,16 +133,21 @@ pub enum ReconnectMethod {
     ReconnectAfter(Duration),
 }
 
+pub enum MioNotification {
+    Pub(QualityOfService),
+    Sub,
+}
+
 pub struct Publisher {
     pub_send: chan::Sender<Message>,
-    mio_notifier: Sender<bool>,
+    mio_notifier: Sender<MioNotification>,
 }
 
 impl Publisher {
     pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) {
 
         let topic = TopicName::new(topic.to_string()).unwrap(); //TODO: Remove unwrap here
-        let qos = match qos {
+        let qos_pkid = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
             QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
@@ -150,12 +155,12 @@ impl Publisher {
         let message = Message {
             topic: topic,
             retain: false, // TODO: Verify this
-            qos: qos,
+            qos: qos_pkid,
             payload: Arc::new(payload),
         };
 
         self.pub_send.send(message);
-        self.mio_notifier.send(true);
+        self.mio_notifier.send(MioNotification::Pub(qos));
     }
 }
 
@@ -192,7 +197,7 @@ pub struct ProxyClient {
 
 impl Handler for ProxyClient {
     type Timeout = u64;
-    type Message = bool;
+    type Message = MioNotification;
 
     fn ready(&mut self, event_loop: &mut EventLoop<ProxyClient>, token: Token, _: EventSet) {
         match token {
@@ -272,18 +277,39 @@ impl Handler for ProxyClient {
         }
     }
 
-    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: bool) {
-        if self.outgoing_ack.len() < 5 {
-            let message = {
-                match self.pub_recv {
-                    Some(ref pub_recv) => pub_recv.recv().unwrap(),
-                    None => panic!("No publish recv channel"),
-                }
-            };
+    fn notify(&mut self, event_loop: &mut EventLoop<Self>, notification_type: MioNotification) {
+        match notification_type {
+            MioNotification::Pub(qos) => {
+                match qos {
+                    QualityOfService::Level0 => {
+                        let message = {
+                            match self.pub_recv {
+                                Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                                None => panic!("No publish recv channel"),
+                            }
+                        };
+                        self._publish(message);
+                    }
+                    QualityOfService::Level1 => {
+                        if self.outgoing_ack.len() < 5 {
+                            let message = {
+                                match self.pub_recv {
+                                    Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                                    None => panic!("No publish recv channel"),
+                                }
+                            };
 
-            self.outgoing_ack.push_back(Box::new(message.clone()));
-            self._publish(message);
+                            self.outgoing_ack.push_back(Box::new(message.clone()));
+                            self._publish(message);
+                        }
+                    }
+
+                    _ => panic!("Invalid Qos"),
+                }
+            }
+            MioNotification::Sub => {}
         }
+
     }
 }
 
@@ -368,6 +394,10 @@ impl ProxyClient {
                     /// Receives puback packet and verifies it with sub packet id
                     &VariablePacket::PubackPacket(ref puback) => {
                         let pkid = puback.packet_identifier();
+                        match self.outgoing_ack.iter().position(|ref x| x.get_pkid() == Some(pkid))  {
+                            Some(i) => self.outgoing_ack.remove(i),
+                            None => panic!("Oopssss..unsolicited ack"),
+                        };
                         Ok(None)
                     }
 
