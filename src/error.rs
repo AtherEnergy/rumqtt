@@ -2,7 +2,6 @@ use std::result;
 use std::io;
 use std::sync::mpsc;
 use mqtt::topic_name::TopicNameError;
-use mqtt::packet::{Packet, PacketError};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -47,7 +46,7 @@ impl From<mpsc::RecvError> for Error {
 }
 
 impl From<TopicNameError> for Error {
-    fn from(err: TopicNameError) -> Error {
+    fn from(_: TopicNameError) -> Error {
         Error::TopicNameError
     }
 }

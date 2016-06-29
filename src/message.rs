@@ -1,9 +1,7 @@
 
 use std::sync::Arc;
 
-use mqtt::control::variable_header::PacketIdentifier;
 use mqtt::topic_name::TopicName;
-use mqtt::QualityOfService;
 use mqtt::packet::*;
 use error::{Error, Result};
 

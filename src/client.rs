@@ -4,7 +4,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use error::{Error, Result};
 use message::Message;
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::io::{Write};
 use std::str;
 use mio::tcp::TcpStream;
 use mio::*;
@@ -12,9 +12,7 @@ use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mqtt::topic_name::TopicName;
-use std::sync::{self, Arc, Mutex};
-use std::sync::mpsc;
-use std::io::Cursor;
+use std::sync::{Arc};
 use std::thread;
 use chan;
 use std::net::Shutdown;
@@ -92,7 +90,7 @@ impl ClientOptions {
         //                                                              QualityOfService)>>();
         // let (msg_send, msg_recv) = mioco::sync::mpsc::channel::<Message>();
 
-        let mut proxy = ProxyClient {
+        let proxy = ProxyClient {
             addr: addr,
             stream: stream,
             session_present: false,
