@@ -53,7 +53,7 @@ fn publish_qos0_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-#[test]
+// #[test]
 fn publish_qos1_test() {
     env_logger::init().unwrap();
 
@@ -72,6 +72,35 @@ fn publish_qos1_test() {
         publisher.publish("hello/rust", QualityOfService::Level1, payload.into_bytes());
         thread::sleep(Duration::new(1, 0));
     }
+
+    thread::sleep(Duration::new(120, 0));
+}
+
+#[test]
+fn subscribe_test() {
+    env_logger::init().unwrap();
+
+    let mut client_options = ClientOptions::new();
+    client_options.set_keep_alive(5);
+    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
+    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
+
+    let (_, subscriber) = match proxy_client.await() {
+        Ok((_, subcriber)) => (.., subcriber),
+        Err(e) => panic!("Await Error --> {:?}", e),
+    };
+        
+    let topics: Vec<(TopicFilter, QualityOfService)> =
+    vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
+              QualityOfService::Level0)];
+
+    subscriber.subscribe(topics);
+    thread::spawn(move || {
+        loop {
+            let message = subscriber.receive().unwrap();
+            println!("@@@ {:?}", message);
+        }
+    });
 
     thread::sleep(Duration::new(120, 0));
 }

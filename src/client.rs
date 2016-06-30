@@ -86,10 +86,6 @@ impl ClientOptions {
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
         let stream = TcpStream::connect(&addr).unwrap();
 
-        // let (sub_send, sub_recv) = mioco::sync::mpsc::channel::<Vec<(TopicFilter,
-        //                                                              QualityOfService)>>();
-        // let (msg_send, msg_recv) = mioco::sync::mpsc::channel::<Message>();
-
         let proxy = ProxyClient {
             addr: addr,
             stream: stream,
@@ -103,6 +99,8 @@ impl ClientOptions {
 
             // Channels
             pub_recv: None,
+            sub_recv: None,
+            msg_send: None,
 
             // Queues
             incomming_pub: VecDeque::new(),
@@ -162,6 +160,25 @@ impl Publisher {
     }
 }
 
+pub struct Subscriber {
+    subscribe_send: chan::Sender<Vec<(TopicFilter, QualityOfService)>>,
+    message_recv: chan::Receiver<Message>,
+    mio_notifier: Sender<MioNotification>,
+}
+
+impl Subscriber {
+    pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) {
+        self.subscribe_send.send(topics);
+        self.mio_notifier.send(MioNotification::Sub);
+    }
+
+    pub fn receive(&self) -> Result<Message> {
+        debug!("Receive message wait <---");
+        let message = self.message_recv.recv().unwrap();
+        Ok(message)
+    }
+}
+
 
 pub struct ProxyClient {
     addr: SocketAddr,
@@ -172,8 +189,12 @@ pub struct ProxyClient {
     last_flush: Instant,
     last_pkid: PacketIdentifier,
     await_ping: bool,
+
     // Channels
+    sub_recv: Option<chan::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
+    msg_send: Option<chan::Sender<Message>>,
     pub_recv: Option<chan::Receiver<Message>>,
+
     // Queues
     incomming_pub: VecDeque<Box<Message>>, // QoS 1
     incomming_rec: VecDeque<Box<Message>>, // QoS 2
@@ -226,7 +247,10 @@ impl Handler for ProxyClient {
                 match self.handle_packet(&packet) {
                     Ok(message) => {
                         if let Some(m) = message {
-                            // message_send.send(*m);
+                            match self.msg_send {
+                                Some(ref msg_send) => msg_send.send(*m),
+                                None => panic!("Expected a message send channel"),
+                            }
                         }
                     }
                     Err(err) => panic!("error in handling packet. {:?}", err),
@@ -297,20 +321,27 @@ impl Handler for ProxyClient {
                     _ => panic!("Invalid Qos"),
                 }
             }
-            MioNotification::Sub => {}
+            MioNotification::Sub => {
+                let topics = match self.sub_recv {
+                    Some(ref sub_recv) => sub_recv.recv(),
+                    None => panic!("Expected a subscribe recieve channel"),
+                };
+
+                if let Some(topics) = topics {
+                    info!("request = {:?}", topics);
+                    self._subscribe(topics);
+                }
+            }
         }
 
     }
 }
 
 impl ProxyClient {
-    pub fn await(mut self) -> Result<(Publisher, i32)> {
+    pub fn await(mut self) -> Result<(Publisher, Subscriber)> {
         try!(self._connect());
 
-        // let subscriber = Subscriber {
-        //     subscribe_send: sub_send,
-        //     message_recv: msg_recv,
-        // };
+
         let mut event_loop = EventLoop::new().unwrap();
         let mio_notify = event_loop.channel();
 
@@ -321,19 +352,29 @@ impl ProxyClient {
         };
         self.pub_recv = Some(pub_recv);
 
+        let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(10);
+        let (msg_send, msg_recv) = chan::sync::<Message>(50);
+        let subscriber = Subscriber {
+            subscribe_send: sub_send,
+            message_recv: msg_recv,
+            mio_notifier: mio_notify.clone(),
+        };
+        self.msg_send = Some(msg_send);
+        self.sub_recv = Some(sub_recv);
+
         thread::spawn(move || {
             event_loop.register(&self.stream,
-                          Token(1),
-                          EventSet::readable(),
-                          PollOpt::edge())
-                .unwrap();
+                                Token(1),
+                                EventSet::readable(),
+                                PollOpt::edge())
+                      .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
                 event_loop.timeout_ms(123, keep_alive as u64 * 900);
             }
             event_loop.run(&mut self).unwrap();
         });
-        Ok((publisher, 0))
+        Ok((publisher, subscriber))
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
@@ -360,13 +401,10 @@ impl ProxyClient {
 
             MqttClientState::Connected => {
                 match packet {
-                    &VariablePacket::SubackPacket(ref ack) => {
-                        if ack.packet_identifier() != 10 {
-                            error!("SUBACK packet identifier not match");
-                        } else {
-                            println!("Subscribed!");
-                        }
-
+                    &VariablePacket::SubackPacket(..) => {
+                        // if ack.packet_identifier() != 10
+                        // TODO: Maintain a subscribe queue and retry if
+                        // subscribes are not successful
                         Ok(None)
                     }
 
@@ -388,8 +426,8 @@ impl ProxyClient {
                                self.outgoing_ack);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_ack
-                            .iter()
-                            .position(|ref x| x.get_pkid() == Some(pkid)) {
+                                  .iter()
+                                  .position(|ref x| x.get_pkid() == Some(pkid)) {
                             Some(i) => self.outgoing_ack.remove(i),
                             None => panic!("Oopssss..unsolicited ack"),
                         };
@@ -402,13 +440,13 @@ impl ProxyClient {
                         self._handle_message(message)
                     }
 
-                    &VariablePacket::PubrecPacket(ref pubrec) => Ok(None),
+                    &VariablePacket::PubrecPacket(..) => Ok(None),
 
-                    &VariablePacket::PubrelPacket(ref pubrel) => Ok(None),
+                    &VariablePacket::PubrelPacket(..) => Ok(None),
 
-                    &VariablePacket::PubcompPacket(ref pubcomp) => Ok(None),
+                    &VariablePacket::PubcompPacket(..) => Ok(None),
 
-                    &VariablePacket::UnsubackPacket(ref pubrec) => Ok(None),
+                    &VariablePacket::UnsubackPacket(..) => Ok(None),
 
                     _ => Ok(None), //TODO: Replace this with panic later
                 }
@@ -589,24 +627,6 @@ impl ProxyClient {
         self.last_pkid
     }
 }
-
-// pub struct Subscriber {
-//     subscribe_send: Sender<Vec<(TopicFilter, QualityOfService)>>,
-//     message_recv: Receiver<Message>,
-// }
-
-// impl Subscriber {
-//     pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) {
-//         debug!("---> Subscribing");
-//         self.subscribe_send.send(topics);
-//     }
-
-//     pub fn receive(&self) -> Result<Message> {
-//         debug!("Receive message wait <---");
-//         let message = try!(self.message_recv.recv());
-//         Ok(message)
-//     }
-// }
 
 // impl Proxy {
 //     pub fn await(self) -> Result<()> {
