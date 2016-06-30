@@ -1,6 +1,5 @@
 use std::result;
 use std::io;
-use std::sync::mpsc;
 use mqtt::topic_name::TopicNameError;
 use mio;
 
@@ -18,8 +17,6 @@ pub enum Error {
     UnsupportedFeature,
     UnrecognizedPacket,
     ConnectionAbort,
-    IncommingStorageAbsent,
-    OutgoingStorageAbsent,
     HandshakeFailed,
     ProtocolViolation,
     Disconnected,
@@ -29,7 +26,6 @@ pub enum Error {
     InvalidCert(String),
     NoStreamError,
     TopicNameError,
-    Mpsc(mpsc::RecvError),
     NoReconnectTry,
     MqttPacketError,
     MioNotifyError,
@@ -41,11 +37,6 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<mpsc::RecvError> for Error {
-    fn from(err: mpsc::RecvError) -> Error {
-        Error::Mpsc(err)
-    }
-}
 
 impl From<TopicNameError> for Error {
     fn from(_: TopicNameError) -> Error {

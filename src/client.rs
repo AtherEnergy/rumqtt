@@ -106,7 +106,6 @@ impl ClientOptions {
         let proxy = ProxyClient {
             addr: addr,
             stream: stream,
-            session_present: false,
             // State
             last_flush: Instant::now(),
             last_pkid: PacketIdentifier(0),
@@ -205,7 +204,6 @@ pub struct ProxyClient {
     state: MqttClientState,
     opts: ClientOptions,
     stream: TcpStream,
-    session_present: bool,
     last_flush: Instant,
     last_pkid: PacketIdentifier,
     await_ping: bool,
