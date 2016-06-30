@@ -25,6 +25,8 @@ pub struct ClientOptions {
     username: Option<String>,
     password: Option<String>,
     reconnect: ReconnectMethod,
+    pub_q_len: u16,
+    sub_q_len: u16,
 }
 
 
@@ -37,39 +39,51 @@ impl ClientOptions {
             username: None,
             password: None,
             reconnect: ReconnectMethod::ForeverDisconnect,
+            pub_q_len: 50,
+            sub_q_len: 5,
         }
     }
 
-    pub fn set_keep_alive(&mut self, secs: u16) -> &mut ClientOptions {
+    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         self.keep_alive = Some(secs);
         self
     }
 
-    pub fn set_client_id(&mut self, client_id: String) -> &mut ClientOptions {
+    pub fn set_client_id(&mut self, client_id: String) -> &mut Self {
         self.client_id = Some(client_id);
         self
     }
 
-    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut ClientOptions {
+    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
         self
     }
 
 
-    pub fn generate_client_id(&mut self) -> &mut ClientOptions {
+    pub fn generate_client_id(&mut self) -> &mut Self {
         let mut rng = rand::thread_rng();
         let id = rng.gen::<u32>();
         self.client_id = Some(format!("mqttc_{}", id));
         self
     }
 
-    pub fn set_username(&mut self, username: String) -> &mut ClientOptions {
+    pub fn set_username(&mut self, username: String) -> &mut Self {
         self.username = Some(username);
         self
     }
 
-    pub fn set_password(&mut self, password: String) -> &mut ClientOptions {
+    pub fn set_password(&mut self, password: String) -> &mut Self {
         self.password = Some(password);
+        self
+    }
+
+    pub fn set_pub_q_len(&mut self, len: u16) -> &mut Self {
+        self.pub_q_len = len;
+        self
+    }
+
+    pub fn set_sub_q_len(&mut self, len: u16) -> &mut Self {
+        self.sub_q_len = len;
         self
     }
 
@@ -111,7 +125,6 @@ impl ClientOptions {
             outgoing_comp: VecDeque::new(),
         };
 
-        // Ok((proxy, subscriber, publisher))
         Ok(proxy)
     }
 }
@@ -173,7 +186,6 @@ impl Subscriber {
     }
 
     pub fn receive(&self) -> Result<Message> {
-        debug!("Receive message wait <---");
         let message = self.message_recv.recv().unwrap();
         Ok(message)
     }
@@ -345,15 +357,15 @@ impl ProxyClient {
         let mut event_loop = EventLoop::new().unwrap();
         let mio_notify = event_loop.channel();
 
-        let (pub_send, pub_recv) = chan::sync::<Message>(10);
+        let (pub_send, pub_recv) = chan::sync::<Message>(self.opts.pub_q_len as usize);
         let publisher = Publisher {
             pub_send: pub_send,
             mio_notifier: mio_notify.clone(),
         };
         self.pub_recv = Some(pub_recv);
 
-        let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(10);
-        let (msg_send, msg_recv) = chan::sync::<Message>(50);
+        let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (msg_send, msg_recv) = chan::sync::<Message>(0);
         let subscriber = Subscriber {
             subscribe_send: sub_send,
             message_recv: msg_recv,
@@ -513,7 +525,6 @@ impl ProxyClient {
         let subscribe_packet = try!(self._generate_subscribe_packet(topics));
         try!(self._write_packet(subscribe_packet));
         self._flush()
-        // TODO: sync wait for suback here
     }
 
     fn _publish(&mut self, message: Message) -> Result<()> {
@@ -627,136 +638,3 @@ impl ProxyClient {
         self.last_pkid
     }
 }
-
-// impl Proxy {
-//     pub fn await(self) -> Result<()> {
-//         let mut proxy_client = ProxyClient {
-//             addr: self.addr,
-//             state: MqttClientState::Disconnected,
-//             opts: self.opts.clone(),
-//             stream: None,
-//             session_present: self.session_present,
-//             last_flush: Instant::now(),
-//             last_pid: PacketIdentifier(0),
-//             await_ping: false,
-//             // Queues
-//             incomming_pub: VecDeque::new(),
-//             incomming_rec: VecDeque::new(),
-//             incomming_rel: VecDeque::new(),
-//             outgoing_ack: Arc::new(VecDeque::new()),
-//             outgoing_rec: VecDeque::new(),
-//             outgoing_comp: VecDeque::new(),
-//         };
-
-//         let subscribe_recv = self.subscribe_recv;
-//         let message_send = self.message_send;
-//         let pub_recv_dummy = self.pub_recv;
-//         let (pub_send, pub_recv) = mioco::sync::mpsc::channel::<Message>();
-
-//         mioco::start(move || {
-//             let addr = proxy_client.addr;
-//             let mut stream = proxy_client._reconnect(addr).unwrap();
-
-//             // Mqtt connect packet send + connack packet await
-//             match proxy_client._handshake() {
-//                 Ok(_) => (),
-//                 Err(e) => return Err(e),
-//             };
-
-//             // Has to reroute this way for using
-//             // synchronous channels functionality
-//             // TODO: remove this once there is synchronous channels
-//             // in mioco
-//             let outgoing_ack = proxy_client.outgoing_ack.clone();
-//             mioco::spawn(move || {
-//                 let mut outgoing_ack = outgoing_ack.lock().unwrap();
-//                 loop {
-//                     if outgoing_ack.len() < 10 {
-//                         if let Ok(message) = pub_recv_dummy.recv() {
-//                             //info!("message = {:?}", message);
-//                             pub_send.send(message);
-//                         }
-//                     }else{
-//                         thread::sleep(Duration::new(3, 0));
-//                     }
-//                 }
-
-// });
-
-//             let mut pingreq_timer = Timer::new();
-//             // let mut retry_timer = Timer::new();
-
-//             // let stream = match proxy_client.stream {
-//             //     Some(ref mut s) => s,
-//             //     None => return Err(Error::NoStreamError),
-//             // };
-
-//             loop {
-//                 pingreq_timer.set_timeout(proxy_client.opts.keep_alive.unwrap() as i64 * 1000);
-//                 // retry_timer.set_timeout(10 * 1000);
-
-//                 select!(
-//                         r:pingreq_timer => {
-//                             match proxy_client.state {
-//                                 MqttClientState::Connected | MqttClientState::Handshake => {
-//                                     info!("@PING REQ");
-//                                     if !proxy_client.await_ping {
-//                                         let _ = proxy_client.ping();
-//                                     } else {
-//                                         panic!("awaiting for previous ping resp");
-//                                     }
-//                                 }
-//                                 MqttClientState::Disconnected => {
-//                                      for _ in 0..3 {
-//                                          if let Err(e) = proxy_client._try_reconnect() {
-//                                              continue;
-//                                          }
-//                                          break;
-//                                      }
-//                                 }
-//                             }
-//                         },
-
-//                         r:stream => {
-//                             let packet = match VariablePacket::decode(&mut stream) {
-//                                 Ok(pk) => pk,
-//                                 Err(err) => {
-//                                     // maybe size=0 while reading indicating socket
-//                                     // close at broker end
-//                                     error!("Error in receiving packet {:?}", err);
-//                                     proxy_client.state = MqttClientState::Disconnected;
-//                                     loop {
-//                                         match proxy_client._try_reconnect() {
-//                                             Ok(_) => break,
-//                                             Err(e) => {
-//                                                 // return incase of disconnections
-//                                                 // if retry method is not set
-//                                                 match e {
-//                                                     Error::NoReconnectTry => return Err(e),
-//                                                     _ => (),
-//                                                 }
-//                                             }
-//                                         }
-//                                     }
-//                                     continue;
-//                                 }
-//                             };
-
-//                             trace!("   %%%RECEIVED PACKET {:?}", packet);
-//                             match proxy_client.handle_packet(&packet){
-//                                 Ok(message) => {
-//                                     if let Some(m) = message {
-//                                         message_send.send(*m);
-//                                     }
-//                                 },
-//                                 Err(err) => panic!("error in handling packet. {:?}", err),
-//                             };
-//                         },
-
-//                         r:subscribe_recv => {
-//                             info!("@SUBSCRIBE REQUEST");
-//                             if let Ok(topics) = subscribe_recv.try_recv(){
-//                                 info!("request = {:?}", topics);
-//                                 proxy_client._subscribe(topics);
-//                             }
-//                         },
