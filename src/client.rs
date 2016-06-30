@@ -1,4 +1,6 @@
 use std::time::{Duration, Instant};
+use time;
+
 use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
 use error::{Error, Result};
@@ -17,8 +19,9 @@ use std::thread;
 use chan;
 use std::net::Shutdown;
 
-const MIO_TIMER_ID: u64 = 123;
-const MIO_CLIENT_STREAM_ID: Token = Token(1);
+const MIO_PING_TIMER: u64 = 123;
+const MIO_QUEUE_TIMER: u64 = 321;
+const MIO_CLIENT_STREAM: Token = Token(1);
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -30,6 +33,7 @@ pub struct ClientOptions {
     reconnect: ReconnectMethod,
     pub_q_len: u16,
     sub_q_len: u16,
+    queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
 }
 
 
@@ -44,6 +48,7 @@ impl ClientOptions {
             reconnect: ReconnectMethod::ForeverDisconnect,
             pub_q_len: 50,
             sub_q_len: 5,
+            queue_timeout: 60,
         }
     }
 
@@ -217,7 +222,7 @@ pub struct ProxyClient {
     incomming_pub: VecDeque<Box<Message>>, // QoS 1
     incomming_rec: VecDeque<Box<Message>>, // QoS 2
     incomming_rel: VecDeque<PacketIdentifier>, // QoS 2
-    outgoing_ack: VecDeque<Box<Message>>, // QoS 1
+    outgoing_ack: VecDeque<(i64, Box<Message>)>, // QoS 1
     outgoing_rec: VecDeque<Box<Message>>, // QoS 2
     outgoing_comp: VecDeque<PacketIdentifier>, // QoS 2
 }
@@ -228,7 +233,7 @@ impl Handler for ProxyClient {
 
     fn ready(&mut self, event_loop: &mut EventLoop<ProxyClient>, token: Token, _: EventSet) {
         match token {
-            MIO_CLIENT_STREAM_ID => {
+            MIO_CLIENT_STREAM => {
                 let packet = match VariablePacket::decode(&mut self.stream) {
                     Ok(pk) => pk,
                     Err(err) => {
@@ -243,7 +248,7 @@ impl Handler for ProxyClient {
                         }
 
                         let _ = event_loop.reregister(&self.stream,
-                                                      MIO_CLIENT_STREAM_ID,
+                                                      MIO_CLIENT_STREAM,
                                                       EventSet::readable(),
                                                       PollOpt::edge());
 
@@ -251,7 +256,7 @@ impl Handler for ProxyClient {
                         match self._connect() {
                             Ok(_) => {
                                 if let Some(keep_alive) = self.opts.keep_alive {
-                                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900)
+                                    event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900)
                                         .unwrap();
                                 }
                             }
@@ -281,29 +286,43 @@ impl Handler for ProxyClient {
         }
     }
 
-    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, _: Self::Timeout) {
+    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timer: Self::Timeout) {
+        match timer {
+            MIO_PING_TIMER => {
+                println!("client state --> {:?}, await_ping --> {}",
+                         self.state,
+                         self.await_ping);
 
-        println!("client state --> {:?}, await_ping --> {}",
-                 self.state,
-                 self.await_ping);
+                match self.state {
+                    MqttClientState::Connected => {
+                        if !self.await_ping {
+                            let _ = self.ping();
+                        } else {
+                            error!("awaiting for previous ping resp");
+                        }
 
-        match self.state {
-            MqttClientState::Connected => {
-                if !self.await_ping {
-                    let _ = self.ping();
-                } else {
-                    panic!("awaiting for previous ping resp");
-                }
+                        if let Some(keep_alive) = self.opts.keep_alive {
+                            event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
+                        }
+                    }
 
-                if let Some(keep_alive) = self.opts.keep_alive {
-                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
+                    MqttClientState::Disconnected |
+                    MqttClientState::Handshake => {
+                        debug!("I won't ping. Client is in disconnected/handshake state")
+                    }
+
                 }
             }
 
-            MqttClientState::Disconnected |
-            MqttClientState::Handshake => {
-                debug!("I won't ping. Client is in disconnected/handshake state")
+            MIO_QUEUE_TIMER => {
+                debug!("^^^ QUEUE RESEND");
+                self._try_republish();
+                event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
+                    .unwrap();
+
             }
+
+            _ => panic!("Invalid timer id"),
 
         }
     }
@@ -384,14 +403,15 @@ impl ProxyClient {
 
         thread::spawn(move || {
             event_loop.register(&self.stream,
-                          MIO_CLIENT_STREAM_ID,
+                          MIO_CLIENT_STREAM,
                           EventSet::readable(),
                           PollOpt::edge())
                 .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
-                event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
+                event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
             }
+            event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000).unwrap();
             event_loop.run(&mut self).unwrap();
         });
         Ok((publisher, subscriber))
@@ -441,15 +461,19 @@ impl ProxyClient {
 
                     /// Receives puback packet and verifies it with sub packet id
                     &VariablePacket::PubackPacket(ref puback) => {
-                        debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
-                               puback,
-                               self.outgoing_ack);
+                        // debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
+                        //        puback,
+                        //        self.outgoing_ack);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_ack
                             .iter()
-                            .position(|ref x| x.get_pkid() == Some(pkid)) {
-                            Some(i) => self.outgoing_ack.remove(i),
-                            None => panic!("Oopssss..unsolicited ack"),
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            Some(i) => {
+                                self.outgoing_ack.remove(i);
+                            }
+                            None => {
+                                error!("Oopssss..unsolicited ack");
+                            }
                         };
                         Ok(None)
                     }
@@ -515,6 +539,23 @@ impl ProxyClient {
         }
     }
 
+    fn _try_republish(&mut self) {
+        match self.state {
+            MqttClientState::Connected => {
+                let outgoing_ack = self.outgoing_ack.clone(); //TODO: Remove the clone
+                let timeout = self.opts.queue_timeout as i64;
+                for e in outgoing_ack.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
+                    let _ = self._publish(*e.1.clone());
+                }
+            }
+
+            MqttClientState::Disconnected |
+            MqttClientState::Handshake => {
+                error!("I won't republish. Client isn't in connected state")
+            }
+        }
+    }
+
     fn ping(&mut self) -> Result<()> {
         let ping = try!(self._generate_pingreq_packet());
         self.await_ping = true;
@@ -543,11 +584,14 @@ impl ProxyClient {
 
         let publish_packet = try!(self._generate_publish_packet(message.topic.clone(),
                                                                 qos.clone(),
+
                                                                 payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(_) => self.outgoing_ack.push_back(message.clone()),
+            QoSWithPacketIdentifier::Level1(_) => {
+                self.outgoing_ack.push_back((time::get_time().sec, message.clone()))
+            }
             QoSWithPacketIdentifier::Level2(_) => (),
         }
 

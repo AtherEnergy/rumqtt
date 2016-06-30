@@ -53,7 +53,7 @@ fn publish_qos0_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-// #[test]
+#[test]
 fn publish_qos1_test() {
     env_logger::init().unwrap();
 
@@ -76,7 +76,7 @@ fn publish_qos1_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-#[test]
+//#[test]
 fn subscribe_test() {
     env_logger::init().unwrap();
 
