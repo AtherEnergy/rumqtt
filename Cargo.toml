@@ -3,12 +3,17 @@ authors = ["kteza1 <k.teza1@gmail.com>"]
 name = "rumqtt"
 version = "0.1.0"
 
+[features]
+default = ["ssl"]
+ssl = ["openssl"]
+
 [dependencies]
 chan = "0.1"
 log = "0.3"
 mio = "0.5"
 rand = "0.3"
 time = "0.1"
+openssl = { version = "0.7", optional = true, features = ["tlsv1_1", "tlsv1_2"] }
 
 [dependencies.mqtt-protocol]
 git = "https://github.com/kteza1/mqtt-rs.git"

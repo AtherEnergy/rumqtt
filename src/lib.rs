@@ -7,8 +7,13 @@ extern crate mqtt;
 #[macro_use]
 extern crate chan;
 extern crate time;
+#[cfg(feature = "ssl")]
+extern crate openssl;
 
-pub mod error;
+
+mod error;
+#[cfg(feature = "ssl")]
+mod tls;
 mod message;
 pub mod client;
 

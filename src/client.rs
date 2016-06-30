@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 use time;
 
 use rand::{self, Rng};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
 use error::{Error, Result};
 use message::Message;
 use std::collections::VecDeque;
@@ -17,7 +17,7 @@ use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
 use chan;
-use std::net::Shutdown;
+use tls::{SslContext, SslStream, NetworkStream};
 
 const MIO_PING_TIMER: u64 = 123;
 const MIO_QUEUE_TIMER: u64 = 321;
@@ -34,6 +34,7 @@ pub struct ClientOptions {
     pub_q_len: u16,
     sub_q_len: u16,
     queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
+    ssl: Option<SslContext>,
 }
 
 
@@ -49,6 +50,7 @@ impl ClientOptions {
             pub_q_len: 50,
             sub_q_len: 5,
             queue_timeout: 60,
+            ssl: None,
         }
     }
 
@@ -95,8 +97,13 @@ impl ClientOptions {
         self
     }
 
-    pub fn set_reconnect(&mut self, reconnect: ReconnectMethod) -> &mut ClientOptions {
+    pub fn set_reconnect(&mut self, reconnect: ReconnectMethod) -> &mut Self {
         self.reconnect = reconnect;
+        self
+    }
+
+    pub fn set_tls(&mut self, ssl: SslContext) -> &mut Self {
+        self.ssl = Some(ssl);
         self
     }
 
@@ -106,7 +113,14 @@ impl ClientOptions {
         }
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
-        let stream = TcpStream::connect(&addr).unwrap();
+
+        let stream = try!(TcpStream::connect(&addr));
+        let stream: NetworkStream = match self.ssl {
+            Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
+            None => NetworkStream::Tcp(stream),
+        };
+
+        // let stream = TcpStream::connect(&addr).unwrap();
 
         let proxy = ProxyClient {
             addr: addr,
@@ -208,7 +222,7 @@ pub struct ProxyClient {
     addr: SocketAddr,
     state: MqttClientState,
     opts: ClientOptions,
-    stream: TcpStream,
+    stream: NetworkStream,
     last_flush: Instant,
     last_pkid: PacketIdentifier,
     await_ping: bool,
@@ -247,7 +261,7 @@ impl Handler for ProxyClient {
                             return;
                         }
 
-                        let _ = event_loop.reregister(&self.stream,
+                        let _ = event_loop.reregister(self.stream.get_ref().unwrap(),
                                                       MIO_CLIENT_STREAM,
                                                       EventSet::readable(),
                                                       PollOpt::edge());
@@ -402,7 +416,7 @@ impl ProxyClient {
         self.sub_recv = Some(sub_recv);
 
         thread::spawn(move || {
-            event_loop.register(&self.stream,
+            event_loop.register(self.stream.get_ref().unwrap(),
                           MIO_CLIENT_STREAM,
                           EventSet::readable(),
                           PollOpt::edge())
@@ -527,7 +541,10 @@ impl ProxyClient {
                 thread::sleep(dur);
                 match TcpStream::connect(&self.addr) {
                     Ok(stream) => {
-                        println!("stream = {:?}", stream);
+                        let stream: NetworkStream = match self.opts.ssl {
+                            Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
+                            None => NetworkStream::Tcp(stream),
+                        };
                         self.stream = stream;
                     }
                     Err(err) => {
