@@ -156,7 +156,7 @@ pub struct Publisher {
 }
 
 impl Publisher {
-    pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) {
+    pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
 
         let topic = TopicName::new(topic.to_string()).unwrap(); //TODO: Remove unwrap here
         let qos_pkid = match qos {
@@ -171,8 +171,10 @@ impl Publisher {
             payload: Arc::new(payload),
         };
 
+        //TODO: Check message sanity here and return error if not
+
         self.pub_send.send(message);
-        self.mio_notifier.send(MioNotification::Pub(qos));
+        try!(self.mio_notifier.send(MioNotification::Pub(qos)));
     }
 }
 
@@ -184,8 +186,9 @@ pub struct Subscriber {
 
 impl Subscriber {
     pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) {
+        // TODO: Check for topic sanity and return error if not
         self.subscribe_send.send(topics);
-        self.mio_notifier.send(MioNotification::Sub);
+        try!(self.mio_notifier.send(MioNotification::Sub));
     }
 
     pub fn receive(&self) -> Result<Message> {
@@ -239,7 +242,7 @@ impl Handler for ProxyClient {
                             return;
                         }
 
-                        event_loop.reregister(&self.stream,
+                        let _ = event_loop.reregister(&self.stream,
                                               MIO_CLIENT_STREAM_ID,
                                               EventSet::readable(),
                                               PollOpt::edge());
@@ -248,7 +251,7 @@ impl Handler for ProxyClient {
                         match self._connect() {
                             Ok(_) => {
                                 if let Some(keep_alive) = self.opts.keep_alive {
-                                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900);
+                                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
                                 }
                             }
                             Err(e) => debug!("Error Reconnecting --> {:?}", e),
@@ -277,7 +280,7 @@ impl Handler for ProxyClient {
         }
     }
 
-    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timeout: Self::Timeout) {
+    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, _: Self::Timeout) {
 
         println!("client state --> {:?}, await_ping --> {}",
                  self.state,
@@ -292,7 +295,7 @@ impl Handler for ProxyClient {
                 }
 
                 if let Some(keep_alive) = self.opts.keep_alive {
-                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900);
+                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
                 }
             }
 
@@ -304,7 +307,7 @@ impl Handler for ProxyClient {
         }
     }
 
-    fn notify(&mut self, event_loop: &mut EventLoop<Self>, notification_type: MioNotification) {
+    fn notify(&mut self, _: &mut EventLoop<Self>, notification_type: MioNotification) {
         match notification_type {
             MioNotification::Pub(qos) => {
                 match qos {
@@ -315,7 +318,7 @@ impl Handler for ProxyClient {
                                 None => panic!("No publish recv channel"),
                             }
                         };
-                        self._publish(message);
+                        let _ = self._publish(message);
                     }
                     QualityOfService::Level1 => {
                         if self.outgoing_ack.len() < 5 {
@@ -329,7 +332,7 @@ impl Handler for ProxyClient {
                             // Add next packet id to message and publish
                             let PacketIdentifier(pkid) = self._next_pkid();
                             message.set_pkid(pkid);
-                            self._publish(message);
+                            let _ = self._publish(message);
                         }
                     }
 
@@ -344,7 +347,7 @@ impl Handler for ProxyClient {
 
                 if let Some(topics) = topics {
                     info!("request = {:?}", topics);
-                    self._subscribe(topics);
+                    let _ = self._subscribe(topics);
                 }
             }
         }
@@ -386,7 +389,7 @@ impl ProxyClient {
                       .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
-                event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900);
+                event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
             }
             event_loop.run(&mut self).unwrap();
         });

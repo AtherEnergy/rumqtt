@@ -2,6 +2,7 @@ use std::result;
 use std::io;
 use std::sync::mpsc;
 use mqtt::topic_name::TopicNameError;
+use mio;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -31,6 +32,7 @@ pub enum Error {
     Mpsc(mpsc::RecvError),
     NoReconnectTry,
     MqttPacketError,
+    MioError(mio::NotifyError),
 }
 
 impl From<io::Error> for Error {
@@ -48,5 +50,11 @@ impl From<mpsc::RecvError> for Error {
 impl From<TopicNameError> for Error {
     fn from(_: TopicNameError) -> Error {
         Error::TopicNameError
+    }
+}
+
+impl From<mio::NotifyError> for Error {
+    fn from(e: mio::NotifyError) -> Error {
+        Error::MioError(e)
     }
 }
