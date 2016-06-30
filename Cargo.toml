@@ -4,13 +4,11 @@ name = "rumqtt"
 version = "0.1.0"
 
 [dependencies]
-chan = "*"
-log = "*"
-mio = "*"
-mioco = "*"
-net2 = "*"
-rand = "*"
-time = "*"
+chan = "0.1"
+log = "0.3"
+mio = "0.5"
+rand = "0.3"
+time = "0.1"
 
 [dependencies.mqtt-protocol]
 git = "https://github.com/kteza1/mqtt-rs.git"

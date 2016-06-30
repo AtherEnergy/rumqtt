@@ -531,7 +531,6 @@ impl ProxyClient {
 
         let qos = message.qos.clone();
         let message = message.transform(Some(qos.clone()));
-        let topic = message.topic.clone();
         let ref payload = *message.payload;
 
         let publish_packet = try!(self._generate_publish_packet(message.topic.clone(),
@@ -540,8 +539,8 @@ impl ProxyClient {
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(pkid) => self.outgoing_ack.push_back(message.clone()),
-            QoSWithPacketIdentifier::Level2(pkid) => (),
+            QoSWithPacketIdentifier::Level1(_) => self.outgoing_ack.push_back(message.clone()),
+            QoSWithPacketIdentifier::Level2(_) => (),
         }
 
         debug!("       Publish {:?} {:?} > {} bytes",
