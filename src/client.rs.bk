@@ -17,9 +17,6 @@ use std::thread;
 use chan;
 use std::net::Shutdown;
 
-const MIO_TIMER_ID: u64 = 123;
-const MIO_CLIENT_STREAM_ID: Token = Token(1);
-
 #[derive(Clone)]
 pub struct ClientOptions {
     keep_alive: Option<u16>,
@@ -225,7 +222,7 @@ impl Handler for ProxyClient {
 
     fn ready(&mut self, event_loop: &mut EventLoop<ProxyClient>, token: Token, _: EventSet) {
         match token {
-            MIO_CLIENT_STREAM_ID => {
+            Token(1) => {
                 let packet = match VariablePacket::decode(&mut self.stream) {
                     Ok(pk) => pk,
                     Err(err) => {
@@ -240,7 +237,7 @@ impl Handler for ProxyClient {
                         }
 
                         event_loop.reregister(&self.stream,
-                                              MIO_CLIENT_STREAM_ID,
+                                              Token(1),
                                               EventSet::readable(),
                                               PollOpt::edge());
 
@@ -248,7 +245,7 @@ impl Handler for ProxyClient {
                         match self._connect() {
                             Ok(_) => {
                                 if let Some(keep_alive) = self.opts.keep_alive {
-                                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900);
+                                    event_loop.timeout_ms(123, keep_alive as u64 * 900);
                                 }
                             }
                             Err(e) => debug!("Error Reconnecting --> {:?}", e),
@@ -292,7 +289,7 @@ impl Handler for ProxyClient {
                 }
 
                 if let Some(keep_alive) = self.opts.keep_alive {
-                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900);
+                    event_loop.timeout_ms(123, keep_alive as u64 * 900);
                 }
             }
 
@@ -367,8 +364,7 @@ impl ProxyClient {
         };
         self.pub_recv = Some(pub_recv);
 
-        let (sub_send, sub_recv) =
-            chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
         let (msg_send, msg_recv) = chan::sync::<Message>(0);
         let subscriber = Subscriber {
             subscribe_send: sub_send,
@@ -380,13 +376,13 @@ impl ProxyClient {
 
         thread::spawn(move || {
             event_loop.register(&self.stream,
-                                MIO_CLIENT_STREAM_ID,
+                                Token(1),
                                 EventSet::readable(),
                                 PollOpt::edge())
                       .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
-                event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900);
+                event_loop.timeout_ms(123, keep_alive as u64 * 900);
             }
             event_loop.run(&mut self).unwrap();
         });
@@ -404,7 +400,7 @@ impl ProxyClient {
 
                             match self._try_reconnect() {
                                 Ok(_) => Ok(None), //sent connect packet
-                                Err(_) => Err(Error::NoReconnectTry), //no conn packet sent
+                                Err(e) => Err(Error::NoReconnectTry), //no conn packet sent
                             }
                         } else {
                             self.state = MqttClientState::Connected;
