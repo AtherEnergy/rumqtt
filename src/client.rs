@@ -171,10 +171,11 @@ impl Publisher {
             payload: Arc::new(payload),
         };
 
-        //TODO: Check message sanity here and return error if not
+        // TODO: Check message sanity here and return error if not
 
         self.pub_send.send(message);
         try!(self.mio_notifier.send(MioNotification::Pub(qos)));
+        Ok(())
     }
 }
 
@@ -185,10 +186,11 @@ pub struct Subscriber {
 }
 
 impl Subscriber {
-    pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) {
+    pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
         // TODO: Check for topic sanity and return error if not
         self.subscribe_send.send(topics);
         try!(self.mio_notifier.send(MioNotification::Sub));
+        Ok(())
     }
 
     pub fn receive(&self) -> Result<Message> {
@@ -243,15 +245,16 @@ impl Handler for ProxyClient {
                         }
 
                         let _ = event_loop.reregister(&self.stream,
-                                              MIO_CLIENT_STREAM_ID,
-                                              EventSet::readable(),
-                                              PollOpt::edge());
+                                                      MIO_CLIENT_STREAM_ID,
+                                                      EventSet::readable(),
+                                                      PollOpt::edge());
 
                         // Mqtt connect packet send
                         match self._connect() {
                             Ok(_) => {
                                 if let Some(keep_alive) = self.opts.keep_alive {
-                                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
+                                    event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900)
+                                        .unwrap();
                                 }
                             }
                             Err(e) => debug!("Error Reconnecting --> {:?}", e),
@@ -383,10 +386,10 @@ impl ProxyClient {
 
         thread::spawn(move || {
             event_loop.register(&self.stream,
-                                MIO_CLIENT_STREAM_ID,
-                                EventSet::readable(),
-                                PollOpt::edge())
-                      .unwrap();
+                          MIO_CLIENT_STREAM_ID,
+                          EventSet::readable(),
+                          PollOpt::edge())
+                .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
                 event_loop.timeout_ms(MIO_TIMER_ID, keep_alive as u64 * 900).unwrap();
@@ -445,8 +448,8 @@ impl ProxyClient {
                                self.outgoing_ack);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_ack
-                                  .iter()
-                                  .position(|ref x| x.get_pkid() == Some(pkid)) {
+                            .iter()
+                            .position(|ref x| x.get_pkid() == Some(pkid)) {
                             Some(i) => self.outgoing_ack.remove(i),
                             None => panic!("Oopssss..unsolicited ack"),
                         };

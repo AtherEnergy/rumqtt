@@ -32,7 +32,7 @@ pub enum Error {
     Mpsc(mpsc::RecvError),
     NoReconnectTry,
     MqttPacketError,
-    MioError(mio::NotifyError),
+    MioNotifyError,
 }
 
 impl From<io::Error> for Error {
@@ -53,8 +53,8 @@ impl From<TopicNameError> for Error {
     }
 }
 
-impl From<mio::NotifyError> for Error {
-    fn from(e: mio::NotifyError) -> Error {
-        Error::MioError(e)
+impl<T> From<mio::NotifyError<T>> for Error {
+    fn from(_: mio::NotifyError<T>) -> Error {
+        Error::MioNotifyError
     }
 }
