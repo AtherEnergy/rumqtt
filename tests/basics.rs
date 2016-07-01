@@ -3,12 +3,37 @@ extern crate mqtt;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
+#[cfg(feature = "ssl")]
+extern crate openssl;
 
-use rumqtt::{ClientOptions, ReconnectMethod};
+use rumqtt::{ClientOptions, ReconnectMethod, SslContext};
 use mqtt::{TopicFilter, QualityOfService};
 
 use std::thread;
 use std::time::Duration;
+use openssl::ssl;
+
+#[test]
+fn tls_test() {
+    let ssl = SslContext::with_cert_key_and_ca("/Users/ravitejareddy/scooter.crt", 
+                                        "/Users/ravitejareddy/scooter.key", 
+                                        "/Users/ravitejareddy/ca.crt").unwrap();
+
+    env_logger::init().unwrap();
+
+    let mut client_options = ClientOptions::new();
+    client_options.set_keep_alive(5);
+    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
+    client_options.set_tls(ssl);
+    let proxy_client = client_options.connect("stage-mqtt-broker.atherengineering.in:8883")
+                                        .expect("CONNECT ERROR");
+    match proxy_client.await() {
+        Ok(_) => (),
+        Err(e) => panic!("Await Error --> {:?}", e),
+    };
+
+    thread::sleep(Duration::new(120, 0));
+}
 
 //#[test]
 fn pingreq_reconnect_test() {
@@ -53,7 +78,7 @@ fn publish_qos0_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-#[test]
+//#[test]
 fn publish_qos1_test() {
     env_logger::init().unwrap();
 
