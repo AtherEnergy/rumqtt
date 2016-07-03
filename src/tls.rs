@@ -13,7 +13,7 @@ pub type SslError = ssl::error::SslError;
 
 #[derive(Debug, Clone)]
 pub struct SslContext {
-    inner: Arc<ssl::SslContext>,
+    pub inner: Arc<ssl::SslContext>,
 }
 
 impl Default for SslContext {
@@ -35,6 +35,16 @@ impl SslContext {
         try!(ctx.set_cipher_list("DEFAULT"));
         try!(ctx.set_certificate_file(cert.as_ref(), X509FileType::PEM));
         try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
+        ctx.set_verify(SSL_VERIFY_NONE, None);
+        Ok(SslContext { inner: Arc::new(ctx) })
+    }
+
+    pub fn with_ca<CA>(ca: CA) -> Result<SslContext, SslError>
+        where CA: AsRef<Path>
+    {
+        let mut ctx = try!(ssl::SslContext::new(SslMethod::Sslv23));
+        try!(ctx.set_cipher_list("DEFAULT"));
+        try!(ctx.set_CA_file(ca.as_ref()));
         ctx.set_verify(SSL_VERIFY_NONE, None);
         Ok(SslContext { inner: Arc::new(ctx) })
     }
