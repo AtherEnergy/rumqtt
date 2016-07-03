@@ -24,6 +24,3 @@ env_logger = "0.3"
 [features]
 default = ["ssl"]
 ssl = ["openssl"]
-
-[dependencies.rustls]
-git = "https://github.com/ctz/rustls"
