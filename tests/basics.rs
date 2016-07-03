@@ -31,11 +31,11 @@ fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
     unreachable!("Cannot lookup address");
 }
 
-#[test]
+//#[test]
 fn tls_test() {
     env_logger::init().unwrap();
 
-    let ca = "/Users/ravitejareddy/Downloads/ca.crt";
+    let ca = "/home/ravitejareddy/Desktop/rumqtt/tests/ca.crt";
     let ssl = SslContext::with_ca(ca).unwrap();
 
 
@@ -46,6 +46,31 @@ fn tls_test() {
 
     thread::sleep(Duration::new(120, 0));
 }
+
+#[test]
+fn tls_connect() {
+    // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
+    env_logger::init().unwrap();
+
+    let mut client_options = ClientOptions::new();
+    client_options.set_keep_alive(5);
+    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
+    let ca = "/home/ravitejareddy/Desktop/rumqtt/tests/ca.crt";
+    let cert = "/home/ravitejareddy/Desktop/rumqtt/tests/scooter.crt";
+    let key = "/home/ravitejareddy/Desktop/rumqtt/tests/scooter.key";
+    let ssl = SslContext::with_ca(ca).expect("#Ssl context error");
+    //let ssl = SslContext::with_cert_key_and_ca(cert, key, ca).expect("#Ssl context error");
+
+    client_options.set_tls(ssl);
+
+    let proxy_client = client_options.connect("localhost:8883").expect("CONNECT ERROR");
+    match proxy_client.await() {
+        Ok(_) => (),
+        Err(e) => panic!("Await Error --> {:?}", e),
+    };
+
+    thread::sleep(Duration::new(120, 0));
+}   
 
 //#[test]
 fn pingreq_reconnect_test() {

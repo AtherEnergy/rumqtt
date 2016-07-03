@@ -31,7 +31,7 @@ impl SslContext {
         where C: AsRef<Path>,
               K: AsRef<Path>
     {
-        let mut ctx = try!(ssl::SslContext::new(SslMethod::Sslv23));
+        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
         try!(ctx.set_cipher_list("DEFAULT"));
         try!(ctx.set_certificate_file(cert.as_ref(), X509FileType::PEM));
         try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
@@ -42,7 +42,7 @@ impl SslContext {
     pub fn with_ca<CA>(ca: CA) -> Result<SslContext, SslError>
         where CA: AsRef<Path>
     {
-        let mut ctx = try!(ssl::SslContext::new(SslMethod::Sslv23));
+        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
         try!(ctx.set_cipher_list("DEFAULT"));
         try!(ctx.set_CA_file(ca.as_ref()));
         ctx.set_verify(SSL_VERIFY_NONE, None);

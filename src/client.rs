@@ -107,12 +107,27 @@ impl ClientOptions {
         self
     }
 
+
+    fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
+    	use std::net::ToSocketAddrs;
+
+    	let addrs = (host, port).to_socket_addrs().unwrap();
+    	for addr in addrs {
+            if let SocketAddr::V4(_) = addr {
+                return addr.clone();
+            }
+        }
+        unreachable!("Cannot lookup address");
+    }
+    
     pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<ProxyClient> {
         if self.client_id == None {
             self.generate_client_id();
         }
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
+
+        let addr = Self::lookup_ipv4("localhost", 8883);
 
         let stream = try!(TcpStream::connect(&addr));
         let stream: NetworkStream = match self.ssl {
@@ -391,6 +406,7 @@ impl Handler for ProxyClient {
 
 impl ProxyClient {
     pub fn await(mut self) -> Result<(Publisher, Subscriber)> {
+	thread::sleep(Duration::new(2,0));
         try!(self._connect());
 
 
