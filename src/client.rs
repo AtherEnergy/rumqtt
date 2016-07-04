@@ -109,17 +109,17 @@ impl ClientOptions {
 
 
     fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
-    	use std::net::ToSocketAddrs;
+        use std::net::ToSocketAddrs;
 
-    	let addrs = (host, port).to_socket_addrs().unwrap();
-    	for addr in addrs {
+        let addrs = (host, port).to_socket_addrs().unwrap();
+        for addr in addrs {
             if let SocketAddr::V4(_) = addr {
                 return addr.clone();
             }
         }
         unreachable!("Cannot lookup address");
     }
-    
+
     pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<ProxyClient> {
         if self.client_id == None {
             self.generate_client_id();
@@ -127,7 +127,7 @@ impl ClientOptions {
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
 
-        let addr = Self::lookup_ipv4("localhost", 8883);
+        let addr = Self::lookup_ipv4("localhost", 1883);
 
         let stream = try!(TcpStream::connect(&addr));
         let stream: NetworkStream = match self.ssl {
@@ -260,59 +260,122 @@ impl Handler for ProxyClient {
     type Timeout = u64;
     type Message = MioNotification;
 
-    fn ready(&mut self, event_loop: &mut EventLoop<ProxyClient>, token: Token, _: EventSet) {
-        match token {
-            MIO_CLIENT_STREAM => {
-                let packet = match VariablePacket::decode(&mut self.stream) {
-                    Ok(pk) => pk,
-                    Err(err) => {
-                        // maybe size=0 while reading indicating socket
-                        // close at broker end
-                        error!("Error in receiving packet {:?}", err);
-                        self._unbind();
-
-                        if let Err(e) = self._try_reconnect() {
-                            error!("No Reconnect try --> {:?}", e);
-                            return;
+    fn ready(&mut self, event_loop: &mut EventLoop<ProxyClient>, token: Token, events: EventSet) {
+        if events.is_readable() {
+            match token {
+                MIO_CLIENT_STREAM => {
+                    let packet = match VariablePacket::decode(&mut self.stream) {
+                        // @ Decoded packet successfully.
+                        // @ Retrigger readable in evenloop
+                        Ok(pk) => {
+                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                                            MIO_CLIENT_STREAM,
+                                            EventSet::readable(),
+                                            PollOpt::edge() | PollOpt::oneshot())
+                                .unwrap();
+                            pk
                         }
+                        // @ Try to make a new Tcp connection.
+                        // @ Set state machine to Disconnected.
+                        // @ Make eventloop writable to check connection status
+                        Err(err) => {
+                            // maybe size=0 while reading indicating socket
+                            // close at broker end
+                            error!("Error in receiving packet {:?}", err);
+                            self._unbind();
 
-                        let _ = event_loop.reregister(self.stream.get_ref().unwrap(),
-                                                      MIO_CLIENT_STREAM,
-                                                      EventSet::readable(),
-                                                      PollOpt::edge());
+                            if let Err(e) = self._try_reconnect() {
+                                error!("No Reconnect try --> {:?}", e);
+                                return;
+                            }
+                            self.state = MqttClientState::Disconnected;
+                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                                            MIO_CLIENT_STREAM,
+                                            EventSet::writable(),
+                                            PollOpt::edge() | PollOpt::oneshot())
+                                .unwrap();
 
-                        // Mqtt connect packet send
-                        match self._connect() {
-                            Ok(_) => {
-                                if let Some(keep_alive) = self.opts.keep_alive {
-                                    event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900)
+                            return;
+
+                        }
+                    };
+
+                    trace!("   %%%RECEIVED PACKET {:?}", packet);
+                    match self.handle_packet(&packet, event_loop) {
+                        Ok(message) => {
+                            if let Some(m) = message {
+                                match self.msg_send {
+                                    Some(ref msg_send) => msg_send.send(*m),
+                                    None => panic!("Expected a message send channel"),
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            panic!("error in handling packet. {:?}", err);
+                        }
+                    };
+
+
+
+                }
+                _ => panic!("unexpected token"),
+            }
+        }
+
+
+        if events.is_writable() {
+            match token {
+                MQTT_CLIENT_STREAM => {
+                    match self.state {
+                        MqttClientState::Disconnected => {
+                            match self._connect() {
+                                // @ If writing connect packet is successful means TCP
+                                // @ connection is successful. Change the state machine
+                                // @ to handshake and event loop to readable to read
+                                // @ CONACK packet
+                                Ok(_) => {
+                                    if let Some(keep_alive) = self.opts.keep_alive {
+                                        event_loop.timeout_ms(MIO_PING_TIMER,
+                                        keep_alive as u64 * 900)
+                                        .unwrap();
+                                    }
+                                    self.state = MqttClientState::Handshake;
+                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                                    MIO_CLIENT_STREAM,
+                                                    EventSet::readable(),
+                                                    PollOpt::edge() | PollOpt::oneshot())
+                                        .unwrap();
+                                }
+                                // @ Writing connect packet failed. Tcp connection might
+                                // @ have failed. Try to establish a new Tcp connection
+                                // @ and set eventloop to writable to write connect packets
+                                // @ again
+                                Err(e) => {
+                                    info!("Error Connecting --> {:?}", e);
+                                    if let Err(e) = self._try_reconnect() {
+                                        error!("No Reconnect try --> {:?}", e);
+                                        return;
+                                    }
+
+                                    self.state = MqttClientState::Disconnected;
+                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                                    MIO_CLIENT_STREAM,
+                                                    EventSet::writable(),
+                                                    PollOpt::edge() | PollOpt::oneshot())
                                         .unwrap();
                                 }
                             }
-                            Err(e) => debug!("Error Reconnecting --> {:?}", e),
                         }
-                        return;
-
+                        MqttClientState::Handshake => panic!("invalid writable state"),
+                        MqttClientState::Connected => {}
                     }
-                };
 
-                trace!("   %%%RECEIVED PACKET {:?}", packet);
-                match self.handle_packet(&packet) {
-                    Ok(message) => {
-                        if let Some(m) = message {
-                            match self.msg_send {
-                                Some(ref msg_send) => msg_send.send(*m),
-                                None => panic!("Expected a message send channel"),
-                            }
-                        }
-                    }
-                    Err(err) => panic!("error in handling packet. {:?}", err),
-                };
-
+                }
 
             }
-            _ => panic!("unexpected token"),
+
         }
+
     }
 
     fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timer: Self::Timeout) {
@@ -377,7 +440,6 @@ impl Handler for ProxyClient {
                                     None => panic!("No publish recv channel"),
                                 }
                             };
-
                             // Add next packet id to message and publish
                             let PacketIdentifier(pkid) = self._next_pkid();
                             message.set_pkid(pkid);
@@ -406,10 +468,6 @@ impl Handler for ProxyClient {
 
 impl ProxyClient {
     pub fn await(mut self) -> Result<(Publisher, Subscriber)> {
-	thread::sleep(Duration::new(2,0));
-        try!(self._connect());
-
-
         let mut event_loop = EventLoop::new().unwrap();
         let mio_notify = event_loop.channel();
 
@@ -432,10 +490,13 @@ impl ProxyClient {
         self.sub_recv = Some(sub_recv);
 
         thread::spawn(move || {
+            // State machine: Disconnected. Check if 'writable' success
+            // to know connection success
+            self.state = MqttClientState::Disconnected;
             event_loop.register(self.stream.get_ref().unwrap(),
                           MIO_CLIENT_STREAM,
-                          EventSet::readable(),
-                          PollOpt::edge())
+                          EventSet::writable(),
+                          PollOpt::edge() | PollOpt::oneshot())
                 .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
@@ -447,21 +508,37 @@ impl ProxyClient {
         Ok((publisher, subscriber))
     }
 
-    fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
+    fn handle_packet(&mut self,
+                     packet: &VariablePacket,
+                     event_loop: &mut EventLoop<Self>)
+                     -> Result<Option<Box<Message>>> {
         match self.state {
             MqttClientState::Handshake => {
                 match packet {
                     &VariablePacket::ConnackPacket(ref connack) => {
                         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
-
                             error!("Failed to connect, err {:?}", connack.connect_return_code());
-
+                            // @  Try to make a new Tcp connection.
+                            // @  Set state machine to Disconnected.
+                            // @  Make eventloop writable to check connection status
                             match self._try_reconnect() {
-                                Ok(_) => Ok(None), //sent connect packet
-                                Err(_) => Err(Error::NoReconnectTry), //no conn packet sent
-                            }
+                                Ok(_) => (),
+                                Err(_) => return Err(Error::NoReconnectTry), //no conn packet sent
+                            };
+
+                            self.state = MqttClientState::Disconnected;
+                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                                            MIO_CLIENT_STREAM,
+                                            EventSet::writable(),
+                                            PollOpt::edge() | PollOpt::oneshot())
+                                .unwrap();
+                            Ok(None)
                         } else {
                             self.state = MqttClientState::Connected;
+                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                                                  MIO_CLIENT_STREAM,
+                                                  EventSet::readable(),
+                                                  PollOpt::edge() | PollOpt::oneshot());
                             Ok(None)
                         }
                     }
@@ -483,13 +560,13 @@ impl ProxyClient {
                         Ok(None)
                     }
 
-                    /// Receives disconnect packet
+                    // @ Receives disconnect packet
                     &VariablePacket::DisconnectPacket(..) => {
                         // TODO
                         Ok(None)
                     }
 
-                    /// Receives puback packet and verifies it with sub packet id
+                    // @ Receives puback packet and verifies it with sub packet id
                     &VariablePacket::PubackPacket(ref puback) => {
                         // debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
                         //        puback,
@@ -508,7 +585,7 @@ impl ProxyClient {
                         Ok(None)
                     }
 
-                    /// Receives publish packet
+                    // @ Receives publish packet
                     &VariablePacket::PublishPacket(ref publ) => {
                         let message = try!(Message::from_pub(publ));
                         self._handle_message(message)
@@ -545,7 +622,6 @@ impl ProxyClient {
     fn _connect(&mut self) -> Result<()> {
         let connect = try!(self._generate_connect_packet());
         try!(self._write_packet(connect));
-        self.state = MqttClientState::Handshake;
         self._flush()
     }
 
