@@ -55,9 +55,9 @@ fn tls_connect() {
     let mut client_options = ClientOptions::new();
     client_options.set_keep_alive(5);
     client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let ca = "/home/ravitejareddy/Desktop/rumqtt/tests/ca.crt";
-    let cert = "/home/ravitejareddy/Desktop/rumqtt/tests/scooter.crt";
-    let key = "/home/ravitejareddy/Desktop/rumqtt/tests/scooter.key";
+    let ca = "./tests/ca.crt";
+    let cert = "./tests/scooter.crt";
+    let key = "./tests/scooter.key";
     let ssl = SslContext::with_ca(ca).expect("#Ssl context error");
     //let ssl = SslContext::with_cert_key_and_ca(cert, key, ca).expect("#Ssl context error");
 
