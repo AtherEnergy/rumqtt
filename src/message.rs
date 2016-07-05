@@ -62,8 +62,9 @@ impl Message {
     pub fn to_pub(&self, qos: Option<QoSWithPacketIdentifier>, dup: bool) -> Box<PublishPacket> {
         let qos = qos.unwrap_or(self.qos.clone());
 
-        let mut publish_packet =
-            PublishPacket::new(self.topic.clone(), qos, (&*self.payload).clone());
+        let mut publish_packet = PublishPacket::new(self.topic.clone(),
+                                                    qos,
+                                                    (&*self.payload).clone());
         publish_packet.set_dup(dup);
         publish_packet.set_retain(self.retain);
 

@@ -126,13 +126,10 @@ impl ClientOptions {
         }
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
-        let addr = Self::lookup_ipv4("localhost", 1883);
+        let addr = Self::lookup_ipv4("localhost", 8883);
 
         let stream = try!(TcpStream::connect(&addr));
-        let stream: NetworkStream = match self.ssl {
-            Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
-            None => NetworkStream::Tcp(stream),
-        };
+        let stream = NetworkStream::Tcp(stream);
 
         // let stream = TcpStream::connect(&addr).unwrap();
 
@@ -167,7 +164,7 @@ impl ClientOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttClientState {
     Handshake,
-    Connected,
+    Connected, // 0: No state, 1: ping, 2: subscribe, 3: publish, 4: retry
     Disconnected,
 }
 
@@ -268,10 +265,10 @@ impl Handler for ProxyClient {
                         // @ Retrigger readable in evenloop
                         Ok(pk) => {
                             event_loop.reregister(self.stream.get_ref().unwrap(),
-                                            MIO_CLIENT_STREAM,
-                                            EventSet::readable(),
-                                            PollOpt::edge() | PollOpt::oneshot())
-                                .unwrap();
+                                                  MIO_CLIENT_STREAM,
+                                                  EventSet::readable(),
+                                                  PollOpt::edge() | PollOpt::oneshot())
+                                      .unwrap();
                             pk
                         }
                         // @ Try to make a new Tcp connection.
@@ -289,10 +286,10 @@ impl Handler for ProxyClient {
                             }
                             self.state = MqttClientState::Disconnected;
                             event_loop.register(self.stream.get_ref().unwrap(),
-                                            MIO_CLIENT_STREAM,
-                                            EventSet::writable(),
-                                            PollOpt::edge() | PollOpt::oneshot())
-                                .unwrap();
+                                                MIO_CLIENT_STREAM,
+                                                EventSet::writable(),
+                                                PollOpt::edge() | PollOpt::oneshot())
+                                      .unwrap();
 
                             return;
 
@@ -327,6 +324,50 @@ impl Handler for ProxyClient {
                 MQTT_CLIENT_STREAM => {
                     match self.state {
                         MqttClientState::Disconnected => {
+                            // Attempt tls if option is enabled
+                            let ssl = self.opts.ssl.clone();
+                            match ssl {
+                                Some(ssl) => {
+                                    println!("trying ssl connect");
+                                    match ssl.connect(self.stream
+                                                          .get_ref()
+                                                          .expect("no tcp stream")
+                                                          .try_clone()
+                                                          .expect("couldn't clone the stream")) {
+                                        Ok(stream) => {
+                                            self.stream = NetworkStream::Ssl(stream);
+                                            self.state = MqttClientState::Disconnected;
+                                        }
+                                        Err(e) => {
+                                            info!("1. Error Connecting --> {:?}", e);
+                                            if let Err(e) = self._try_reconnect() {
+                                                error!("No Reconnect try --> {:?}", e);
+                                                return;
+                                            }
+
+                                            self.state = MqttClientState::Disconnected;
+                                            event_loop.register(self.stream
+                                                                    .get_ref()
+                                                                    .unwrap(),
+                                                                MIO_CLIENT_STREAM,
+                                                                EventSet::writable(),
+                                                                PollOpt::edge() |
+                                                                PollOpt::oneshot())
+                                                      .unwrap();
+                                            return;
+                                        }
+                                    }
+                                }
+                                None => {
+                                    self.stream = NetworkStream::Tcp(self.stream
+                                                                         .get_ref()
+                                                                         .expect("no tcp stream")
+                                                                         .try_clone()
+                                                                         .expect("couldn't clone \
+                                                                                  the stream"));
+                                }
+                            };
+
                             match self._connect() {
                                 // @ If writing connect packet is successful means TCP
                                 // @ connection is successful. Change the state machine
@@ -335,22 +376,22 @@ impl Handler for ProxyClient {
                                 Ok(_) => {
                                     if let Some(keep_alive) = self.opts.keep_alive {
                                         event_loop.timeout_ms(MIO_PING_TIMER,
-                                        keep_alive as u64 * 900)
-                                        .unwrap();
+                                                              keep_alive as u64 * 900)
+                                                  .unwrap();
                                     }
                                     self.state = MqttClientState::Handshake;
                                     event_loop.reregister(self.stream.get_ref().unwrap(),
-                                                    MIO_CLIENT_STREAM,
-                                                    EventSet::readable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
-                                        .unwrap();
+                                                          MIO_CLIENT_STREAM,
+                                                          EventSet::readable(),
+                                                          PollOpt::edge() | PollOpt::oneshot())
+                                              .unwrap();
                                 }
                                 // @ Writing connect packet failed. Tcp connection might
                                 // @ have failed. Try to establish a new Tcp connection
                                 // @ and set eventloop to writable to write connect packets
                                 // @ again
                                 Err(e) => {
-                                    info!("Error Connecting --> {:?}", e);
+                                    info!("2. Error Connecting --> {:?}", e);
                                     if let Err(e) = self._try_reconnect() {
                                         error!("No Reconnect try --> {:?}", e);
                                         return;
@@ -358,10 +399,10 @@ impl Handler for ProxyClient {
 
                                     self.state = MqttClientState::Disconnected;
                                     event_loop.register(self.stream.get_ref().unwrap(),
-                                                    MIO_CLIENT_STREAM,
-                                                    EventSet::writable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
-                                        .unwrap();
+                                                        MIO_CLIENT_STREAM,
+                                                        EventSet::writable(),
+                                                        PollOpt::edge() | PollOpt::oneshot())
+                                              .unwrap();
                                 }
                             }
                         }
@@ -409,7 +450,7 @@ impl Handler for ProxyClient {
                 debug!("^^^ QUEUE RESEND");
                 self._try_republish();
                 event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
-                    .unwrap();
+                          .unwrap();
 
             }
 
@@ -493,10 +534,10 @@ impl ProxyClient {
             // to know connection success
             self.state = MqttClientState::Disconnected;
             event_loop.register(self.stream.get_ref().unwrap(),
-                          MIO_CLIENT_STREAM,
-                          EventSet::writable(),
-                          PollOpt::edge() | PollOpt::oneshot())
-                .unwrap();
+                                MIO_CLIENT_STREAM,
+                                EventSet::writable(),
+                                PollOpt::edge() | PollOpt::oneshot())
+                      .unwrap();
 
             if let Some(keep_alive) = self.opts.keep_alive {
                 event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
@@ -524,15 +565,15 @@ impl ProxyClient {
                                 Ok(_) => (),
                                 Err(_) => return Err(Error::NoReconnectTry), //no conn packet sent
                             };
-                            //REPORT: After every new tcp connection, I had to do
-                            //'mio register' instead of 'reregister' on linux. But
-                            //reregister is working fine on mac osx here.
+                            // REPORT: After every new tcp connection, I had to do
+                            // 'mio register' instead of 'reregister' on linux. But
+                            // reregister is working fine on mac osx here.
                             self.state = MqttClientState::Disconnected;
                             event_loop.register(self.stream.get_ref().unwrap(),
-                                            MIO_CLIENT_STREAM,
-                                            EventSet::writable(),
-                                            PollOpt::edge() | PollOpt::oneshot())
-                                .unwrap();
+                                                MIO_CLIENT_STREAM,
+                                                EventSet::writable(),
+                                                PollOpt::edge() | PollOpt::oneshot())
+                                      .unwrap();
                             Ok(None)
                         } else {
                             self.state = MqttClientState::Connected;
@@ -574,8 +615,8 @@ impl ProxyClient {
                         //        self.outgoing_ack);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_ack
-                            .iter()
-                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                                  .iter()
+                                  .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 self.outgoing_ack.remove(i);
                             }
@@ -634,11 +675,7 @@ impl ProxyClient {
                 thread::sleep(dur);
                 match TcpStream::connect(&self.addr) {
                     Ok(stream) => {
-                        let stream: NetworkStream = match self.opts.ssl {
-                            Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
-                            None => NetworkStream::Tcp(stream),
-                        };
-                        self.stream = stream;
+                        self.stream = NetworkStream::Tcp(stream);
                     }
                     Err(err) => {
                         panic!("Error creating new stream {:?}", err);
