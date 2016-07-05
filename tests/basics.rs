@@ -5,11 +5,11 @@ extern crate log;
 extern crate env_logger;
 #[cfg(feature = "ssl")]
 extern crate openssl;
-extern crate mio;
+extern crate mioco;
 
 use rumqtt::{ClientOptions, ReconnectMethod, SslContext};
 use mqtt::{TopicFilter, QualityOfService};
-use mio::tcp::TcpStream;
+use mioco::tcp::TcpStream;
 use std::thread;
 use std::time::Duration;
 use std::net::ToSocketAddrs;

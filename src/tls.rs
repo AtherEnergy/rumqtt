@@ -74,6 +74,7 @@ impl SslContext {
 pub enum NetworkStream {
     Tcp(TcpStream),
     Ssl(SslStream),
+    None,
 }
 
 impl NetworkStream {
