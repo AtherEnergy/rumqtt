@@ -126,7 +126,6 @@ impl ClientOptions {
         }
 
         let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
-
         let addr = Self::lookup_ipv4("localhost", 1883);
 
         let stream = try!(TcpStream::connect(&addr));
@@ -361,7 +360,7 @@ impl Handler for ProxyClient {
                                     event_loop.reregister(self.stream.get_ref().unwrap(),
                                                     MIO_CLIENT_STREAM,
                                                     EventSet::writable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
+                                                    PollOpt::edge() | PollOpt::oneshot());
                                         .unwrap();
                                 }
                             }
