@@ -288,7 +288,7 @@ impl Handler for ProxyClient {
                                 return;
                             }
                             self.state = MqttClientState::Disconnected;
-                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                            event_loop.register(self.stream.get_ref().unwrap(),
                                             MIO_CLIENT_STREAM,
                                             EventSet::writable(),
                                             PollOpt::edge() | PollOpt::oneshot())
@@ -357,10 +357,10 @@ impl Handler for ProxyClient {
                                     }
 
                                     self.state = MqttClientState::Disconnected;
-                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                    event_loop.register(self.stream.get_ref().unwrap(),
                                                     MIO_CLIENT_STREAM,
                                                     EventSet::writable(),
-                                                    PollOpt::edge() | PollOpt::oneshot());
+                                                    PollOpt::edge() | PollOpt::oneshot())
                                         .unwrap();
                                 }
                             }
@@ -524,9 +524,11 @@ impl ProxyClient {
                                 Ok(_) => (),
                                 Err(_) => return Err(Error::NoReconnectTry), //no conn packet sent
                             };
-
+                            //REPORT: After every new tcp connection, I had to do
+                            //'mio register' instead of 'reregister' on linux. But
+                            //reregister is working fine on mac osx here.
                             self.state = MqttClientState::Disconnected;
-                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                            event_loop.register(self.stream.get_ref().unwrap(),
                                             MIO_CLIENT_STREAM,
                                             EventSet::writable(),
                                             PollOpt::edge() | PollOpt::oneshot())
