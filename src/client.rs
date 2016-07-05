@@ -20,6 +20,7 @@ use std::thread;
 use chan;
 use tls::{SslContext, SslStream, NetworkStream};
 use mioco::sync::mpsc::{self, Sender, Receiver};
+use std;
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -267,8 +268,8 @@ impl ProxyClient {
         self.msg_send = Some(msg_send);
         self.sub_recv = Some(sub_recv);
 
-        thread::spawn(move || {
-            mioco::start(move || {
+        thread::spawn(move || -> Result<()> {
+            mioco::start(move || -> Result<()> {
                 // @ Inital Tcp/Tls connection. Won't retry
                 // @ if connectin fails here
                 let stream: TcpStream = try!(TcpStream::connect(&self.addr));

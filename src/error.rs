@@ -3,8 +3,10 @@ use std::io;
 use mqtt::topic_name::TopicNameError;
 use mioco;
 use std::sync::mpsc::SendError;
+use openssl::ssl;
 
 pub type Result<T> = result::Result<T, Error>;
+pub type SslError = ssl::error::SslError;
 
 #[derive(Debug)]
 pub enum Error {
@@ -30,6 +32,7 @@ pub enum Error {
     NoReconnectTry,
     MqttPacketError,
     MioNotifyError,
+    SslError,
 }
 
 impl From<io::Error> for Error {
@@ -48,6 +51,12 @@ impl From<TopicNameError> for Error {
 impl<T> From<SendError<T>> for Error {
     fn from(_: SendError<T>) -> Error {
         Error::MioNotifyError
+    }
+}
+
+impl From<SslError> for Error {
+    fn from(e: SslError) -> Error {
+        Error::SslError
     }
 }
 
