@@ -47,7 +47,7 @@ fn tls_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-#[test]
+//#[test]
 fn tls_connect() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
@@ -72,7 +72,7 @@ fn tls_connect() {
     thread::sleep(Duration::new(120, 0));
 }   
 
-//#[test]
+#[test]
 fn pingreq_reconnect_test() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
