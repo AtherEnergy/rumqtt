@@ -1,7 +1,8 @@
 use std::result;
 use std::io;
 use mqtt::topic_name::TopicNameError;
-use mio;
+use mioco;
+use std::sync::mpsc::SendError;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -44,8 +45,14 @@ impl From<TopicNameError> for Error {
     }
 }
 
-impl<T> From<mio::NotifyError<T>> for Error {
-    fn from(_: mio::NotifyError<T>) -> Error {
+impl<T> From<SendError<T>> for Error {
+    fn from(_: SendError<T>) -> Error {
         Error::MioNotifyError
     }
 }
+
+// impl<T> From<mio::NotifyError<T>> for Error {
+//     fn from(_: mio::NotifyError<T>) -> Error {
+//         Error::MioNotifyError
+//     }
+// }

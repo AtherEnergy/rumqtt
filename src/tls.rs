@@ -1,4 +1,4 @@
-use mio::tcp::TcpStream;
+use mioco::tcp::TcpStream;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::path::Path;

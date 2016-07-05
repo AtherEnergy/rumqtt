@@ -6,7 +6,7 @@ version = "0.2.1"
 [dependencies]
 chan = "0.1"
 log = "0.3"
-mio = "*"
+mioco = "0.7"
 rand = "0.3"
 time = "0.1"
 
