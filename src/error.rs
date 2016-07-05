@@ -33,6 +33,7 @@ pub enum Error {
     MqttPacketError,
     MioNotifyError,
     SslError,
+    EventLoopError,
 }
 
 impl From<io::Error> for Error {

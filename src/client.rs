@@ -221,7 +221,6 @@ impl Subscriber {
     }
 }
 
-
 pub struct ProxyClient {
     addr: SocketAddr,
     state: MqttClientState,
@@ -247,19 +246,21 @@ pub struct ProxyClient {
 
 impl ProxyClient {
     pub fn await(mut self) -> Result<(Publisher, Subscriber)> {
-        //         let mut event_loop = EventLoop::new().unwrap();
-        //         let mio_notify = event_loop.channel();
+        // @ Create notifiers for users to publish to event loop
         let (notify_send, notify_recv) = mpsc::channel::<MioNotification>();
         let (pub_send, pub_recv) = chan::sync::<Message>(self.opts.pub_q_len as usize);
+        let (sub_send, sub_recv) =
+            chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (msg_send, msg_recv) = chan::sync::<Message>(0);
+
+        // @ Create 'publisher' and 'subscriber'
+        // @ These are the handles using which user interacts with rumqtt.
         let publisher = Publisher {
             pub_send: pub_send,
             notifier: notify_send.clone(),
         };
         self.pub_recv = Some(pub_recv);
 
-        let (sub_send, sub_recv) =
-            chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
-        let (msg_send, msg_recv) = chan::sync::<Message>(0);
         let subscriber = Subscriber {
             subscribe_send: sub_send,
             message_recv: msg_recv,
@@ -268,10 +269,11 @@ impl ProxyClient {
         self.msg_send = Some(msg_send);
         self.sub_recv = Some(sub_recv);
 
+        // @ New thread for event loop
         thread::spawn(move || -> Result<()> {
             mioco::start(move || -> Result<()> {
-                // @ Inital Tcp/Tls connection. Won't retry
-                // @ if connectin fails here
+                // @ Inital Tcp/Tls connection.
+                // @ Won't retry if connectin fails here
                 let stream: TcpStream = try!(TcpStream::connect(&self.addr));
                 let stream = match self.opts.ssl {
                     Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
@@ -280,19 +282,38 @@ impl ProxyClient {
                 self.stream = stream;
                 self.state = MqttClientState::Disconnected;
 
+                // @ Timer for ping requests and retransmits
                 let mut timer = mioco::timer::Timer::new();
-                loop {
-                    // Start the event loop
-                    select! (
-                    r:self.stream.get_ref().unwrap() => {
-                        let packet = match VariablePacket::decode(&mut self.stream) {
-                    // @ Decoded packet successfully.
+
+                'mqtt_connect: loop {
+                    // @ Send Mqtt connect packet.
+                    // @ Change the state to handshake.
+                    // @ Start PINGREQ/RETRANSMIT timer. But PINGREQs
+                    // @ should only be sent in 'connected' state
+                    match self._connect() {
+                        Ok(_) => {
+                            if let Some(keep_alive) = self.opts.keep_alive {
+                                timer.set_timeout(keep_alive as u64 * 900);
+                            }
+                            self.state = MqttClientState::Handshake;
+                        }
+                        _ => panic!("There shouldln't be error here"),
+                    }
+
+                    // @ Start the event loop
+                    'events: loop {
+                        select! (
+                            r:self.stream.get_ref().unwrap() => {
+                                let packet = match VariablePacket::decode(&mut self.stream) {
+                        // @ Decoded packet successfully.
                                     Ok(pk) => pk,
-                    // @ Try to make a new Tcp connection.
-                    // @ Set state machine to Disconnected.
+                        // @ Set state machine to Disconnected.
+                        // @ Try to make a new Tcp connection.
+                        // @ If network goes down after this block, all the network operations ..
+                        // @ will fail until eventloop reaches here again and tries for reconnect.
                                     Err(err) => {
-                    // maybe size=0 while reading indicating socket
-                    // close at broker end
+                        // maybe size=0 while reading indicating socket
+                        // close at broker end
                                         error!("Error in receiving packet {:?}", err);
                                         self._unbind();
                                         self.state = MqttClientState::Disconnected;
@@ -301,42 +322,47 @@ impl ProxyClient {
                                             return Err(Error::NoReconnectTry);
                                         }
                                         else {
-                                            continue;
+                                            continue 'mqtt_connect;
                                         }
                                     }
-                        };
-                        if let Some(keep_alive) = self.opts.keep_alive {
-                            timer.set_timeout(keep_alive as u64 * 900);
-                        }
+                                };
 
-                    // @ At this point, there is a connected
-                    // @ Tcp socket.
-                        self.handle_packet(&packet);
-                    },
+                                // @ At this point, there is a connected TCP socket
+                                self.handle_packet(&packet);
+                            },
 
-                    r:timer => {
-                        match self.state {
-                            MqttClientState::Connected => {
-                                if !self.await_ping {
-                                    let _ = self.ping();
-                                } else {
-                                    error!("awaiting for previous ping resp");
+                            r:timer => {
+                                match self.state {
+                                    MqttClientState::Connected => {
+                                        if !self.await_ping {
+                                            let _ = self.ping();
+                                        } else {
+                                            error!("awaiting for previous ping resp");
+                                        }
+                                    }
+
+                                    // @ Timer stopped. Reconnection will start the timer again
+                                    MqttClientState::Disconnected |
+                                    MqttClientState::Handshake => {
+                                        debug!("I won't ping.
+                                                Client is in disconnected/handshake state")
+                                    }
                                 }
-
+                                // @ Restarting the timer only in connected state
+                                // @ is leading to level triggered notifications.
+                                // TODO: Find a way to stop the timer in
+                                // Disconnected/Handshake state
                                 if let Some(keep_alive) = self.opts.keep_alive {
                                     timer.set_timeout(keep_alive as u64 * 900);
                                 }
-                            }
+                            },
+                        ); //select end
+                    } //event loop end
+                } //mqtt connection loop end
 
-                            MqttClientState::Disconnected |
-                            MqttClientState::Handshake => {
-                                debug!("I won't ping. Client is in disconnected/handshake state")
-                            }
-                        }
-                    },
-                ); //select end
-                }
+                Err(Error::EventLoopError)
             }); //mioco end
+            Err(Error::EventLoopError)
         }); //thread end
 
         Ok((publisher, subscriber))
@@ -349,8 +375,11 @@ impl ProxyClient {
                     &VariablePacket::ConnackPacket(ref connack) => {
                         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
                             error!("Failed to connect, err {:?}", connack.connect_return_code());
+                            Ok(None)
+                        } else {
+                            self.state = MqttClientState::Connected;
+                            Ok(None)
                         }
-                        Ok(None)
                     }
                     _ => Ok(None),
                 }
@@ -383,8 +412,8 @@ impl ProxyClient {
                         //        self.outgoing_ack);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_ack
-                                  .iter()
-                                  .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            .iter()
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 self.outgoing_ack.remove(i);
                             }
@@ -454,12 +483,17 @@ impl ProxyClient {
         match self.opts.reconnect {
             ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
             ReconnectMethod::ReconnectAfter(dur) => {
+                //TODO: Move the loop from here to caller
                 loop {
                     info!("  Will try Reconnect in {} seconds", dur.as_secs());
                     thread::sleep(dur);
                     match TcpStream::connect(&self.addr) {
                         Ok(stream) => {
-                            self.stream = NetworkStream::Tcp(stream);
+                            let stream = match self.opts.ssl {
+                                Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
+                                None => NetworkStream::Tcp(stream),
+                            };
+                            self.stream = stream;
                             break;
                         }
                         Err(err) => {
@@ -623,34 +657,3 @@ impl ProxyClient {
         self.last_pkid
     }
 }
-
-
-// // @ Above statement will loop/return until tcp
-//                         // @ connection is successful. We have a connected
-//                         // @ socket at this point
-//                         match self.state {
-//                             MqttClientState::Disconnected => {
-//                                 match self._connect() {
-//                                     // @ If writing connect packet is successful means TCP
-//                                     // @ connection is successful. Change the state machine
-//                                     // @ to handshake and event loop to readable to read
-//                                     // @ CONACK packet
-//                                     Ok(_) => {
-//                                         if let Some(keep_alive) = self.opts.keep_alive {
-//                                             timer.set_timeout(keep_alive as u64 * 900);
-//                                         }
-//                                         self.state = MqttClientState::Handshake;
-//                                     }
-
-//                                     _ => panic!("There shouldln't be error here");
-//                                 }
-//                             },
-
-// MqttClientState::Handshake => {
-
-// },
-
-// MqttClientState::Disconnected => {
-
-//                             },
-//                         }

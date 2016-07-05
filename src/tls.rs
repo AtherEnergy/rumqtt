@@ -78,24 +78,30 @@ pub enum NetworkStream {
 }
 
 impl NetworkStream {
-    // pub fn peer_addr(&self) -> Result<SocketAddr> {
-    //     match *self {
-    //         NetworkStream::Tcp(ref s) => {
-    //             let addr = try!(s.peer_addr());
-    //             Ok(addr)
-    //         }
-    //         NetworkStream::Ssl(ref s) => {
-    //             let addr = try!(s.get_ref().peer_addr());
-    //             Ok(addr)
-    //         }
-    //         NetworkStream::None => Err(Error::NoStreamError),
-    //     }
-    // }
+    pub fn peer_addr(&self) -> Result<SocketAddr> {
+        match *self {
+            NetworkStream::Tcp(ref s) => {
+                let addr = try!(s.peer_addr());
+                Ok(addr)
+            }
+            NetworkStream::Ssl(ref s) => {
+                let addr = try!(s.get_ref().peer_addr());
+                Ok(addr)
+            }
+            NetworkStream::None => Err(Error::NoStreamError),
+        }
+    }
 
     pub fn shutdown(&self, how: Shutdown) -> Result<()> {
         match *self {
-            NetworkStream::Tcp(ref s) => try!(s.shutdown(how)),
-            NetworkStream::Ssl(ref s) => try!(s.get_ref().shutdown(how)),
+            NetworkStream::Tcp(ref s) => {
+                try!(s.shutdown(how));
+                Ok(())
+            }
+            NetworkStream::Ssl(ref s) => {
+                try!(s.get_ref().shutdown(how));
+                Ok(())
+            }
             NetworkStream::None => Err(Error::NoStreamError),
         }
     }
@@ -112,37 +118,27 @@ impl NetworkStream {
 impl Read for NetworkStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
-            NetworkStream::Tcp(ref mut s) => {
-                match s.read(buf) {
-                    Ok(size) => Ok(size),
-                    Err(e) => Err(Error::Io(e)),
-                }
-            }
-            NetworkStream::Ssl(ref mut s) => {
-                match s.read(buf) {
-                    Ok(size) => Ok(size),
-                    Err(e) => Err(Error::Io(e)),
-                }
-            }
-            NetworkStream::None => Err(Error::NoStreamError),
+            NetworkStream::Tcp(ref mut s) => s.read(buf),
+            NetworkStream::Ssl(ref mut s) => s.read(buf),
+            NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
 }
 
-// impl Write for NetworkStream {
-//     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-//         match *self {
-//             NetworkStream::Tcp(ref mut s) => try!(s.write(buf)),
-//             NetworkStream::Ssl(ref mut s) => try!(s.write(buf)),
-//             NetworkStream::None => Err(Error::NoStreamError),
-//         }
-//     }
+impl Write for NetworkStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match *self {
+            NetworkStream::Tcp(ref mut s) => s.write(buf),
+            NetworkStream::Ssl(ref mut s) => s.write(buf),
+            NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
+        }
+    }
 
-//     fn flush(&mut self) -> Result<()> {
-//         match *self {
-//             NetworkStream::Tcp(ref mut s) => s.flush(),
-//             NetworkStream::Ssl(ref mut s) => s.flush(),
-//             NetworkStream::None => Err(Error::NoStreamError),
-//         }
-//     }
-// }
+    fn flush(&mut self) -> io::Result<()> {
+        match *self {
+            NetworkStream::Tcp(ref mut s) => s.flush(),
+            NetworkStream::Ssl(ref mut s) => s.flush(),
+            NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
+        }
+    }
+}
