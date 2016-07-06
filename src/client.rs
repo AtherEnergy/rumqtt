@@ -18,9 +18,8 @@ use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
 use chan;
-use tls::{SslContext, SslStream, NetworkStream};
-use mioco::sync::mpsc::{self, Sender, Receiver};
-use std;
+use tls::{SslContext, NetworkStream};
+use mioco::sync::mpsc::{self, Sender};
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -245,8 +244,7 @@ impl ProxyClient {
         // @ Create notifiers for users to publish to event loop
         let (notify_send, notify_recv) = mpsc::channel::<MioNotification>();
         let (pub_send, pub_recv) = chan::sync::<Message>(self.opts.pub_q_len as usize);
-        let (sub_send, sub_recv) =
-            chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
         let (msg_send, msg_recv) = chan::sync::<Message>(0);
 
         // @ Create 'publisher' and 'subscriber'
@@ -373,7 +371,7 @@ impl ProxyClient {
                                         debug!("^^^ QUEUE RESEND");
                                         self._try_republish();
                                     }
-                                    MqttClientState::Disconnected 
+                                    MqttClientState::Disconnected
                                     | MqttClientState::Handshake => {
                                         debug!("I won't republish.
                                                 Client is in disconnected/handshake state")
@@ -395,7 +393,7 @@ impl ProxyClient {
                                                 };
                                                 let _ = self._publish(message);
                                             }
-                                    
+
                                             QualityOfService::Level1 => {
                                                 if self.outgoing_ack.len() < 5 {
                                                     let mut message = {
@@ -453,7 +451,10 @@ impl ProxyClient {
                             Ok(None)
                         }
                     }
-                    _ => Ok(None),
+                    _ => {
+                        error!("received invalid packet in handshake state --> {:?}", packet);
+                        Ok(None)
+                    }
                 }
             }
 
@@ -540,8 +541,20 @@ impl ProxyClient {
                message.payload.len());
         match message.qos {
             QoSWithPacketIdentifier::Level0 => Ok(Some(message)),
-            QoSWithPacketIdentifier::Level1(_) => Ok(Some(message)),
-            QoSWithPacketIdentifier::Level2(_) => Ok(None),
+            QoSWithPacketIdentifier::Level1(pkid) => {
+                // let pkid = message.get_pkid().expect("no pkid");
+                // @ send puback and release received message
+                try!(self._puback(pkid));
+                Ok(Some(message))
+            }
+            QoSWithPacketIdentifier::Level2(pkid) => {
+                self.incomming_rec.push_back(message.clone());
+                // @ send pubrec.
+                // @ don't release the message yet
+                // @ release message when pubcomp is received
+                try!(self._pubrec(pkid));
+                Ok(None)
+            }
         }
     }
 
@@ -590,9 +603,7 @@ impl ProxyClient {
             }
 
             MqttClientState::Disconnected |
-            MqttClientState::Handshake => {
-                error!("I won't republish. Client isn't in connected state")
-            }
+            MqttClientState::Handshake => error!("I won't republish. Client isn't in connected state"),
         }
     }
 
@@ -622,25 +633,35 @@ impl ProxyClient {
         let message = message.transform(Some(qos.clone()));
         let ref payload = *message.payload;
 
-        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(),
-                                                                qos.clone(),
-
-                                                                payload.clone()));
+        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(_) => {
-                self.outgoing_ack.push_back((time::get_time().sec, message.clone()))
-            }
+            QoSWithPacketIdentifier::Level1(_) => self.outgoing_ack.push_back((time::get_time().sec, message.clone())),
             QoSWithPacketIdentifier::Level2(_) => (),
         }
 
-        debug!("       Publish {:?} {:?} > {} bytes",
-               message.qos,
-               message.topic.to_string(),
-               message.payload.len());
+        debug!("       Publish {:?} {:?} > {} bytes", message.qos, message.topic.to_string(), message.payload.len());
 
         try!(self._write_packet(publish_packet));
+        self._flush()
+    }
+
+    fn _puback(&mut self, pkid: u16) -> Result<()> {
+        let puback_packet = try!(self._generate_puback_packet(pkid));
+        try!(self._write_packet(puback_packet));
+        self._flush()
+    }
+
+    fn _pubrec(&mut self, pkid: u16) -> Result<()> {
+        let puback_packet = try!(self._generate_pubrec_packet(pkid));
+        try!(self._write_packet(puback_packet));
+        self._flush()
+    }
+
+    fn _pubcomp(&mut self, pkid: u16) -> Result<()> {
+        let puback_packet = try!(self._generate_pubcomp_packet(pkid));
+        try!(self._write_packet(puback_packet));
         self._flush()
     }
 
@@ -658,8 +679,7 @@ impl ProxyClient {
     }
 
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
-        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(),
-                                                    self.opts.client_id.clone().unwrap());
+        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.opts.client_id.clone().unwrap());
         connect_packet.set_clean_session(self.opts.clean_session);
         connect_packet.set_keep_alive(self.opts.keep_alive.unwrap());
 
@@ -688,9 +708,7 @@ impl ProxyClient {
         Ok(buf)
     }
 
-    fn _generate_subscribe_packet(&self,
-                                  topics: Vec<(TopicFilter, QualityOfService)>)
-                                  -> Result<Vec<u8>> {
+    fn _generate_subscribe_packet(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<Vec<u8>> {
         let subscribe_packet = SubscribePacket::new(11, topics);
         let mut buf = Vec::new();
 
@@ -714,6 +732,45 @@ impl ProxyClient {
         let mut buf = Vec::new();
 
         match publish_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_puback_packet(&self, pkid: u16) -> Result<Vec<u8>> {
+        let puback_packet = PubackPacket::new(pkid);
+        let mut buf = Vec::new();
+
+        match puback_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_pubrec_packet(&self, pkid: u16) -> Result<Vec<u8>> {
+        let pubrec_packet = PubrecPacket::new(pkid);
+        let mut buf = Vec::new();
+
+        match pubrec_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_pubcomp_packet(&self, pkid: u16) -> Result<Vec<u8>> {
+        let pubcomp_packet = PubcompPacket::new(pkid);
+        let mut buf = Vec::new();
+
+        match pubcomp_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
                 return Err(Error::MqttEncodeError);

@@ -1,7 +1,6 @@
 use std::result;
 use std::io;
 use mqtt::topic_name::TopicNameError;
-use mioco;
 use std::sync::mpsc::SendError;
 use openssl::ssl;
 
@@ -37,28 +36,20 @@ pub enum Error {
 }
 
 impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::Io(err)
-    }
+    fn from(err: io::Error) -> Error { Error::Io(err) }
 }
 
 
 impl From<TopicNameError> for Error {
-    fn from(_: TopicNameError) -> Error {
-        Error::TopicNameError
-    }
+    fn from(_: TopicNameError) -> Error { Error::TopicNameError }
 }
 
 impl<T> From<SendError<T>> for Error {
-    fn from(_: SendError<T>) -> Error {
-        Error::MioNotifyError
-    }
+    fn from(_: SendError<T>) -> Error { Error::MioNotifyError }
 }
 
 impl From<SslError> for Error {
-    fn from(e: SslError) -> Error {
-        Error::SslError
-    }
+    fn from(_: SslError) -> Error { Error::SslError }
 }
 
 // impl<T> From<mio::NotifyError<T>> for Error {

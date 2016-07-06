@@ -2,7 +2,7 @@ use mioco::tcp::TcpStream;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::path::Path;
-use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
+use std::net::Shutdown;
 use error::{Error, Result};
 use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE};
 use openssl::x509::X509FileType;
@@ -17,15 +17,11 @@ pub struct SslContext {
 }
 
 impl Default for SslContext {
-    fn default() -> SslContext {
-        SslContext { inner: Arc::new(ssl::SslContext::new(SslMethod::Tlsv1_2).unwrap()) }
-    }
+    fn default() -> SslContext { SslContext { inner: Arc::new(ssl::SslContext::new(SslMethod::Tlsv1_2).unwrap()) } }
 }
 
 impl SslContext {
-    pub fn new(context: ssl::SslContext) -> Self {
-        SslContext { inner: Arc::new(context) }
-    }
+    pub fn new(context: ssl::SslContext) -> Self { SslContext { inner: Arc::new(context) } }
 
     pub fn with_cert_and_key<C, K>(cert: C, key: K) -> Result<SslContext>
         where C: AsRef<Path>,
@@ -78,19 +74,19 @@ pub enum NetworkStream {
 }
 
 impl NetworkStream {
-    pub fn peer_addr(&self) -> Result<SocketAddr> {
-        match *self {
-            NetworkStream::Tcp(ref s) => {
-                let addr = try!(s.peer_addr());
-                Ok(addr)
-            }
-            NetworkStream::Ssl(ref s) => {
-                let addr = try!(s.get_ref().peer_addr());
-                Ok(addr)
-            }
-            NetworkStream::None => Err(Error::NoStreamError),
-        }
-    }
+    // pub fn peer_addr(&self) -> Result<SocketAddr> {
+    //     match *self {
+    //         NetworkStream::Tcp(ref s) => {
+    //             let addr = try!(s.peer_addr());
+    //             Ok(addr)
+    //         }
+    //         NetworkStream::Ssl(ref s) => {
+    //             let addr = try!(s.get_ref().peer_addr());
+    //             Ok(addr)
+    //         }
+    //         NetworkStream::None => Err(Error::NoStreamError),
+    //     }
+    // }
 
     pub fn shutdown(&self, how: Shutdown) -> Result<()> {
         match *self {

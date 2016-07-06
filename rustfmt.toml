@@ -1,0 +1,5 @@
+max_width = 120
+idea_width = 100
+fn_call_width = 100
+fn_single_line = true
+wrap_comments = true

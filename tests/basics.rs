@@ -116,12 +116,12 @@ fn publish_qos0_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-//#[test]
+#[test]
 fn publish_qos1_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5);
+    client_options.set_keep_alive(5).set_pub_q_len(10);
     client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
     let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
 
@@ -139,7 +139,7 @@ fn publish_qos1_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-#[test]
+//#[test]
 fn subscribe_test() {
     env_logger::init().unwrap();
 
