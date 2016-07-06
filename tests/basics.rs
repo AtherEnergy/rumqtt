@@ -123,10 +123,11 @@ fn publish_qos1_test() {
     let mut client_options = ClientOptions::new();
     client_options.set_keep_alive(5).set_pub_q_len(10);
     client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
+    let proxy_client =
+     client_options.connect("localhost:1883").expect("CONNECT ERROR");
 
-    let (publisher, _) = match proxy_client.await() {
-        Ok((publisher, _)) => (publisher, ..),
+    let (publisher, subscriber) = match proxy_client.await() {
+        Ok(h) => h,
         Err(e) => panic!("Await Error --> {:?}", e),
     };
 
