@@ -1,4 +1,4 @@
-# RUMQTT [![build status](https://gitlab.com/kteza1/rumqtt/badges/master/build.svg)](https://gitlab.com/kteza1/rumqtt/commits/master)
+# RUMQTT [![build status](https://travis-ci.org/kteza1/rumqtt.svg?branch=master)](https://travis-ci.org/kteza1/rumqtt)
 
 A pure rust mqtt client.
 
