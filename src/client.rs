@@ -138,10 +138,8 @@ impl ClientOptions {
             msg_send: None,
 
             // Queues
-            incomming_pub: VecDeque::new(),
             incomming_rec: VecDeque::new(),
-            incomming_rel: VecDeque::new(),
-            outgoing_ack: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
             outgoing_rec: VecDeque::new(),
             outgoing_comp: VecDeque::new(),
         };
@@ -231,11 +229,9 @@ pub struct ProxyClient {
     pub_recv: Option<chan::Receiver<Message>>,
 
     // Queues
-    incomming_pub: VecDeque<Box<Message>>, // QoS 1
     incomming_rec: VecDeque<Box<Message>>, // QoS 2
-    incomming_rel: VecDeque<PacketIdentifier>, // QoS 2
-    outgoing_ack: VecDeque<(i64, Box<Message>)>, // QoS 1
-    outgoing_rec: VecDeque<Box<Message>>, // QoS 2
+    outgoing_pub: VecDeque<(i64, Box<Message>)>, // QoS 1
+    outgoing_rec: VecDeque<(i64, Box<Message>)>, // QoS 2
     outgoing_comp: VecDeque<PacketIdentifier>, // QoS 2
 }
 
@@ -395,7 +391,7 @@ impl ProxyClient {
                                             }
 
                                             QualityOfService::Level1 => {
-                                                if self.outgoing_ack.len() < 5 {
+                                                if self.outgoing_pub.len() < 5 {
                                                     let mut message = {
                                                         match self.pub_recv {
                                                             Some(ref pub_recv) => pub_recv.recv().unwrap(),
@@ -482,13 +478,13 @@ impl ProxyClient {
                     &VariablePacket::PubackPacket(ref puback) => {
                         // debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
                         //        puback,
-                        //        self.outgoing_ack);
+                        //        self.outgoing_pub);
                         let pkid = puback.packet_identifier();
-                        match self.outgoing_ack
+                        match self.outgoing_pub
                             .iter()
                             .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
-                                self.outgoing_ack.remove(i);
+                                self.outgoing_pub.remove(i);
                             }
                             None => {
                                 error!("Oopssss..unsolicited ack");
@@ -503,9 +499,52 @@ impl ProxyClient {
                         self._handle_message(message)
                     }
 
-                    &VariablePacket::PubrecPacket(..) => Ok(None),
+                    //@ Qos2 message published by client is recorded by broker
+                    //@ Remove message from 'outgoing_rec' queue and add pkid to 'outgoing_rel'
+                    //@ Send 'pubrel' to broker
+                    &VariablePacket::PubrecPacket(ref pubrec) => {
+                        let pkid = pubrec.packet_identifier();
+                        match self.outgoing_rec
+                            .iter()
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            Some(i) => {
+                                self.outgoing_pub.remove(i);
+                            }
+                            None => {
+                                error!("Oopssss..unsolicited record");
+                            }
+                        };
+                        try!(self._pubrel(pkid));
+                        self.outgoing_comp.push_back(PacketIdentifier(pkid));
+                        Ok(None)
+                    }
 
-                    &VariablePacket::PubrelPacket(..) => Ok(None),
+                    // @ Broker knows that client has the message
+                    // @ release the message stored in 'recorded' queue
+                    // @ send 'pubcomp' to sender indicating that message is released
+                    // @ if 'pubcomp' packet is lost, broker will send pubrel again
+                    // @ for the released message, for which we send dummy 'pubcomp' again
+                    &VariablePacket::PubrelPacket(ref pubrel) => {
+                        let pkid = pubrel.packet_identifier();
+                        let message = match self.incomming_rec
+                            .iter()
+                            .position(|ref x| x.get_pkid() == Some(pkid)) {
+                            Some(i) => {
+                                if let Some(message) = self.incomming_rec.remove(i) {
+                                    Some(message)
+                                }
+                                else {
+                                    None
+                                }
+                            }
+                            None => {
+                                info!("Oopssss..unsolicited release. Message might have already been released");
+                                None
+                            }
+                        };
+                        try!(self._pubcomp(pkid));
+                        Ok(message)
+                    }
 
                     &VariablePacket::PubcompPacket(..) => Ok(None),
 
@@ -542,16 +581,25 @@ impl ProxyClient {
         match message.qos {
             QoSWithPacketIdentifier::Level0 => Ok(Some(message)),
             QoSWithPacketIdentifier::Level1(pkid) => {
-                // let pkid = message.get_pkid().expect("no pkid");
-                // @ send puback and release received message
                 try!(self._puback(pkid));
                 Ok(Some(message))
             }
+            // @ store the message in 'recorded' queue and send 'pubrec' to broker
+            // @ if 'pubrec' is lost, broker will resend the message. so only pushback is pkid is new.
+            // @ and resend pubcomp.
+            // @ TODO: Analyze broker crash cases for all queues.
             QoSWithPacketIdentifier::Level2(pkid) => {
-                self.incomming_rec.push_back(message.clone());
-                // @ send pubrec.
-                // @ don't release the message yet
-                // @ release message when pubcomp is received
+                match self.incomming_rec
+                    .iter()
+                    .position(|ref x| x.get_pkid() == Some(pkid)) {
+                    Some(i) => {
+                        self.incomming_rec[i] = message.clone();
+                    }
+                    None => {
+                        self.incomming_rec.push_back(message.clone());
+                    }
+                };
+                
                 try!(self._pubrec(pkid));
                 Ok(None)
             }
@@ -595,9 +643,9 @@ impl ProxyClient {
     fn _try_republish(&mut self) {
         match self.state {
             MqttClientState::Connected => {
-                let outgoing_ack = self.outgoing_ack.clone(); //TODO: Remove the clone
+                let outgoing_pub = self.outgoing_pub.clone(); //TODO: Remove the clone
                 let timeout = self.opts.queue_timeout as i64;
-                for e in outgoing_ack.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
+                for e in outgoing_pub.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
                     let _ = self._publish(*e.1.clone());
                 }
             }
@@ -637,7 +685,7 @@ impl ProxyClient {
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(_) => self.outgoing_ack.push_back((time::get_time().sec, message.clone())),
+            QoSWithPacketIdentifier::Level1(_) => self.outgoing_pub.push_back((time::get_time().sec, message.clone())),
             QoSWithPacketIdentifier::Level2(_) => (),
         }
 
@@ -654,8 +702,14 @@ impl ProxyClient {
     }
 
     fn _pubrec(&mut self, pkid: u16) -> Result<()> {
-        let puback_packet = try!(self._generate_pubrec_packet(pkid));
-        try!(self._write_packet(puback_packet));
+        let pubrec_packet = try!(self._generate_pubrec_packet(pkid));
+        try!(self._write_packet(pubrec_packet));
+        self._flush()
+    }
+
+    fn _pubrel(&mut self, pkid: u16) -> Result<()> {
+        let pubrel_packet = try!(self._generate_pubrel_packet(pkid));
+        try!(self._write_packet(pubrel_packet));
         self._flush()
     }
 
@@ -758,6 +812,19 @@ impl ProxyClient {
         let mut buf = Vec::new();
 
         match pubrec_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_pubrel_packet(&self, pkid: u16) -> Result<Vec<u8>> {
+        let pubrel_packet = PubrelPacket::new(pkid);
+        let mut buf = Vec::new();
+
+        match pubrel_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
                 return Err(Error::MqttEncodeError);
