@@ -106,11 +106,8 @@ impl ClientOptions {
         self
     }
 
-
-    fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
-        use std::net::ToSocketAddrs;
-
-        let addrs = (host, port).to_socket_addrs().unwrap();
+    fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
+        let addrs = addr.to_socket_addrs().unwrap();
         for addr in addrs {
             if let SocketAddr::V4(_) = addr {
                 return addr.clone();
@@ -124,8 +121,7 @@ impl ClientOptions {
             self.generate_client_id();
         }
 
-        let addr = try!(addr.to_socket_addrs()).next().expect("Socket address is broken");
-        let addr = Self::lookup_ipv4("localhost", 8883);
+        let addr = Self::lookup_ipv4(addr);
 
         let proxy = ProxyClient {
             addr: addr,
@@ -283,7 +279,8 @@ impl ProxyClient {
                 self.state = MqttClientState::Disconnected;
 
                 // @ Timer for ping requests and retransmits
-                let mut timer = mioco::timer::Timer::new();
+                let mut ping_timer = mioco::timer::Timer::new();
+                let mut resend_timer = mioco::timer::Timer::new();
 
                 'mqtt_connect: loop {
                     // @ Send Mqtt connect packet.
@@ -293,7 +290,8 @@ impl ProxyClient {
                     match self._connect() {
                         Ok(_) => {
                             if let Some(keep_alive) = self.opts.keep_alive {
-                                timer.set_timeout(keep_alive as u64 * 900);
+                                ping_timer.set_timeout(keep_alive as u64 * 900);
+                                resend_timer.set_timeout(self.opts.queue_timeout as u64 * 1000);
                             }
                             self.state = MqttClientState::Handshake;
                         }
@@ -328,10 +326,22 @@ impl ProxyClient {
                                 };
 
                                 // @ At this point, there is a connected TCP socket
-                                self.handle_packet(&packet);
+                                match self.handle_packet(&packet) {
+                                    Ok(message) => {
+                                        if let Some(m) = message {
+                                            match self.msg_send {
+                                                Some(ref msg_send) => msg_send.send(*m),
+                                                None => panic!("Expected a message send channel"),
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        panic!("error in handling packet. {:?}", err);
+                                    }
+                                };
                             },
 
-                            r:timer => {
+                            r:ping_timer => {
                                 match self.state {
                                     MqttClientState::Connected => {
                                         if !self.await_ping {
@@ -353,9 +363,71 @@ impl ProxyClient {
                                 // TODO: Find a way to stop the timer in
                                 // Disconnected/Handshake state
                                 if let Some(keep_alive) = self.opts.keep_alive {
-                                    timer.set_timeout(keep_alive as u64 * 900);
+                                    ping_timer.set_timeout(keep_alive as u64 * 900);
                                 }
                             },
+
+                            r:resend_timer => {
+                                match self.state {
+                                    MqttClientState::Connected => {
+                                        debug!("^^^ QUEUE RESEND");
+                                        self._try_republish();
+                                    }
+                                    MqttClientState::Disconnected 
+                                    | MqttClientState::Handshake => {
+                                        debug!("I won't republish.
+                                                Client is in disconnected/handshake state")
+                                    }
+                                }
+                                resend_timer.set_timeout(self.opts.queue_timeout as u64 * 1000);
+                            },
+
+                            r:notify_recv => {
+                                match notify_recv.recv().unwrap() {
+                                    MioNotification::Pub(qos) => {
+                                        match qos {
+                                            QualityOfService::Level0 => {
+                                                let message = {
+                                                    match self.pub_recv {
+                                                        Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                                                        None => panic!("No publish recv channel"),
+                                                    }
+                                                };
+                                                let _ = self._publish(message);
+                                            }
+                                    
+                                            QualityOfService::Level1 => {
+                                                if self.outgoing_ack.len() < 5 {
+                                                    let mut message = {
+                                                        match self.pub_recv {
+                                                            Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                                                            None => panic!("No publish recv channel"),
+                                                        }
+                                                    };
+                                                    // Add next packet id to message and publish
+                                                    let PacketIdentifier(pkid) = self._next_pkid();
+                                                    message.set_pkid(pkid);
+                                                    let _ = self._publish(message);
+                                                }
+                                            }
+
+                                            _ => panic!("Invalid Qos"),
+                                        }
+                                    }
+                                    MioNotification::Sub => {
+                                        let topics = match self.sub_recv {
+                                            Some(ref sub_recv) => sub_recv.recv(),
+                                            None => panic!("Expected a subscribe recieve channel"),
+                                        };
+
+                                        if let Some(topics) = topics {
+                                            info!("request = {:?}", topics);
+                                            let _ = self._subscribe(topics);
+                                        }
+                                    }
+                                }
+                            },
+
                         ); //select end
                     } //event loop end
                 } //mqtt connection loop end
@@ -483,7 +555,7 @@ impl ProxyClient {
         match self.opts.reconnect {
             ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
             ReconnectMethod::ReconnectAfter(dur) => {
-                //TODO: Move the loop from here to caller
+                // TODO: Move the loop from here to caller
                 loop {
                     info!("  Will try Reconnect in {} seconds", dur.as_secs());
                     thread::sleep(dur);
