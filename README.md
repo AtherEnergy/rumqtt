@@ -2,8 +2,9 @@
 
 A pure rust mqtt client.
 
+[DOCUMENTATION](http://kteza1.github.io/rumqtt/rumqtt/)
 ## Features
 
 * Supports QoS 0, QoS 1 and QoS 2
-* Auto reconnet
+* Auto reconnect
 * TLS support
