@@ -12,6 +12,7 @@ time = "0.1"
 
 [dependencies.mqtt-protocol]
 git = "https://github.com/kteza1/mqtt-rs.git"
+branch = "patch-2"
 
 [dependencies.openssl]
 features = ["tlsv1_1", "tlsv1_2"]
