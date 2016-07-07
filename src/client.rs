@@ -646,6 +646,13 @@ impl ProxyClient {
         self._flush()
     }
 
+     pub fn disconnect(&mut self) -> Result<()> {
+        let connect = try!(self._generate_disconnect_packet());
+        try!(self._write_packet(connect));
+        self._flush()
+     }
+
+
     fn _try_reconnect(&mut self) -> Result<()> {
         match self.opts.reconnect {
             ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
@@ -781,6 +788,19 @@ impl ProxyClient {
 
         let mut buf = Vec::new();
         match connect_packet.encode(&mut buf) {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(Error::MqttEncodeError);
+            }
+        };
+        Ok(buf)
+    }
+
+    fn _generate_disconnect_packet(&self) -> Result<Vec<u8>> {
+        let disconnect_packet = DisconnectPacket::new();
+
+        let mut buf = Vec::new();
+        match disconnect_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
                 return Err(Error::MqttEncodeError);
