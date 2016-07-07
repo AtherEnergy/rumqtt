@@ -1,4 +1,0 @@
-- [ ] Add channels
-- [ ] Add subscribe and propagate the incoming message all the way to top
-- [X] create tests with awaiter in a separate thread
-- [X] split the implementation into (client, handler)
