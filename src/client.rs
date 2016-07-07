@@ -235,7 +235,7 @@ pub struct ProxyClient {
     /// If 'puback' isn't received in `queue_timeout` time, client should resend these messages
     outgoing_pub: VecDeque<(i64, Box<Message>)>,
     /// For QoS 2. Store for incoming publishes to record. Released after `pubrel` is received.
-    /// Client records these messages and sends `pubrec` to broker. 
+    /// Client records these messages and sends `pubrec` to broker.
     /// Broker resends these messages if `pubrec` isn't received (which means either broker message
     /// is lost or clinet `pubrec` is lost) and client responds with `pubrec`.
     /// Broker also resends `pubrel` till it receives `pubcomp` (which means either borker `pubrel`
@@ -247,7 +247,7 @@ pub struct ProxyClient {
     /// For Qos2. Store for outgoing `pubrel` packets. Removed after `pubcomp` is received.
     /// If `pubcomp` is not received in `timeout` time (client's `pubrel` might have been lost and message
     /// isn't released by the broker or broker's `pubcomp` is lost), client should resend `pubrel` again.
-    outgoing_rel: VecDeque<PacketIdentifier>,
+    outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 }
 
 impl ProxyClient {
@@ -389,7 +389,7 @@ impl ProxyClient {
                                 match self.state {
                                     MqttClientState::Connected => {
                                         debug!("^^^ QUEUE RESEND");
-                                        self._try_republish();
+                                        self._try_retransmit();
                                     }
                                     MqttClientState::Disconnected
                                     | MqttClientState::Handshake => {
@@ -547,9 +547,9 @@ impl ProxyClient {
                                 error!("Oopssss..unsolicited record");
                             }
                         };
-                        // @ what if this is lost. TODO: stray pkid in outgoing_rel should be rereleased
+
                         try!(self._pubrel(pkid));
-                        self.outgoing_rel.push_back(PacketIdentifier(pkid));
+                        self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
                         Ok(None)
                     }
 
@@ -579,7 +579,20 @@ impl ProxyClient {
                         Ok(message)
                     }
 
-                    &VariablePacket::PubcompPacket(..) => Ok(None),
+                    // @ Remove this pkid from 'outgoing_rel' queue
+                    &VariablePacket::PubcompPacket(ref pubcomp) => {
+                        let pkid = pubcomp.packet_identifier();
+                        match self.outgoing_rel
+                                  .iter()
+                                  .position(|ref x| x.1 == PacketIdentifier(pkid)) {
+                            Some(pos) => self.outgoing_rel.remove(pos),
+                            None => {
+                                error!("Oopssss..unsolicited complete");
+                                None
+                            }
+                        };
+                        Ok(None)
+                    }
 
                     &VariablePacket::UnsubackPacket(..) => Ok(None),
 
@@ -646,11 +659,11 @@ impl ProxyClient {
         self._flush()
     }
 
-     pub fn disconnect(&mut self) -> Result<()> {
+    pub fn disconnect(&mut self) -> Result<()> {
         let connect = try!(self._generate_disconnect_packet());
         try!(self._write_packet(connect));
         self._flush()
-     }
+    }
 
 
     fn _try_reconnect(&mut self) -> Result<()> {
@@ -681,11 +694,12 @@ impl ProxyClient {
         }
     }
 
-    fn _try_republish(&mut self) {
+    fn _try_retransmit(&mut self) {
         match self.state {
             MqttClientState::Connected => {
                 let outgoing_pub = self.outgoing_pub.clone(); //TODO: Remove the clone
                 let outgoing_rec = self.outgoing_rec.clone(); //TODO: Remove the clone
+                let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
                 let timeout = self.opts.queue_timeout as i64;
 
                 // Republish Qos 1 outgoing publishes
@@ -696,6 +710,12 @@ impl ProxyClient {
                 // Republish QoS 2 outgoing records
                 for e in outgoing_rec.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
                     let _ = self._publish(*e.1.clone());
+                }
+
+                // Resend QoS 2 outgoing release
+                for e in outgoing_rel.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
+                    let PacketIdentifier(pkid) = e.1;
+                    let _ = self._pubrel(pkid);
                 }
             }
 
