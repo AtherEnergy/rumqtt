@@ -233,21 +233,21 @@ pub struct ProxyClient {
     /// Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes. Removed after `puback` is received.
     /// If 'puback' isn't received in `queue_timeout` time, client should resend these messages
-    outgoing_pub: VecDeque<(i64, Box<Message>)>, 
+    outgoing_pub: VecDeque<(i64, Box<Message>)>,
     /// For QoS 2. Store for incoming publishes to record. Released after `pubrel` is received.
     /// Client records these messages and sends `pubrec` to broker. 
     /// Broker resends these messages if `pubrec` isn't received (which means either broker message
     /// is lost or clinet `pubrec` is lost) and client responds with `pubrec`.
     /// Broker also resends `pubrel` till it receives `pubcomp` (which means either borker `pubrel`
     /// is lost or client's `pubcomp` is lost)
-    incoming_rec: VecDeque<Box<Message>>, // 
+    incoming_rec: VecDeque<Box<Message>>, //
     /// For QoS 2. Store for outgoing publishes. Removed after pubrec is received.
     /// If 'pubrec' isn't received in 'timout' time, client should publish these messages again.
     outgoing_rec: VecDeque<(i64, Box<Message>)>,
     /// For Qos2. Store for outgoing `pubrel` packets. Removed after `pubcomp` is received.
     /// If `pubcomp` is not received in `timeout` time (client's `pubrel` might have been lost and message
     /// isn't released by the broker or broker's `pubcomp` is lost), client should resend `pubrel` again.
-    outgoing_rel: VecDeque<PacketIdentifier>, 
+    outgoing_rel: VecDeque<PacketIdentifier>,
 }
 
 impl ProxyClient {
@@ -415,12 +415,10 @@ impl ProxyClient {
                                             }
 
                                             QualityOfService::Level1 => {
-                                                if self.outgoing_pub.len() < 5 {
-                                                    let mut message = {
-                                                        match self.pub_recv {
-                                                            Some(ref pub_recv) => pub_recv.recv().unwrap(),
-                                                            None => panic!("No publish recv channel"),
-                                                        }
+                                                if self.outgoing_pub.len() < self.opts.pub_q_len as usize{
+                                                    let mut message = match self.pub_recv {
+                                                        Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                                                        None => panic!("No publish recv channel"),
                                                     };
                                                     // Add next packet id to message and publish
                                                     let PacketIdentifier(pkid) = self._next_pkid();
@@ -429,7 +427,18 @@ impl ProxyClient {
                                                 }
                                             }
 
-                                            _ => panic!("Invalid Qos"),
+                                            QualityOfService::Level2 => {
+                                                if self.outgoing_rec.len() < self.opts.pub_q_len as usize{
+                                                    let mut message = match self.pub_recv {
+                                                        Some(ref pub_recv) => pub_recv.recv().unwrap(),
+                                                        None => panic!("No publish recv channel"),
+                                                    };
+                                                    // Add next packet id to message and publish
+                                                    let PacketIdentifier(pkid) = self._next_pkid();
+                                                    message.set_pkid(pkid);
+                                                    let _ = self._publish(message);
+                                                }
+                                            }
                                         }
                                     }
                                     MioNotification::Sub => {
@@ -505,8 +514,8 @@ impl ProxyClient {
                         //        self.outgoing_pub);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_pub
-                            .iter()
-                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                                  .iter()
+                                  .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 self.outgoing_pub.remove(i);
                             }
@@ -529,8 +538,8 @@ impl ProxyClient {
                     &VariablePacket::PubrecPacket(ref pubrec) => {
                         let pkid = pubrec.packet_identifier();
                         match self.outgoing_rec
-                            .iter()
-                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                                  .iter()
+                                  .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 self.outgoing_pub.remove(i);
                             }
@@ -552,8 +561,8 @@ impl ProxyClient {
                     &VariablePacket::PubrelPacket(ref pubrel) => {
                         let pkid = pubrel.packet_identifier();
                         let message = match self.incoming_rec
-                            .iter()
-                            .position(|ref x| x.get_pkid() == Some(pkid)) {
+                                                .iter()
+                                                .position(|ref x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(message) = self.incoming_rec.remove(i) {
                                     Some(message)
@@ -615,8 +624,8 @@ impl ProxyClient {
             // @ TODO: Analyze broker crash cases for all queues.
             QoSWithPacketIdentifier::Level2(pkid) => {
                 match self.incoming_rec
-                    .iter()
-                    .position(|ref x| x.get_pkid() == Some(pkid)) {
+                          .iter()
+                          .position(|ref x| x.get_pkid() == Some(pkid)) {
                     Some(i) => {
                         self.incoming_rec[i] = message.clone();
                     }
@@ -669,8 +678,16 @@ impl ProxyClient {
         match self.state {
             MqttClientState::Connected => {
                 let outgoing_pub = self.outgoing_pub.clone(); //TODO: Remove the clone
+                let outgoing_rec = self.outgoing_rec.clone(); //TODO: Remove the clone
                 let timeout = self.opts.queue_timeout as i64;
+
+                // Republish Qos 1 outgoing publishes
                 for e in outgoing_pub.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
+                    let _ = self._publish(*e.1.clone());
+                }
+
+                // Republish QoS 2 outgoing records
+                for e in outgoing_rec.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
                     let _ = self._publish(*e.1.clone());
                 }
             }
@@ -711,7 +728,7 @@ impl ProxyClient {
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => self.outgoing_pub.push_back((time::get_time().sec, message.clone())),
-            QoSWithPacketIdentifier::Level2(_) => (),
+            QoSWithPacketIdentifier::Level2(_) => self.outgoing_rec.push_back((time::get_time().sec, message.clone())),
         }
 
         debug!("       Publish {:?} {:?} > {} bytes", message.qos, message.topic.to_string(), message.payload.len());
