@@ -98,7 +98,7 @@ impl NetworkStream {
                 try!(s.get_ref().shutdown(how));
                 Ok(())
             }
-            NetworkStream::None => Err(Error::NoStreamError),
+            NetworkStream::None => Err(Error::NoStream),
         }
     }
 
@@ -106,7 +106,7 @@ impl NetworkStream {
         match *self {
             NetworkStream::Tcp(ref s) => Ok(s),
             NetworkStream::Ssl(ref s) => Ok(s.get_ref()),
-            NetworkStream::None => Err(Error::NoStreamError),
+            NetworkStream::None => Err(Error::NoStream),
         }
     }
 }

@@ -10,7 +10,6 @@ use std::io::Write;
 use std::str;
 use mioco;
 use mioco::tcp::TcpStream;
-use mioco::*;
 use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
@@ -35,9 +34,8 @@ pub struct ClientOptions {
     ssl: Option<SslContext>,
 }
 
-
-impl ClientOptions {
-    pub fn new() -> ClientOptions {
+impl Default for ClientOptions {
+    fn default() -> Self {
         ClientOptions {
             keep_alive: Some(5),
             clean_session: true,
@@ -51,6 +49,11 @@ impl ClientOptions {
             ssl: None,
         }
     }
+}
+
+
+impl ClientOptions {
+    pub fn new() -> ClientOptions { ClientOptions { ..Default::default() } }
 
     pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         self.keep_alive = Some(secs);
@@ -109,12 +112,13 @@ impl ClientOptions {
         let addrs = addr.to_socket_addrs().unwrap();
         for addr in addrs {
             if let SocketAddr::V4(_) = addr {
-                return addr.clone();
+                return addr;
             }
         }
         unreachable!("Cannot lookup address");
     }
 
+    // TODO: Change name. no connection happenening
     pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<ProxyClient> {
         if self.client_id == None {
             self.generate_client_id();
@@ -208,10 +212,13 @@ impl Subscriber {
         Ok(())
     }
 
+    // TODO: Multiple topics, timeout
     pub fn receive(&self) -> Result<Message> {
         let message = self.message_recv.recv().unwrap();
         Ok(message)
     }
+
+    // TODO Add peek function
 }
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
@@ -231,22 +238,32 @@ pub struct ProxyClient {
     pub_recv: Option<chan::Receiver<Message>>,
 
     /// Queues. Note: 'record' is qos2 term for 'publish'
-    /// For QoS 1. Stores outgoing publishes. Removed after `puback` is received.
-    /// If 'puback' isn't received in `queue_timeout` time, client should resend these messages
+    /// For QoS 1. Stores outgoing publishes. Removed after `puback` is
+    /// received.
+    /// If 'puback' isn't received in `queue_timeout` time, client should
+    /// resend these messages
     outgoing_pub: VecDeque<(i64, Box<Message>)>,
-    /// For QoS 2. Store for incoming publishes to record. Released after `pubrel` is received.
+    /// For QoS 2. Store for incoming publishes to record. Released after
+    /// `pubrel` is received.
     /// Client records these messages and sends `pubrec` to broker.
-    /// Broker resends these messages if `pubrec` isn't received (which means either broker message
+    /// Broker resends these messages if `pubrec` isn't received (which means
+    /// either broker message
     /// is lost or clinet `pubrec` is lost) and client responds with `pubrec`.
-    /// Broker also resends `pubrel` till it receives `pubcomp` (which means either borker `pubrel`
+    /// Broker also resends `pubrel` till it receives `pubcomp` (which means
+    /// either borker `pubrel`
     /// is lost or client's `pubcomp` is lost)
     incoming_rec: VecDeque<Box<Message>>, //
-    /// For QoS 2. Store for outgoing publishes. Removed after pubrec is received.
-    /// If 'pubrec' isn't received in 'timout' time, client should publish these messages again.
+    /// For QoS 2. Store for outgoing publishes. Removed after pubrec is
+    /// received.
+    /// If 'pubrec' isn't received in 'timout' time, client should publish
+    /// these messages again.
     outgoing_rec: VecDeque<(i64, Box<Message>)>,
-    /// For Qos2. Store for outgoing `pubrel` packets. Removed after `pubcomp` is received.
-    /// If `pubcomp` is not received in `timeout` time (client's `pubrel` might have been lost and message
-    /// isn't released by the broker or broker's `pubcomp` is lost), client should resend `pubrel` again.
+    /// For Qos2. Store for outgoing `pubrel` packets. Removed after `pubcomp`
+    /// is received.
+    /// If `pubcomp` is not received in `timeout` time (client's `pubrel` might
+    /// have been lost and message
+    /// isn't released by the broker or broker's `pubcomp` is lost), client
+    /// should resend `pubrel` again.
     outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 }
 
@@ -254,12 +271,14 @@ impl ProxyClient {
     /// Returns `Subscriber` and `Publisher` and handles reqests from them
     /// in a seperate thread.
     ///
-    ///```ignore
-    ///let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
-    ///let (publisher, subscriber) = match proxy_client.await() {
+    /// ```ignore
+    /// let proxy_client =
+    /// client_options.connect("localhost:1883").expect("CONNECT ERROR");
+    /// let (publisher, subscriber) = match proxy_client.await() {
     ///    Ok(h) => h,
     ///    Err(e) => panic!("Await Error --> {:?}", e),
-    ///};
+    /// };
+    // TODO: CHange name
     pub fn await(mut self) -> Result<(Publisher, Subscriber)> {
         // @ Create notifiers for users to publish to event loop
         let (notify_send, notify_recv) = mpsc::channel::<MioNotification>();
@@ -317,7 +336,7 @@ impl ProxyClient {
                     }
 
                     // @ Start the event loop
-                    'events: loop {
+                    loop {
                         select! (
                             r:self.stream.get_ref().unwrap() => {
                                 let packet = match VariablePacket::decode(&mut self.stream) {
@@ -459,9 +478,8 @@ impl ProxyClient {
                     } //event loop end
                 } //mqtt connection loop end
 
-                Err(Error::EventLoopError)
             }); //mioco end
-            Err(Error::EventLoopError)
+            Err(Error::EventLoop)
         }); //thread end
 
         Ok((publisher, subscriber))
@@ -470,8 +488,8 @@ impl ProxyClient {
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
         match self.state {
             MqttClientState::Handshake => {
-                match packet {
-                    &VariablePacket::ConnackPacket(ref connack) => {
+                match *packet {
+                    VariablePacket::ConnackPacket(ref connack) => {
                         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
                             error!("Failed to connect, err {:?}", connack.connect_return_code());
                             Ok(None)
@@ -488,34 +506,34 @@ impl ProxyClient {
             }
 
             MqttClientState::Connected => {
-                match packet {
-                    &VariablePacket::SubackPacket(..) => {
+                match *packet {
+                    VariablePacket::SubackPacket(..) => {
                         // if ack.packet_identifier() != 10
                         // TODO: Maintain a subscribe queue and retry if
                         // subscribes are not successful
                         Ok(None)
                     }
 
-                    &VariablePacket::PingrespPacket(..) => {
+                    VariablePacket::PingrespPacket(..) => {
                         self.await_ping = false;
                         Ok(None)
                     }
 
                     // @ Receives disconnect packet
-                    &VariablePacket::DisconnectPacket(..) => {
+                    VariablePacket::DisconnectPacket(..) => {
                         // TODO
                         Ok(None)
                     }
 
                     // @ Receives puback packet and verifies it with sub packet id
-                    &VariablePacket::PubackPacket(ref puback) => {
+                    VariablePacket::PubackPacket(ref puback) => {
                         // debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
                         //        puback,
                         //        self.outgoing_pub);
                         let pkid = puback.packet_identifier();
                         match self.outgoing_pub
-                                  .iter()
-                                  .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            .iter()
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 self.outgoing_pub.remove(i);
                             }
@@ -527,7 +545,7 @@ impl ProxyClient {
                     }
 
                     // @ Receives publish packet
-                    &VariablePacket::PublishPacket(ref publ) => {
+                    VariablePacket::PublishPacket(ref publ) => {
                         let message = try!(Message::from_pub(publ));
                         self._handle_message(message)
                     }
@@ -535,11 +553,11 @@ impl ProxyClient {
                     // @ Qos2 message published by client is recorded by broker
                     // @ Remove message from 'outgoing_rec' queue and add pkid to 'outgoing_rel'
                     // @ Send 'pubrel' to broker
-                    &VariablePacket::PubrecPacket(ref pubrec) => {
+                    VariablePacket::PubrecPacket(ref pubrec) => {
                         let pkid = pubrec.packet_identifier();
                         match self.outgoing_rec
-                                  .iter()
-                                  .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            .iter()
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 self.outgoing_pub.remove(i);
                             }
@@ -558,11 +576,11 @@ impl ProxyClient {
                     // @ send 'pubcomp' to sender indicating that message is released
                     // @ if 'pubcomp' packet is lost, broker will send pubrel again
                     // @ for the released message, for which we send dummy 'pubcomp' again
-                    &VariablePacket::PubrelPacket(ref pubrel) => {
+                    VariablePacket::PubrelPacket(ref pubrel) => {
                         let pkid = pubrel.packet_identifier();
                         let message = match self.incoming_rec
-                                                .iter()
-                                                .position(|ref x| x.get_pkid() == Some(pkid)) {
+                            .iter()
+                            .position(|ref x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(message) = self.incoming_rec.remove(i) {
                                     Some(message)
@@ -580,11 +598,11 @@ impl ProxyClient {
                     }
 
                     // @ Remove this pkid from 'outgoing_rel' queue
-                    &VariablePacket::PubcompPacket(ref pubcomp) => {
+                    VariablePacket::PubcompPacket(ref pubcomp) => {
                         let pkid = pubcomp.packet_identifier();
                         match self.outgoing_rel
-                                  .iter()
-                                  .position(|ref x| x.1 == PacketIdentifier(pkid)) {
+                            .iter()
+                            .position(|ref x| x.1 == PacketIdentifier(pkid)) {
                             Some(pos) => self.outgoing_rel.remove(pos),
                             None => {
                                 error!("Oopssss..unsolicited complete");
@@ -594,7 +612,7 @@ impl ProxyClient {
                         Ok(None)
                     }
 
-                    &VariablePacket::UnsubackPacket(..) => Ok(None),
+                    VariablePacket::UnsubackPacket(..) => Ok(None),
 
                     _ => Ok(None), //TODO: Replace this with panic later
                 }
@@ -637,8 +655,8 @@ impl ProxyClient {
             // @ TODO: Analyze broker crash cases for all queues.
             QoSWithPacketIdentifier::Level2(pkid) => {
                 match self.incoming_rec
-                          .iter()
-                          .position(|ref x| x.get_pkid() == Some(pkid)) {
+                    .iter()
+                    .position(|ref x| x.get_pkid() == Some(pkid)) {
                     Some(i) => {
                         self.incoming_rec[i] = message.clone();
                     }
@@ -660,8 +678,8 @@ impl ProxyClient {
     }
 
     pub fn disconnect(&mut self) -> Result<()> {
-        let connect = try!(self._generate_disconnect_packet());
-        try!(self._write_packet(connect));
+        let disconnect = try!(self._generate_disconnect_packet());
+        try!(self._write_packet(disconnect));
         self._flush()
     }
 
@@ -746,9 +764,9 @@ impl ProxyClient {
 
     fn _publish(&mut self, message: Message) -> Result<()> {
 
-        let qos = message.qos.clone();
-        let message = message.transform(Some(qos.clone()));
-        let ref payload = *message.payload;
+        let qos = message.qos;
+        let message = message.transform(Some(qos));
+        let payload = &*message.payload;
 
         let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), payload.clone()));
 
@@ -810,7 +828,7 @@ impl ProxyClient {
         match connect_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -823,7 +841,7 @@ impl ProxyClient {
         match disconnect_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -838,7 +856,7 @@ impl ProxyClient {
             // use try! here and all generate packets
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -853,7 +871,7 @@ impl ProxyClient {
         match subscribe_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -866,7 +884,7 @@ impl ProxyClient {
         match publish_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -879,7 +897,7 @@ impl ProxyClient {
         match puback_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -892,7 +910,7 @@ impl ProxyClient {
         match pubrec_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -905,7 +923,7 @@ impl ProxyClient {
         match pubrel_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)
@@ -918,7 +936,7 @@ impl ProxyClient {
         match pubcomp_packet.encode(&mut buf) {
             Ok(result) => result,
             Err(_) => {
-                return Err(Error::MqttEncodeError);
+                return Err(Error::MqttEncode);
             }
         };
         Ok(buf)

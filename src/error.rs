@@ -10,11 +10,11 @@ pub type SslError = ssl::error::SslError;
 #[derive(Debug)]
 pub enum Error {
     InvalidMosqClient,
-    ConnectionError(i32),
-    MqttEncodeError,
-    TlsError(i32),
-    SubscribeError(i32),
-    PublishError(i32),
+    Connection(i32),
+    MqttEncode,
+    Tls(i32),
+    Subscribe(i32),
+    Publish(i32),
     AlreadyConnected,
     UnsupportedFeature,
     UnrecognizedPacket,
@@ -26,13 +26,13 @@ pub enum Error {
     ConnectionRefused(i32),
     Io(io::Error),
     InvalidCert(String),
-    NoStreamError,
-    TopicNameError,
+    NoStream,
+    TopicName,
     NoReconnectTry,
-    MqttPacketError,
-    MioNotifyError,
-    SslError,
-    EventLoopError,
+    MqttPacket,
+    MioNotify,
+    Ssl,
+    EventLoop,
 }
 
 impl From<io::Error> for Error {
@@ -41,15 +41,15 @@ impl From<io::Error> for Error {
 
 
 impl From<TopicNameError> for Error {
-    fn from(_: TopicNameError) -> Error { Error::TopicNameError }
+    fn from(_: TopicNameError) -> Error { Error::TopicName }
 }
 
 impl<T> From<SendError<T>> for Error {
-    fn from(_: SendError<T>) -> Error { Error::MioNotifyError }
+    fn from(_: SendError<T>) -> Error { Error::MioNotify }
 }
 
 impl From<SslError> for Error {
-    fn from(_: SslError) -> Error { Error::SslError }
+    fn from(_: SslError) -> Error { Error::Ssl }
 }
 
 // impl<T> From<mio::NotifyError<T>> for Error {
