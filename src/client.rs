@@ -173,6 +173,7 @@ pub enum MioNotification {
 pub struct Publisher {
     pub_send: chan::Sender<Message>,
     notifier: Sender<MioNotification>,
+    retain: bool,
 }
 
 impl Publisher {
@@ -184,9 +185,10 @@ impl Publisher {
             QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
         };
+
         let message = Message {
             topic: topic,
-            retain: false, // TODO: Verify this
+            retain: self.retain, // TODO: Verify this
             qos: qos_pkid,
             payload: Arc::new(payload),
         };
@@ -195,6 +197,11 @@ impl Publisher {
         self.pub_send.send(message);
         try!(self.notifier.send(MioNotification::Pub(qos)));
         Ok(())
+    }
+
+    pub fn set_retain(&mut self, retain: bool) -> &mut Self {
+        self.retain = true;
+        self
     }
 }
 
@@ -291,6 +298,7 @@ impl ProxyClient {
         let publisher = Publisher {
             pub_send: pub_send,
             notifier: notify_send.clone(),
+            retain: false,
         };
         self.pub_recv = Some(pub_recv);
 
