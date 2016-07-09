@@ -140,7 +140,7 @@ fn publish_qos1_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-//#[test]
+#[test]
 fn subscribe_test() {
     env_logger::init().unwrap();
 
@@ -158,13 +158,9 @@ fn subscribe_test() {
     vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
               QualityOfService::Level0)];
 
-    subscriber.subscribe(topics);
-    thread::spawn(move || {
-        loop {
-            let message = subscriber.receive().unwrap();
-            println!("@@@ {:?}", message);
-        }
-    });
+    subscriber.subscribe(topics, |message| {
+        println!("@@@ {:?}", message);
+    }).expect("Subcription failure");
 
     thread::sleep(Duration::new(120, 0));
 }
