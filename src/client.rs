@@ -19,6 +19,7 @@ use std::thread;
 use chan;
 use tls::{SslContext, NetworkStream};
 use mioco::sync::mpsc::{self, Sender};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -136,11 +137,6 @@ impl ClientOptions {
             state: MqttClientState::Disconnected,
             opts: self,
 
-            // Channels
-            pub_recv: None,
-            sub_recv: None,
-            msg_send: None,
-
             // Queues
             incoming_rec: VecDeque::new(),
             outgoing_pub: VecDeque::new(),
@@ -200,32 +196,30 @@ impl Publisher {
     }
 
     pub fn set_retain(&mut self, retain: bool) -> &mut Self {
-        self.retain = true;
+        self.retain = retain;
         self
+
     }
 }
-
+type SendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct Subscriber {
     subscribe_send: chan::Sender<Vec<(TopicFilter, QualityOfService)>>,
-    message_recv: chan::Receiver<Message>,
     notifier: Sender<MioNotification>,
+    callback_send: chan::Sender<SendableFn>,
 }
 
 impl Subscriber {
-    pub fn subscribe(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
-        // TODO: Check for topic sanity and return error if not
-        self.subscribe_send.send(topics);
+    // TODO Add peek function
+
+    pub fn subscribe<F>(&self, topics: Vec<(TopicFilter, QualityOfService)>, callback: F) -> Result<()>
+        where F: Fn(Message) + Send + Sync + 'static
+
+    {
         try!(self.notifier.send(MioNotification::Sub));
+        self.subscribe_send.send(topics);
+        self.callback_send.send(Box::new(callback));
         Ok(())
     }
-
-    // TODO: Multiple topics, timeout
-    pub fn receive(&self) -> Result<Message> {
-        let message = self.message_recv.recv().unwrap();
-        Ok(message)
-    }
-
-    // TODO Add peek function
 }
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
@@ -239,38 +233,14 @@ pub struct ProxyClient {
     last_pkid: PacketIdentifier,
     await_ping: bool,
 
-    // Channels
-    sub_recv: Option<chan::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
-    msg_send: Option<chan::Sender<Message>>,
-    pub_recv: Option<chan::Receiver<Message>>,
-
     /// Queues. Note: 'record' is qos2 term for 'publish'
-    /// For QoS 1. Stores outgoing publishes. Removed after `puback` is
-    /// received.
-    /// If 'puback' isn't received in `queue_timeout` time, client should
-    /// resend these messages
+    /// For QoS 1. Stores outgoing publishes
     outgoing_pub: VecDeque<(i64, Box<Message>)>,
-    /// For QoS 2. Store for incoming publishes to record. Released after
-    /// `pubrel` is received.
-    /// Client records these messages and sends `pubrec` to broker.
-    /// Broker resends these messages if `pubrec` isn't received (which means
-    /// either broker message
-    /// is lost or clinet `pubrec` is lost) and client responds with `pubrec`.
-    /// Broker also resends `pubrel` till it receives `pubcomp` (which means
-    /// either borker `pubrel`
-    /// is lost or client's `pubcomp` is lost)
+    /// For QoS 2. Store for incoming publishes to record.
     incoming_rec: VecDeque<Box<Message>>, //
-    /// For QoS 2. Store for outgoing publishes. Removed after pubrec is
-    /// received.
-    /// If 'pubrec' isn't received in 'timout' time, client should publish
-    /// these messages again.
+    /// For QoS 2. Store for outgoing publishes. 
     outgoing_rec: VecDeque<(i64, Box<Message>)>,
-    /// For Qos2. Store for outgoing `pubrel` packets. Removed after `pubcomp`
-    /// is received.
-    /// If `pubcomp` is not received in `timeout` time (client's `pubrel` might
-    /// have been lost and message
-    /// isn't released by the broker or broker's `pubcomp` is lost), client
-    /// should resend `pubrel` again.
+    /// For Qos2. Store for outgoing `pubrel` packets. 
     outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 }
 
@@ -291,7 +261,7 @@ impl ProxyClient {
         let (notify_send, notify_recv) = mpsc::channel::<MioNotification>();
         let (pub_send, pub_recv) = chan::sync::<Message>(self.opts.pub_q_len as usize);
         let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
-        let (msg_send, msg_recv) = chan::sync::<Message>(0);
+        let (callback_send, callback_recv) = chan::sync::<SendableFn>(0);
 
         // @ Create 'publisher' and 'subscriber'
         // @ These are the handles using which user interacts with rumqtt.
@@ -300,15 +270,12 @@ impl ProxyClient {
             notifier: notify_send.clone(),
             retain: false,
         };
-        self.pub_recv = Some(pub_recv);
 
         let subscriber = Subscriber {
             subscribe_send: sub_send,
-            message_recv: msg_recv,
             notifier: notify_send.clone(),
+            callback_send: callback_send,
         };
-        self.msg_send = Some(msg_send);
-        self.sub_recv = Some(sub_recv);
 
         // @ New thread for event loop
         thread::spawn(move || -> Result<()> {
@@ -326,6 +293,9 @@ impl ProxyClient {
                 // @ Timer for ping requests and retransmits
                 let mut ping_timer = mioco::timer::Timer::new();
                 let mut resend_timer = mioco::timer::Timer::new();
+
+                // Callback list
+                let mut callback_list: HashMap<String, Arc<SendableFn>> = HashMap::new();
 
                 'mqtt_connect: loop {
                     // @ Send Mqtt connect packet.
@@ -374,10 +344,14 @@ impl ProxyClient {
                                 match self.handle_packet(&packet) {
                                     Ok(message) => {
                                         if let Some(m) = message {
-                                            match self.msg_send {
-                                                Some(ref msg_send) => msg_send.send(*m),
-                                                None => panic!("Expected a message send channel"),
-                                            }
+                                            let topic =  m.topic.to_string();
+                                            match callback_list.get_mut(&topic) {
+                                                Some(callback) => {
+                                                    let callback2 = callback.clone();
+                                                    mioco::spawn(move || callback2(*m));
+                                                }
+                                                None => panic!("No callback"),
+                                            };
                                         }
                                     }
                                     Err(err) => {
@@ -432,21 +406,13 @@ impl ProxyClient {
                                     MioNotification::Pub(qos) => {
                                         match qos {
                                             QualityOfService::Level0 => {
-                                                let message = {
-                                                    match self.pub_recv {
-                                                        Some(ref pub_recv) => pub_recv.recv().unwrap(),
-                                                        None => panic!("No publish recv channel"),
-                                                    }
-                                                };
+                                                let message = pub_recv.recv().unwrap();
                                                 let _ = self._publish(message);
                                             }
 
                                             QualityOfService::Level1 => {
                                                 if self.outgoing_pub.len() < self.opts.pub_q_len as usize{
-                                                    let mut message = match self.pub_recv {
-                                                        Some(ref pub_recv) => pub_recv.recv().unwrap(),
-                                                        None => panic!("No publish recv channel"),
-                                                    };
+                                                    let mut message = pub_recv.recv().unwrap();
                                                     // Add next packet id to message and publish
                                                     let PacketIdentifier(pkid) = self._next_pkid();
                                                     message.set_pkid(pkid);
@@ -456,10 +422,7 @@ impl ProxyClient {
 
                                             QualityOfService::Level2 => {
                                                 if self.outgoing_rec.len() < self.opts.pub_q_len as usize{
-                                                    let mut message = match self.pub_recv {
-                                                        Some(ref pub_recv) => pub_recv.recv().unwrap(),
-                                                        None => panic!("No publish recv channel"),
-                                                    };
+                                                    let mut message = pub_recv.recv().unwrap();
                                                     // Add next packet id to message and publish
                                                     let PacketIdentifier(pkid) = self._next_pkid();
                                                     message.set_pkid(pkid);
@@ -469,14 +432,13 @@ impl ProxyClient {
                                         }
                                     }
                                     MioNotification::Sub => {
-                                        let topics = match self.sub_recv {
-                                            Some(ref sub_recv) => sub_recv.recv(),
-                                            None => panic!("Expected a subscribe recieve channel"),
-                                        };
-
-                                        if let Some(topics) = topics {
-                                            info!("request = {:?}", topics);
-                                            let _ = self._subscribe(topics);
+                                        let topics = sub_recv.recv().unwrap();
+                                        let _ = self._subscribe(topics.clone());
+                                        let callback = callback_recv.recv().expect("Expected a callback"); 
+                                        let callback = Arc::new(callback);                             
+                                        for topic in topics {
+                                            let (topic, _) = topic;
+                                            callback_list.insert(topic.to_string(), callback.clone());
                                         }
                                     }
                                 }

@@ -16,6 +16,7 @@ pub struct Message {
     pub payload: Arc<Vec<u8>>,
 }
 
+
 impl Message {
     pub fn from_pub(publish: &PublishPacket) -> Result<Box<Message>> {
 
