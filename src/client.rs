@@ -120,7 +120,7 @@ impl ClientOptions {
     }
 
     // TODO: Change name. no connection happenening
-    pub fn connect<A: ToSocketAddrs>(mut self, addr: A) -> Result<ProxyClient> {
+    pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> ProxyClient {
         if self.client_id == None {
             self.generate_client_id();
         }
@@ -135,7 +135,7 @@ impl ClientOptions {
             last_pkid: PacketIdentifier(0),
             await_ping: false,
             state: MqttClientState::Disconnected,
-            opts: self,
+            opts: self.clone(),
 
             // Queues
             incoming_rec: VecDeque::new(),
@@ -144,7 +144,7 @@ impl ClientOptions {
             outgoing_rel: VecDeque::new(),
         };
 
-        Ok(proxy)
+        proxy
     }
 }
 
@@ -247,16 +247,7 @@ pub struct ProxyClient {
 impl ProxyClient {
     /// Returns `Subscriber` and `Publisher` and handles reqests from them
     /// in a seperate thread.
-    ///
-    /// ```ignore
-    /// let proxy_client =
-    /// client_options.connect("localhost:1883").expect("CONNECT ERROR");
-    /// let (publisher, subscriber) = match proxy_client.await() {
-    ///    Ok(h) => h,
-    ///    Err(e) => panic!("Await Error --> {:?}", e),
-    /// };
-    // TODO: CHange name
-    pub fn await(mut self) -> Result<(Publisher, Subscriber)> {
+    pub fn start(mut self) -> Result<(Publisher, Subscriber)> {
         // @ Create notifiers for users to publish to event loop
         let (notify_send, notify_recv) = mpsc::channel::<MioNotification>();
         let (pub_send, pub_recv) = chan::sync::<Message>(self.opts.pub_q_len as usize);

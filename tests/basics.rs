@@ -51,10 +51,6 @@ fn tls_test() {
 fn tls_connect() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
-
-    let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5);
-    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
     let ca = "./tests/ca.crt";
     let cert = "./tests/scooter.crt";
     let key = "./tests/scooter.key";
@@ -62,14 +58,16 @@ fn tls_connect() {
     //let ssl = SslContext::with_cert_key_and_ca(cert, key, ca).expect("#Ssl context error");
     //let ssl = SslContext::with_cert_and_key(cert, key).expect("#Ssl context error");
 
-    client_options.set_tls(ssl);
+    let mut client_options = ClientOptions::new();
 
-    let proxy_client = client_options.connect("localhost:8883").expect("CONNECT ERROR");
-    match proxy_client.await() {
-        Ok(_) => (),
-        Err(e) => panic!("Await Error --> {:?}", e),
-    };
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_tls(ssl)
+                                    .connect("localhost:1883");
 
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
     thread::sleep(Duration::new(120, 0));
 }   
 
@@ -79,13 +77,14 @@ fn pingreq_reconnect_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5);
-    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
-    match proxy_client.await() {
-        Ok(_) => (),
-        Err(e) => panic!("Await Error --> {:?}", e),
-    };
+
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .connect("localhost:1883");
+
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
 
     thread::sleep(Duration::new(120, 0));
 }
@@ -98,14 +97,14 @@ fn publish_qos0_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5);
-    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
 
-    let (publisher, _) = match proxy_client.await() {
-        Ok((publisher, _)) => (publisher, ..),
-        Err(e) => panic!("Await Error --> {:?}", e),
-    };
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .connect("localhost:1883");
+
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
 
     for i in 0..100 {
         let payload = format!("{}. hello rust", i);
@@ -121,15 +120,15 @@ fn publish_qos1_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5).set_pub_q_len(10);
-    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let proxy_client =
-     client_options.connect("localhost:1883").expect("CONNECT ERROR");
 
-    let (publisher, subscriber) = match proxy_client.await() {
-        Ok(h) => h,
-        Err(e) => panic!("Await Error --> {:?}", e),
-    };
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_pub_q_len(10)
+                                    .connect("localhost:1883");
+
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
 
     for i in 0..100 {
         let payload = format!("{}. hello rust", i);
@@ -145,14 +144,14 @@ fn subscribe_test() {
     env_logger::init().unwrap();
 
     let mut client_options = ClientOptions::new();
-    client_options.set_keep_alive(5);
-    client_options.set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)));
-    let proxy_client = client_options.connect("localhost:1883").expect("CONNECT ERROR");
 
-    let (_, subscriber) = match proxy_client.await() {
-        Ok((_, subcriber)) => (.., subcriber),
-        Err(e) => panic!("Await Error --> {:?}", e),
-    };
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .connect("localhost:1883");
+
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
         
     let topics: Vec<(TopicFilter, QualityOfService)> =
     vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
