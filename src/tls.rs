@@ -21,19 +21,20 @@ impl Default for SslContext {
 }
 
 impl SslContext {
-    fn new(context: ssl::SslContext) -> Self { SslContext { inner: Arc::new(context) } }
+    // fn new(context: ssl::SslContext) -> Self { SslContext { inner:
+    // Arc::new(context) } }
 
-    fn with_cert_and_key<C, K>(cert: C, key: K) -> Result<SslContext>
-        where C: AsRef<Path>,
-              K: AsRef<Path>
-    {
-        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
-        try!(ctx.set_cipher_list("DEFAULT"));
-        try!(ctx.set_certificate_file(cert.as_ref(), X509FileType::PEM));
-        try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
-        ctx.set_verify(SSL_VERIFY_NONE, None);
-        Ok(SslContext { inner: Arc::new(ctx) })
-    }
+    // fn with_cert_and_key<C, K>(cert: C, key: K) -> Result<SslContext>
+    //     where C: AsRef<Path>,
+    //           K: AsRef<Path>
+    // {
+    //     let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
+    //     try!(ctx.set_cipher_list("DEFAULT"));
+    //     try!(ctx.set_certificate_file(cert.as_ref(), X509FileType::PEM));
+    //     try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
+    //     ctx.set_verify(SSL_VERIFY_NONE, None);
+    //     Ok(SslContext { inner: Arc::new(ctx) })
+    // }
 
     /// Create a new `SslContext` with server authentication
     pub fn with_ca<CA>(ca: CA) -> Result<SslContext>

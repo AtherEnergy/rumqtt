@@ -54,23 +54,23 @@ impl Default for ClientOptions {
 
 
 impl ClientOptions {
-    /// Creates a new `ClientOptions` object which is used to set connection 
+    /// Creates a new `ClientOptions` object which is used to set connection
     /// options for new client. Below are defaults with which this object is
-    /// created.  
-    ///  
-    ///|                         |                          |
-    ///|-------------------------|--------------------------|
-    ///| **client_id**           | Randomly generated       |
-    ///| **clean_session**       | true                     |
-    ///| **keep_alive**          | 5 secs                   |
-    ///| **reconnect try**       | Doesn't try to reconnect |
-    ///| **retransmit try time** | 60 secs                  |
-    ///| **pub_q_len**           | 50                       |
-    ///| **sub_q_len**           | 5                        |
+    /// created.
+    ///
+    /// |                         |                          |
+    /// |-------------------------|--------------------------|
+    /// | **client_id**           | Randomly generated       |
+    /// | **clean_session**       | true                     |
+    /// | **keep_alive**          | 5 secs                   |
+    /// | **reconnect try**       | Doesn't try to reconnect |
+    /// | **retransmit try time** | 60 secs                  |
+    /// | **pub_q_len**           | 50                       |
+    /// | **sub_q_len**           | 5                        |
     ///
     pub fn new() -> ClientOptions { ClientOptions { ..Default::default() } }
 
-    /// Number of seconds after which client should ping the broker 
+    /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         self.keep_alive = Some(secs);
@@ -88,12 +88,14 @@ impl ClientOptions {
     /// `clean_session = true` instructs the broker to clean all the client
     /// state when it disconnects. Note that it is broker which is discarding
     /// the client state. But this client will hold its queues and attemts to
-    /// to retransmit when reconnection happens.  (TODO: Verify this)    
-    ///   
+    /// to retransmit when reconnection happens.  (TODO: Verify this)
+    ///
     /// When set `false`, broker will hold the client state and performs pending
-    /// operations on the client when reconnection with same `client_id` happens.  
-    ///   
-    /// Hence **make sure that you manually set `client_id` when `clean_session` is false**
+    /// operations on the client when reconnection with same `client_id`
+    /// happens.
+    ///
+    /// Hence **make sure that you manually set `client_id` when
+    /// `clean_session` is false**
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
         self
@@ -106,29 +108,31 @@ impl ClientOptions {
         self
     }
 
-    /// Set `username` for broker to perform client authentivation 
+    /// Set `username` for broker to perform client authentivation
     /// vis `username` and `password`
     pub fn set_username(&mut self, username: String) -> &mut Self {
         self.username = Some(username);
         self
     }
 
-    /// Set `password` for broker to perform client authentivation 
+    /// Set `password` for broker to perform client authentivation
     /// vis `username` and `password`
     pub fn set_password(&mut self, password: String) -> &mut Self {
         self.password = Some(password);
         self
     }
 
-    /// All the `QoS > 0` publishes state will be saved to attempt 
-    /// retransmits incase ack from broker fails.  
-    ///   
-    /// If broker disconnects for some time, `Publisher` shouldn't throw error 
-    /// immediately during publishes. At the same time, `Publisher` shouldn't be 
-    /// allowed to infinitely push to the queue.  
-    ///   
-    /// Publish queue length specifies maximum queue capacity upto which `Publisher`
-    /// can push with out blocking. Messages in this queue will published as soon as 
+    /// All the `QoS > 0` publishes state will be saved to attempt
+    /// retransmits incase ack from broker fails.
+    ///
+    /// If broker disconnects for some time, `Publisher` shouldn't throw error
+    /// immediately during publishes. At the same time, `Publisher` shouldn't be
+    /// allowed to infinitely push to the queue.
+    ///
+    /// Publish queue length specifies maximum queue capacity upto which
+    /// `Publisher`
+    /// can push with out blocking. Messages in this queue will published as
+    /// soon as
     /// connection is reestablished and `Publisher` gets unblocked
     pub fn set_pub_q_len(&mut self, len: u16) -> &mut Self {
         self.pub_q_len = len;
@@ -168,15 +172,16 @@ impl ClientOptions {
     /// to connect to. Along with connection details, this object holds
     /// all the state information of a connection.
     ///
-    /// **NOTE**: This should be the final call of `ClientOptions` method chaining
+    /// **NOTE**: This should be the final call of `ClientOptions` method
+    /// chaining
     ///
-    ///```ignore
-    ///let client = client_options.set_keep_alive(5)
+    /// ```ignore
+    /// let client = client_options.set_keep_alive(5)
     ///                           .set_reconnect(5)
     ///                           .set_client_id("my-client-id")
     ///                           .set_clean_session(true)
     ///                           .connect("localhost:1883");
-    ///```
+    /// ```
     pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> ProxyClient {
         if self.client_id == None {
             self.generate_client_id();
@@ -261,12 +266,17 @@ pub struct Subscriber {
 impl Subscriber {
     // TODO Add peek function
 
-    pub fn subscribe<F>(&self, topics: Vec<(TopicFilter, QualityOfService)>, callback: F) -> Result<()>
+    pub fn subscribe<F>(&self, topics: Vec<(&str, QualityOfService)>, callback: F) -> Result<()>
         where F: Fn(Message) + Send + Sync + 'static
-
     {
+        let mut sub_topics = vec![];
+        for topic in topics {
+            let topic = (try!(TopicFilter::new_checked(topic.0)), topic.1);
+            sub_topics.push(topic);
+        }
+
         try!(self.notifier.send(MioNotification::Sub));
-        self.subscribe_send.send(topics);
+        self.subscribe_send.send(sub_topics);
         self.callback_send.send(Box::new(callback));
         Ok(())
     }
@@ -288,9 +298,9 @@ pub struct ProxyClient {
     outgoing_pub: VecDeque<(i64, Box<Message>)>,
     /// For QoS 2. Store for incoming publishes to record.
     incoming_rec: VecDeque<Box<Message>>, //
-    /// For QoS 2. Store for outgoing publishes. 
+    /// For QoS 2. Store for outgoing publishes.
     outgoing_rec: VecDeque<(i64, Box<Message>)>,
-    /// For Qos2. Store for outgoing `pubrel` packets. 
+    /// For Qos2. Store for outgoing `pubrel` packets.
     outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 }
 
@@ -475,8 +485,8 @@ impl ProxyClient {
                                     MioNotification::Sub => {
                                         let topics = sub_recv.recv().unwrap();
                                         let _ = self._subscribe(topics.clone());
-                                        let callback = callback_recv.recv().expect("Expected a callback"); 
-                                        let callback = Arc::new(callback);                             
+                                        let callback = callback_recv.recv().expect("Expected a callback");
+                                        let callback = Arc::new(callback);
                                         for topic in topics {
                                             let (topic, _) = topic;
                                             callback_list.insert(topic.to_string(), callback.clone());

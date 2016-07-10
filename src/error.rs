@@ -1,6 +1,7 @@
 use std::result;
 use std::io;
 use mqtt::topic_name::TopicNameError;
+use mqtt::topic_filter::TopicFilterError;
 use std::sync::mpsc::SendError;
 use openssl::ssl;
 
@@ -28,6 +29,7 @@ pub enum Error {
     InvalidCert(String),
     NoStream,
     TopicName,
+    TopicFilter,
     NoReconnectTry,
     MqttPacket,
     MioNotify,
@@ -42,6 +44,10 @@ impl From<io::Error> for Error {
 
 impl From<TopicNameError> for Error {
     fn from(_: TopicNameError) -> Error { Error::TopicName }
+}
+
+impl From<TopicFilterError> for Error {
+    fn from(_: TopicFilterError) -> Error { Error::TopicFilter }
 }
 
 impl<T> From<SendError<T>> for Error {

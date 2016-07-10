@@ -4,7 +4,7 @@ extern crate log;
 extern crate env_logger;
 
 
-use rumqtt::{ClientOptions, SslContext, TopicFilter, QoS};
+use rumqtt::{ClientOptions, SslContext, QoS};
 use std::thread;
 use std::time::Duration;
 
@@ -114,9 +114,7 @@ fn subscribe_test() {
     // Connects to a broker and returns a `Publisher` and `Subscriber`
     let (_, subscriber) = proxy_client.start().expect("Coudn't start");
         
-    let topics: Vec<(TopicFilter, QoS)> =
-    vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
-              QoS::Level0)];
+    let topics = vec![("hello/world", QoS::Level0), ("hello/rust", QoS::Level1)];
 
     subscriber.subscribe(topics, |message| {
         println!("@@@ {:?}", message);
