@@ -1,16 +1,16 @@
 /*!
 
-An elegant, lock free Mqtt client implementation in Rust.
+A fast, lock free Mqtt client implementation in Rust.
 
-**NOTE**: Though (almost)everything is working, this crate is still in its early stages of development.
-So please be aware of breakages. If you don't find any of they APIs elegant and think that there is a 
-better way, please raise an issue/pullrequest.
+**NOTE**: Though (almost) everything in the spec is working, this crate is still in its early stages of development.
+So please be aware of breakages. If you don't find any of the APIs elegant or think that there is a 
+better way of implementation, please don't hesitate to raise an issue/pullrequest.
 
 Below examples explain basic usage of this library
 
 # Connecting to a broker
 
-```
+```ignore
 let mut client_options = ClientOptions::new();
 
 // Specify client connection opthons and which broker to connect to
@@ -25,7 +25,7 @@ let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
 
 # Publishing
 
-```
+```ignore
 for i in 0..100 {
     let payload = format!("{}. hello rust", i);
     publisher.publish("hello/rust", QualityOfService::Level1, payload.into_bytes());
@@ -38,7 +38,7 @@ for i in 0..100 {
 TODO: Doesn't look great. Refine this.
 TODO: Expose name QualityOfService as QoS
 
-```
+```ignore
 let topics = vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
                                                         QualityOfService::Level0)];
 subscriber.subscribe(topics, 
@@ -61,12 +61,11 @@ extern crate time;
 #[cfg(feature = "ssl")]
 extern crate openssl;
 
-
 mod error;
 #[cfg(feature = "ssl")]
 mod tls;
 mod message;
-pub mod client;
+mod client;
 
 pub use client::{ClientOptions, ReconnectMethod};
 pub use tls::SslContext;
