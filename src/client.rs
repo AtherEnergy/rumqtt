@@ -54,41 +54,75 @@ impl Default for ClientOptions {
 
 
 impl ClientOptions {
+    /// Creates a new `ClientOptions` object which is used to set connection 
+    /// options for new client. Below are defaults with which this object is
+    /// created.
+    /// `client_id`           --> Randomly generated
+    /// `clean_session`       --> true
+    /// `keep_alive`          --> 5 secs
+    /// `reconnect try`       --> Doesn't try to reconnect
+    /// `retransmit try time` --> 60 secs
+    /// `pub_q_len`           --> 50
+    /// `sub_q_len`           --> 5
     pub fn new() -> ClientOptions { ClientOptions { ..Default::default() } }
 
+    /// Time interval for client to ping the broker if there is
+    /// no other data exchange
     pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         self.keep_alive = Some(secs);
         self
     }
 
+    /// Client id of the client. A random client id will be selected
+    /// if you don't set one
     pub fn set_client_id(&mut self, client_id: String) -> &mut Self {
         self.client_id = Some(client_id);
         self
     }
 
+    /// `clean_session = true` instructs the broker to clean all the client
+    /// state when it disconnects. Not that it is broker which is discarding
+    /// the client state. But this client will hold its queues and attemts to
+    /// to resend when reconnection happens. (TODO: Verify this)
+    /// When false, broker will hold the client state and performs pending
+    /// operations on the client when reconnection with same `client_id` happens.
+    ///
+    /// Hence **make sure that you manually set `client_id` when `clean_session` is false**
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
         self
     }
 
-
-    pub fn generate_client_id(&mut self) -> &mut Self {
+    fn generate_client_id(&mut self) -> &mut Self {
         let mut rng = rand::thread_rng();
         let id = rng.gen::<u32>();
         self.client_id = Some(format!("mqttc_{}", id));
         self
     }
 
+    /// Set `username` for broker to perform client authentivation 
+    /// vis `username` and `password`
     pub fn set_username(&mut self, username: String) -> &mut Self {
         self.username = Some(username);
         self
     }
 
+    /// Set `password` for broker to perform client authentivation 
+    /// vis `username` and `password`
     pub fn set_password(&mut self, password: String) -> &mut Self {
         self.password = Some(password);
         self
     }
 
+    /// All the QoS > 0 publishes state will be saved to attempt 
+    /// retransmits incase ack from broker fails. If broker disconnects
+    /// for the time, `Publisher` shouldn't throw error immediately during publishes.
+    /// At the same time, `Publisher` shouldn't be allowed to infinitely
+    /// push to the queue.
+    /// Publish queue length specifies maximum queue capacity upto
+    /// which `Publisher` can push with out blocking.
+    /// Messages in this queue will published as soon as connection is reestablished
+    /// and `Publisher` gets unblocked
     pub fn set_pub_q_len(&mut self, len: u16) -> &mut Self {
         self.pub_q_len = len;
         self
@@ -99,11 +133,15 @@ impl ClientOptions {
         self
     }
 
+    /// Time interval after which client should retry for new
+    /// connection if there are any disconnections.
+    /// By default, no retry will happen
     pub fn set_reconnect(&mut self, dur: u16) -> &mut Self {
         self.reconnect = Some(dur);
         self
     }
 
+    /// Set a TLS connection
     pub fn set_tls(&mut self, ssl: SslContext) -> &mut Self {
         self.ssl = Some(ssl);
         self
@@ -119,7 +157,19 @@ impl ClientOptions {
         unreachable!("Cannot lookup address");
     }
 
-    // TODO: Change name. no connection happenening
+    /// Creates a new mqtt client with the broker address that you want
+    /// to connect to. Along with connection details, this object holds
+    /// all the state information of a connection.
+    ///
+    /// **NOTE**: This should be the final call of `ClientOptions` method chaining
+    ///
+    ///```ignore
+    ///let client = client_options.set_keep_alive(5)
+    ///                           .set_reconnect(5)
+    ///                           .set_client_id("my-client-id")
+    ///                           .set_clean_session(true)
+    ///                           .connect("localhost:1883");
+    ///```
     pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> ProxyClient {
         if self.client_id == None {
             self.generate_client_id();
@@ -147,13 +197,13 @@ impl ClientOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MqttClientState {
+enum MqttClientState {
     Handshake,
     Connected, // 0: No state, 1: ping, 2: subscribe, 3: publish, 4: retry
     Disconnected,
 }
 
-pub enum MioNotification {
+enum MioNotification {
     Pub(QualityOfService),
     Sub,
 }
@@ -193,6 +243,7 @@ impl Publisher {
 
     }
 }
+
 type SendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct Subscriber {
     subscribe_send: chan::Sender<Vec<(TopicFilter, QualityOfService)>>,
