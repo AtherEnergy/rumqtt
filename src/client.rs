@@ -80,8 +80,8 @@ impl ClientOptions {
     /// Client id of the client. A random client id will be selected
 
     /// if you don't set one
-    pub fn set_client_id(&mut self, client_id: String) -> &mut Self {
-        self.client_id = Some(client_id);
+    pub fn set_client_id(&mut self, client_id: &str) -> &mut Self {
+        self.client_id = Some(client_id.to_string());
         self
     }
 
@@ -305,8 +305,9 @@ pub struct ProxyClient {
 }
 
 impl ProxyClient {
-    /// Returns `Subscriber` and `Publisher` and handles reqests from them
-    /// in a seperate thread.
+    /// Connects to the broker and starts an event loop in a new thread.
+    /// Returns `Subscriber` and `Publisher` and handles reqests from them.
+    /// Also handles network events, reconnections and retransmissions.
     pub fn start(mut self) -> Result<(Publisher, Subscriber)> {
         // @ Create notifiers for users to publish to event loop
         let (notify_send, notify_recv) = mpsc::channel::<MioNotification>();

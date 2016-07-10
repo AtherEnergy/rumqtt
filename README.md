@@ -8,3 +8,10 @@ A pure rust mqtt client.
 * Supports QoS 0, QoS 1 and QoS 2
 * Auto reconnect
 * TLS support
+* Offline message buffering
+
+## To Do
+
+* LWT
+* Disk Persitance
+* Authentication

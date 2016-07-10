@@ -69,4 +69,4 @@ mod client;
 
 pub use client::ClientOptions;
 pub use tls::SslContext;
-pub use mqtt::{TopicFilter, QualityOfService as QoS};
+pub use mqtt::QualityOfService as QoS;
