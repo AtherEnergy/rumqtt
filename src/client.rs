@@ -56,24 +56,29 @@ impl Default for ClientOptions {
 impl ClientOptions {
     /// Creates a new `ClientOptions` object which is used to set connection 
     /// options for new client. Below are defaults with which this object is
-    /// created.
-    /// `client_id`           --> Randomly generated
-    /// `clean_session`       --> true
-    /// `keep_alive`          --> 5 secs
-    /// `reconnect try`       --> Doesn't try to reconnect
-    /// `retransmit try time` --> 60 secs
-    /// `pub_q_len`           --> 50
-    /// `sub_q_len`           --> 5
+    /// created.  
+    ///  
+    ///|                         |                          |
+    ///|-------------------------|--------------------------|
+    ///| **client_id**           | Randomly generated       |
+    ///| **clean_session**       | true                     |
+    ///| **keep_alive**          | 5 secs                   |
+    ///| **reconnect try**       | Doesn't try to reconnect |
+    ///| **retransmit try time** | 60 secs                  |
+    ///| **pub_q_len**           | 50                       |
+    ///| **sub_q_len**           | 5                        |
+    ///
     pub fn new() -> ClientOptions { ClientOptions { ..Default::default() } }
 
-    /// Time interval for client to ping the broker if there is
-    /// no other data exchange
+    /// Number of seconds after which client should ping the broker 
+    /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         self.keep_alive = Some(secs);
         self
     }
 
     /// Client id of the client. A random client id will be selected
+
     /// if you don't set one
     pub fn set_client_id(&mut self, client_id: String) -> &mut Self {
         self.client_id = Some(client_id);
@@ -81,12 +86,13 @@ impl ClientOptions {
     }
 
     /// `clean_session = true` instructs the broker to clean all the client
-    /// state when it disconnects. Not that it is broker which is discarding
+    /// state when it disconnects. Note that it is broker which is discarding
     /// the client state. But this client will hold its queues and attemts to
-    /// to resend when reconnection happens. (TODO: Verify this)
-    /// When false, broker will hold the client state and performs pending
-    /// operations on the client when reconnection with same `client_id` happens.
-    ///
+    /// to retransmit when reconnection happens.  (TODO: Verify this)    
+    ///   
+    /// When set `false`, broker will hold the client state and performs pending
+    /// operations on the client when reconnection with same `client_id` happens.  
+    ///   
     /// Hence **make sure that you manually set `client_id` when `clean_session` is false**
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
@@ -114,15 +120,16 @@ impl ClientOptions {
         self
     }
 
-    /// All the QoS > 0 publishes state will be saved to attempt 
-    /// retransmits incase ack from broker fails. If broker disconnects
-    /// for the time, `Publisher` shouldn't throw error immediately during publishes.
-    /// At the same time, `Publisher` shouldn't be allowed to infinitely
-    /// push to the queue.
-    /// Publish queue length specifies maximum queue capacity upto
-    /// which `Publisher` can push with out blocking.
-    /// Messages in this queue will published as soon as connection is reestablished
-    /// and `Publisher` gets unblocked
+    /// All the `QoS > 0` publishes state will be saved to attempt 
+    /// retransmits incase ack from broker fails.  
+    ///   
+    /// If broker disconnects for some time, `Publisher` shouldn't throw error 
+    /// immediately during publishes. At the same time, `Publisher` shouldn't be 
+    /// allowed to infinitely push to the queue.  
+    ///   
+    /// Publish queue length specifies maximum queue capacity upto which `Publisher`
+    /// can push with out blocking. Messages in this queue will published as soon as 
+    /// connection is reestablished and `Publisher` gets unblocked
     pub fn set_pub_q_len(&mut self, len: u16) -> &mut Self {
         self.pub_q_len = len;
         self

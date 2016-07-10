@@ -21,9 +21,9 @@ impl Default for SslContext {
 }
 
 impl SslContext {
-    pub fn new(context: ssl::SslContext) -> Self { SslContext { inner: Arc::new(context) } }
+    fn new(context: ssl::SslContext) -> Self { SslContext { inner: Arc::new(context) } }
 
-    pub fn with_cert_and_key<C, K>(cert: C, key: K) -> Result<SslContext>
+    fn with_cert_and_key<C, K>(cert: C, key: K) -> Result<SslContext>
         where C: AsRef<Path>,
               K: AsRef<Path>
     {
@@ -35,6 +35,7 @@ impl SslContext {
         Ok(SslContext { inner: Arc::new(ctx) })
     }
 
+    /// Create a new `SslContext` with server authentication
     pub fn with_ca<CA>(ca: CA) -> Result<SslContext>
         where CA: AsRef<Path>
     {
@@ -45,6 +46,7 @@ impl SslContext {
         Ok(SslContext { inner: Arc::new(ctx) })
     }
 
+    /// Create a new `SslContext` with client and server authentication
     pub fn with_cert_key_and_ca<C, K, CA>(cert: C, key: K, ca: CA) -> Result<SslContext>
         where C: AsRef<Path>,
               K: AsRef<Path>,
@@ -59,6 +61,7 @@ impl SslContext {
         Ok(SslContext { inner: Arc::new(ctx) })
     }
 
+    /// Create a new TLS1.2 connection
     pub fn connect(&self, stream: TcpStream) -> Result<SslStream> {
         match ssl::SslStream::connect(&*self.inner, stream) {
             Ok(stream) => Ok(stream),
