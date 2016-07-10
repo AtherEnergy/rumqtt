@@ -37,6 +37,7 @@ for i in 0..100 {
 
 TODO: Doesn't look great. Refine this.
 TODO: Expose name QualityOfService as QoS
+
 ```
 let topics = vec![(TopicFilter::new_checked("hello/world".to_string()).unwrap(),
                                                         QualityOfService::Level0)];
@@ -69,3 +70,4 @@ pub mod client;
 
 pub use client::{ClientOptions, ReconnectMethod};
 pub use tls::SslContext;
+pub use mqtt::{TopicFilter, QualityOfService as QoS};
