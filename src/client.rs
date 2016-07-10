@@ -28,7 +28,7 @@ pub struct ClientOptions {
     client_id: Option<String>,
     username: Option<String>,
     password: Option<String>,
-    reconnect: ReconnectMethod,
+    reconnect: Option<u16>,
     pub_q_len: u16,
     sub_q_len: u16,
     queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
@@ -43,7 +43,7 @@ impl Default for ClientOptions {
             client_id: None,
             username: None,
             password: None,
-            reconnect: ReconnectMethod::ForeverDisconnect,
+            reconnect: None,
             pub_q_len: 50,
             sub_q_len: 5,
             queue_timeout: 60,
@@ -99,8 +99,8 @@ impl ClientOptions {
         self
     }
 
-    pub fn set_reconnect(&mut self, reconnect: ReconnectMethod) -> &mut Self {
-        self.reconnect = reconnect;
+    pub fn set_reconnect(&mut self, dur: u16) -> &mut Self {
+        self.reconnect = Some(dur);
         self
     }
 
@@ -127,7 +127,7 @@ impl ClientOptions {
 
         let addr = Self::lookup_ipv4(addr);
 
-        let proxy = ProxyClient {
+        ProxyClient {
             addr: addr,
             stream: NetworkStream::None,
             // State
@@ -142,9 +142,7 @@ impl ClientOptions {
             outgoing_pub: VecDeque::new(),
             outgoing_rec: VecDeque::new(),
             outgoing_rel: VecDeque::new(),
-        };
-
-        proxy
+        }
     }
 }
 
@@ -153,12 +151,6 @@ pub enum MqttClientState {
     Handshake,
     Connected, // 0: No state, 1: ping, 2: subscribe, 3: publish, 4: retry
     Disconnected,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconnectMethod {
-    ForeverDisconnect,
-    ReconnectAfter(Duration),
 }
 
 pub enum MioNotification {
@@ -647,12 +639,12 @@ impl ProxyClient {
 
     fn _try_reconnect(&mut self) -> Result<()> {
         match self.opts.reconnect {
-            ReconnectMethod::ForeverDisconnect => Err(Error::NoReconnectTry),
-            ReconnectMethod::ReconnectAfter(dur) => {
+            None => Err(Error::NoReconnectTry),
+            Some(dur) => {
                 // TODO: Move the loop from here to caller
                 loop {
-                    info!("  Will try Reconnect in {} seconds", dur.as_secs());
-                    thread::sleep(dur);
+                    info!("  Will try Reconnect in {} seconds", dur);
+                    thread::sleep(Duration::new(dur as u64, 0));
                     match TcpStream::connect(&self.addr) {
                         Ok(stream) => {
                             let stream = match self.opts.ssl {

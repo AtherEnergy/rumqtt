@@ -4,7 +4,7 @@ extern crate log;
 extern crate env_logger;
 
 
-use rumqtt::{ClientOptions, ReconnectMethod, SslContext, TopicFilter, QoS};
+use rumqtt::{ClientOptions, SslContext, TopicFilter, QoS};
 use std::thread;
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ fn tls_connect() {
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
-                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_reconnect(5)
                                     .set_tls(ssl)
                                     .connect("localhost:1883");
 
@@ -41,7 +41,7 @@ fn pingreq_reconnect_test() {
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
-                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_reconnect(5)
                                     .connect("localhost:1883");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
@@ -61,7 +61,7 @@ fn publish_qos0_test() {
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
-                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_reconnect(5)
                                     .connect("localhost:1883");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
@@ -84,7 +84,7 @@ fn publish_qos1_test() {
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
-                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_reconnect(5)
                                     .set_pub_q_len(10)
                                     .connect("localhost:1883");
 
@@ -108,7 +108,7 @@ fn subscribe_test() {
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
-                                    .set_reconnect(ReconnectMethod::ReconnectAfter(Duration::new(5,0)))
+                                    .set_reconnect(5)
                                     .connect("localhost:1883");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
