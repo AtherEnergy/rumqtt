@@ -1,10 +1,10 @@
-# RUMQTT [![build status]
+# RUMQTT
 
 [![Build Status](https://travis-ci.org/Ather-Energy/RuMqtt.svg?branch=master)](https://travis-ci.org/Ather-Energy/RuMqtt)
 
 A pure rust mqtt client.
 
-[DOCUMENTATION](https://github.com/Ather-Energy/RuMqtt)
+[DOCUMENTATION](http://ather-energy.github.io/RuMqtt/)
 ## Features
 
 * Supports QoS 0, QoS 1 and QoS 2
