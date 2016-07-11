@@ -113,8 +113,8 @@ impl MqttOptions {
         self
     }
 
-    /// Set `username` for broker to perform client authentivation
-    /// vis `username` and `password`
+    /// Set `username` for broker to perform client authentivcation
+    /// via `username` and `password`
     pub fn set_username(&mut self, username: String) -> &mut Self {
         self.username = Some(username);
         self
@@ -157,16 +157,21 @@ impl MqttOptions {
         self
     }
 
+    /// Set will for the client so that broker can send `will_message` 
+    /// on `will_topic` when this client ungracefully dies.
     pub fn set_will(&mut self, will_topic: &str, will_message: &str) -> &mut Self {
         self.will = Some((will_topic.to_string(), will_message.to_string()));
         self
     }
 
+    /// Set QoS for the will message
     pub fn set_will_qos(&mut self, qos: QualityOfService) -> &mut Self {
         self.will_qos = qos;
         self
     }
 
+    /// Set will retian so that future clients subscribing to will topic 
+    /// knows of client's death.
     pub fn set_will_retain(&mut self, retain: bool) -> &mut Self {
         self.will_retain = retain;
         self
@@ -231,7 +236,7 @@ impl MqttOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttState {
     Handshake,
-    Connected, // 0: No state, 1: ping, 2: subscribe, 3: publish, 4: retry
+    Connected,
     Disconnected,
 }
 

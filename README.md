@@ -11,9 +11,10 @@ A pure rust mqtt client.
 * Auto reconnect
 * TLS support
 * Offline message buffering
+* LWT
+
 
 ## To Do
 
-* LWT
 * Disk Persitance
 * Authentication with username and password
