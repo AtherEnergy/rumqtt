@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 
-#[test]
+//#[test]
 fn basic_test() {
     let mut client_options = MqttOptions::new();
 
@@ -47,6 +47,7 @@ fn retained_message_test() {
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("client-1")
+                                    .set_clean_session(true)
                                     .connect("localhost:1883");
 
     let (mut publisher, subscriber) = proxy_client.start().expect("Coudn't start");
@@ -67,7 +68,51 @@ fn retained_message_test() {
         println!("message --> {:?}", message);
     });
 
+    publisher.disconnect();
+
     thread::sleep(Duration::new(180, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
     thread::sleep(Duration::new(3, 0));
+}
+
+#[test]
+fn will_test() {
+    let mut client_options = MqttOptions::new();
+    let client1 = client_options.set_keep_alive(5)
+                                    .set_reconnect(15)
+                                    .set_client_id("client-1")
+                                    .set_clean_session(false)
+                                    .set_will("hello/world", "I'm dead")
+                                    .connect("localhost:1883");
+
+    let mut client_options = MqttOptions::new();
+    let client2 = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .set_client_id("client-2")
+                                    .connect("localhost:1883");
+
+    let (mut publisher1, _) = client1.start().expect("Coudn't start");
+    let (_, subscriber2) = client2.start().expect("Coudn't start");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    subscriber2.message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        println!("message --> {:?}", message);
+    });
+    subscriber2.subscribe(vec![("hello/world", QoS::Level0)]);
+
+    // LWT doesn't work on graceful disconnects
+    // publisher1.disconnect();
+
+    // Give some time for mqtt connection to be made on
+    // connected socket before shutting down the socket
+    thread::sleep(Duration::new(1, 0));
+    publisher1.shutdown();
+
+    // Wait for last will publish
+    thread::sleep(Duration::new(5, 0));
+    assert!(1 == final_count.load(Ordering::SeqCst));
 }

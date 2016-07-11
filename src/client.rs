@@ -28,6 +28,9 @@ pub struct MqttOptions {
     username: Option<String>,
     password: Option<String>,
     reconnect: Option<u16>,
+    will: Option<(String, String)>,
+    will_qos: QualityOfService,
+    will_retain: bool,
     pub_q_len: u16,
     sub_q_len: u16,
     queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
@@ -43,6 +46,9 @@ impl Default for MqttOptions {
             username: None,
             password: None,
             reconnect: None,
+            will: None,
+            will_qos: QualityOfService::Level0,
+            will_retain: false,
             pub_q_len: 50,
             sub_q_len: 5,
             queue_timeout: 60,
@@ -151,6 +157,21 @@ impl MqttOptions {
         self
     }
 
+    pub fn set_will(&mut self, will_topic: &str, will_message: &str) -> &mut Self {
+        self.will = Some((will_topic.to_string(), will_message.to_string()));
+        self
+    }
+
+    pub fn set_will_qos(&mut self, qos: QualityOfService) -> &mut Self {
+        self.will_qos = qos;
+        self
+    }
+
+    pub fn set_will_retain(&mut self, retain: bool) -> &mut Self {
+        self.will_retain = retain;
+        self
+    }
+
     /// Set a TLS connection
     pub fn set_tls(&mut self, ssl: SslContext) -> &mut Self {
         self.ssl = Some(ssl);
@@ -218,6 +239,8 @@ enum MioNotification {
     Pub(QualityOfService),
     Sub,
     Callback,
+    Disconnect,
+    Shutdown,
 }
 
 pub struct Publisher {
@@ -249,10 +272,19 @@ impl Publisher {
         Ok(())
     }
 
+    pub fn disconnect(&self) -> Result<()> {
+        try!(self.notifier.send(MioNotification::Disconnect));
+        Ok(())
+    }
+
+    pub fn shutdown(&self) -> Result<()> {
+        try!(self.notifier.send(MioNotification::Shutdown));
+        Ok(())
+    }
+
     pub fn set_retain(&mut self, retain: bool) -> &mut Self {
         self.retain = retain;
         self
-
     }
 }
 
@@ -396,12 +428,11 @@ impl ProxyClient {
                                         }
                                     }
                                 };
-
+                                trace!("{:?}", packet);
                                 // @ At this point, there is a connected TCP socket
                                 match self.handle_packet(&packet) {
                                     Ok(message) => {
                                         if let Some(m) = message {
-                                            // let callback2 = callback.clone();
                                             if let Some(ref eloop_callback) = eloop_callback {
                                                 let eloop_callback = eloop_callback.clone();
                                                 mioco::spawn(move || eloop_callback(*m));
@@ -488,6 +519,19 @@ impl ProxyClient {
                                     MioNotification::Sub => {
                                         let topics = sub_recv.recv().unwrap();
                                         let _ = self._subscribe(topics.clone());
+                                    }
+
+                                    MioNotification::Disconnect => {
+                                         match self.state {
+                                            MqttState::Connected => {
+                                                let _ = self._disconnect();
+                                            }
+                                            _ => debug!("Mqtt connection not established"),
+                                        }
+                                    }
+
+                                    MioNotification::Shutdown => {
+                                        let _ = self.stream.shutdown(Shutdown::Both);
                                     }
 
                                     MioNotification::Callback => {
@@ -701,7 +745,7 @@ impl ProxyClient {
         self._flush()
     }
 
-    pub fn disconnect(&mut self) -> Result<()> {
+    pub fn _disconnect(&mut self) -> Result<()> {
         let disconnect = try!(self._generate_disconnect_packet());
         try!(self._write_packet(disconnect));
         self._flush()
@@ -761,8 +805,7 @@ impl ProxyClient {
                 }
             }
 
-            MqttState::Disconnected |
-            MqttState::Handshake => error!("I won't republish. Client isn't in connected state"),
+            MqttState::Disconnected | MqttState::Handshake => error!("I won't republish. Client isn't in connected state"),
         }
     }
 
@@ -845,32 +888,37 @@ impl ProxyClient {
 
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
         let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.opts.client_id.clone().unwrap());
+
         connect_packet.set_clean_session(self.opts.clean_session);
 
         if let Some(keep_alive) = self.opts.keep_alive {
             connect_packet.set_keep_alive(keep_alive);
         }
 
-        let mut buf = Vec::new();
-        match connect_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
+        // Converting (String, String) -> (TopicName, String)
+        let will = match self.opts.will {
+            Some(ref will) => Some((try!(TopicName::new(will.0.clone())), will.1.clone())),
+            None => None,
         };
+
+        if will.is_some() {
+            println!("Setting will");
+            connect_packet.set_will(will);
+            connect_packet.set_will_qos(self.opts.will_qos as u8);
+            connect_packet.set_will_retain(self.opts.will_retain);
+        }
+
+        let mut buf = Vec::new();
+
+        try!(connect_packet.encode(&mut buf));
         Ok(buf)
     }
 
     fn _generate_disconnect_packet(&self) -> Result<Vec<u8>> {
         let disconnect_packet = DisconnectPacket::new();
-
         let mut buf = Vec::new();
-        match disconnect_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+
+        try!(disconnect_packet.encode(&mut buf));
         Ok(buf)
     }
 
@@ -878,14 +926,7 @@ impl ProxyClient {
         let pingreq_packet = PingreqPacket::new();
         let mut buf = Vec::new();
 
-        match pingreq_packet.encode(&mut buf) {
-            // TODO: Embed all Mqtt errors to rumqtt errors and
-            // use try! here and all generate packets
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+        try!(pingreq_packet.encode(&mut buf));
         Ok(buf)
     }
 
@@ -894,13 +935,6 @@ impl ProxyClient {
         let mut buf = Vec::new();
 
         try!(subscribe_packet.encode(&mut buf));
-
-        match subscribe_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
         Ok(buf)
     }
 
@@ -908,12 +942,7 @@ impl ProxyClient {
         let publish_packet = PublishPacket::new(topic, qos, payload);
         let mut buf = Vec::new();
 
-        match publish_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+        try!(publish_packet.encode(&mut buf));
         Ok(buf)
     }
 
@@ -921,12 +950,7 @@ impl ProxyClient {
         let puback_packet = PubackPacket::new(pkid);
         let mut buf = Vec::new();
 
-        match puback_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+        try!(puback_packet.encode(&mut buf));
         Ok(buf)
     }
 
@@ -934,12 +958,7 @@ impl ProxyClient {
         let pubrec_packet = PubrecPacket::new(pkid);
         let mut buf = Vec::new();
 
-        match pubrec_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+        try!(pubrec_packet.encode(&mut buf));
         Ok(buf)
     }
 
@@ -947,12 +966,7 @@ impl ProxyClient {
         let pubrel_packet = PubrelPacket::new(pkid);
         let mut buf = Vec::new();
 
-        match pubrel_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+        try!(pubrel_packet.encode(&mut buf));
         Ok(buf)
     }
 
@@ -960,12 +974,7 @@ impl ProxyClient {
         let pubcomp_packet = PubcompPacket::new(pkid);
         let mut buf = Vec::new();
 
-        match pubcomp_packet.encode(&mut buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(Error::MqttEncode);
-            }
-        };
+        try!(pubcomp_packet.encode(&mut buf));
         Ok(buf)
     }
 
