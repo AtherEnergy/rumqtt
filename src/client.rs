@@ -229,7 +229,7 @@ pub struct Publisher {
 impl Publisher {
     pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
 
-        let topic = TopicName::new(topic.to_string()).unwrap(); //TODO: Remove unwrap here
+        let topic = try!(TopicName::new(topic.to_string()));
         let qos_pkid = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
             QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
@@ -374,7 +374,7 @@ impl ProxyClient {
                     // @ Start the event loop
                     loop {
                         select! (
-                            r:self.stream.get_ref().unwrap() => {
+                            r:try!(self.stream.get_ref()) => {
                                 let packet = match VariablePacket::decode(&mut self.stream) {
                         // @ Decoded packet successfully.
                                     Ok(pk) => pk,
@@ -457,7 +457,7 @@ impl ProxyClient {
                             },
 
                             r:notify_recv => {
-                                match notify_recv.recv().unwrap() {
+                                match try!(notify_recv.recv()) {
                                     MioNotification::Pub(qos) => {
                                         match qos {
                                             QualityOfService::Level0 => {
@@ -778,7 +778,7 @@ impl ProxyClient {
         let _ = self.stream.shutdown(Shutdown::Both);
         self.await_ping = false;
         self.state = MqttClientState::Disconnected;
-        info!("  Disconnected {}", self.opts.client_id.clone().unwrap());
+        info!("  Disconnected {:?}", self.opts.client_id);
     }
 
     fn _subscribe(&mut self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
@@ -847,7 +847,10 @@ impl ProxyClient {
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
         let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.opts.client_id.clone().unwrap());
         connect_packet.set_clean_session(self.opts.clean_session);
-        connect_packet.set_keep_alive(self.opts.keep_alive.unwrap());
+
+        if let Some(keep_alive) = self.opts.keep_alive {
+            connect_packet.set_keep_alive(keep_alive);
+        }
 
         let mut buf = Vec::new();
         match connect_packet.encode(&mut buf) {
@@ -891,7 +894,7 @@ impl ProxyClient {
         let subscribe_packet = SubscribePacket::new(11, topics);
         let mut buf = Vec::new();
 
-        subscribe_packet.encode(&mut buf).unwrap();
+        try!(subscribe_packet.encode(&mut buf));
 
         match subscribe_packet.encode(&mut buf) {
             Ok(result) => result,

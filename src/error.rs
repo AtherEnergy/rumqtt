@@ -2,7 +2,8 @@ use std::result;
 use std::io;
 use mqtt::topic_name::TopicNameError;
 use mqtt::topic_filter::TopicFilterError;
-use std::sync::mpsc::SendError;
+use mqtt::packet::*;
+use std::sync::mpsc::{RecvError, SendError};
 use openssl::ssl;
 
 pub type Result<T> = result::Result<T, Error>;
@@ -52,6 +53,15 @@ impl From<TopicFilterError> for Error {
 
 impl<T> From<SendError<T>> for Error {
     fn from(_: SendError<T>) -> Error { Error::MioNotify }
+}
+
+impl From<RecvError> for Error {
+    fn from(_: RecvError) -> Error { Error::MioNotify }
+}
+
+impl<'a, T: Packet<'a>> From<PacketError<'a, T>> for Error
+{
+    fn from(_: PacketError<'a, T>) -> Error { Error::MqttPacket}
 }
 
 impl From<SslError> for Error {
