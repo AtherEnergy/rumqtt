@@ -435,19 +435,14 @@ impl ProxyClient {
                                 };
                                 trace!("{:?}", packet);
                                 // @ At this point, there is a connected TCP socket
-                                match self.handle_packet(&packet) {
-                                    Ok(message) => {
-                                        if let Some(m) = message {
-                                            if let Some(ref eloop_callback) = eloop_callback {
-                                                let eloop_callback = eloop_callback.clone();
-                                                mioco::spawn(move || eloop_callback(*m));
-                                            }
-                                        }
+                                // @ Exits the event loop with error if handshake fails
+                                let message =  try!(self.handle_packet(&packet));
+                                if let Some(m) = message {
+                                    if let Some(ref eloop_callback) = eloop_callback {
+                                        let eloop_callback = eloop_callback.clone();
+                                        mioco::spawn(move || eloop_callback(*m));
                                     }
-                                    Err(err) => {
-                                        panic!("error in handling packet. {:?}", err);
-                                    }
-                                };
+                                } 
                             },
 
                             r:ping_timer => {
@@ -563,9 +558,10 @@ impl ProxyClient {
             MqttState::Handshake => {
                 match *packet {
                     VariablePacket::ConnackPacket(ref connack) => {
-                        if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
-                            error!("Failed to connect, err {:?}", connack.connect_return_code());
-                            Ok(None)
+                        let conn_ret_code = connack.connect_return_code();
+                        if conn_ret_code != ConnectReturnCode::ConnectionAccepted {
+                            error!("Failed to connect, err {:?}", conn_ret_code);
+                            Err(Error::ConnectionRefused(conn_ret_code))
                         } else {
                             self.state = MqttState::Connected;
                             Ok(None)
@@ -907,7 +903,6 @@ impl ProxyClient {
         };
 
         if will.is_some() {
-            println!("Setting will");
             connect_packet.set_will(will);
             connect_packet.set_will_qos(self.opts.will_qos as u8);
             connect_packet.set_will_retain(self.opts.will_retain);

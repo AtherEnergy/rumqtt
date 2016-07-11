@@ -3,6 +3,7 @@ use std::io;
 use mqtt::topic_name::TopicNameError;
 use mqtt::topic_filter::TopicFilterError;
 use mqtt::packet::*;
+use mqtt::control::variable_header::ConnectReturnCode;
 use std::sync::mpsc::{RecvError, SendError};
 use openssl::ssl;
 
@@ -12,20 +13,17 @@ pub type SslError = ssl::error::SslError;
 #[derive(Debug)]
 pub enum Error {
     InvalidMosqClient,
-    Connection(i32),
     MqttEncode,
     Tls(i32),
     Subscribe(i32),
     Publish(i32),
     AlreadyConnected,
-    UnsupportedFeature,
     UnrecognizedPacket,
     ConnectionAbort,
     HandshakeFailed,
-    ProtocolViolation,
     Disconnected,
     Timeout,
-    ConnectionRefused(i32),
+    ConnectionRefused(ConnectReturnCode),
     Io(io::Error),
     InvalidCert(String),
     NoStream,

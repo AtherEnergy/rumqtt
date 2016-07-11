@@ -75,7 +75,7 @@ fn retained_message_test() {
     thread::sleep(Duration::new(3, 0));
 }
 
-#[test]
+//#[test]
 fn will_test() {
     let mut client_options = MqttOptions::new();
     let client1 = client_options.set_keep_alive(5)
@@ -115,4 +115,31 @@ fn will_test() {
     // Wait for last will publish
     thread::sleep(Duration::new(5, 0));
     assert!(1 == final_count.load(Ordering::SeqCst));
+}
+
+#[test]
+fn zero_len_client_id_test1() {
+    let mut client_options = MqttOptions::new();
+    let client = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .set_client_id("")
+                                    .set_clean_session(true)
+                                    .connect("localhost:1883");
+
+    let _ = client.start().expect("Coudn't start");
+}
+
+///#[test]
+//#[should_panic]
+// This should've failed
+fn zero_len_client_id_test2() {
+    let mut client_options = MqttOptions::new();
+    let client = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .set_client_id("")
+                                    .set_clean_session(false)
+                                    .connect("localhost:1883");
+
+    let _ = client.start().expect("Coudn't start");
+    thread::sleep(Duration::new(5, 0));
 }
