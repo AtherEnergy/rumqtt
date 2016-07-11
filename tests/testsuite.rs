@@ -1,6 +1,6 @@
 extern crate rumqtt;
 
-use rumqtt::{ClientOptions, SslContext, QoS};
+use rumqtt::{MqttOptions, SslContext, QoS};
 use std::thread;
 use std::time::Duration;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
 fn basic_test() {
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
@@ -43,7 +43,7 @@ fn basic_test() {
 
 //#[test]
 fn retained_message_test() {
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("client-1")

@@ -13,7 +13,7 @@
 //! # Connecting to a broker
 //!
 //! ```ignore
-//! let mut client_options = ClientOptions::new();
+//! let mut client_options = MqttOptions::new();
 //!
 //! //Specify client connection opthons and which broker to connect to
 //! let proxy_client = client_options.set_keep_alive(5)
@@ -66,6 +66,6 @@ mod tls;
 mod message;
 mod client;
 
-pub use client::ClientOptions;
+pub use client::MqttOptions;
 pub use tls::SslContext;
 pub use mqtt::QualityOfService as QoS;

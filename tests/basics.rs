@@ -4,7 +4,7 @@ extern crate log;
 extern crate env_logger;
 
 
-use rumqtt::{ClientOptions, SslContext, QoS};
+use rumqtt::{MqttOptions, SslContext, QoS};
 use std::thread;
 use std::time::Duration;
 
@@ -19,7 +19,7 @@ fn tls_connect() {
     //let ssl = SslContext::with_cert_key_and_ca(cert, key, ca).expect("#Ssl context error");
     //let ssl = SslContext::with_cert_and_key(cert, key).expect("#Ssl context error");
 
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
@@ -37,7 +37,7 @@ fn pingreq_reconnect_test() {
     // USAGE: RUST_LOG=rumqtt cargo test -- --nocapture
     env_logger::init().unwrap();
 
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
@@ -57,7 +57,7 @@ fn pingreq_reconnect_test() {
 fn publish_qos0_test() {
     env_logger::init().unwrap();
 
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
@@ -80,7 +80,7 @@ fn publish_qos0_test() {
 fn publish_qos1_test() {
     env_logger::init().unwrap();
 
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
@@ -104,7 +104,7 @@ fn publish_qos1_test() {
 fn subscribe_test() {
     env_logger::init().unwrap();
 
-    let mut client_options = ClientOptions::new();
+    let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)

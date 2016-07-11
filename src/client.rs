@@ -21,7 +21,7 @@ use tls::{SslContext, NetworkStream};
 use mioco::sync::mpsc::{self, Sender};
 
 #[derive(Clone)]
-pub struct ClientOptions {
+pub struct MqttOptions {
     keep_alive: Option<u16>,
     clean_session: bool,
     client_id: Option<String>,
@@ -34,9 +34,9 @@ pub struct ClientOptions {
     ssl: Option<SslContext>,
 }
 
-impl Default for ClientOptions {
+impl Default for MqttOptions {
     fn default() -> Self {
-        ClientOptions {
+        MqttOptions {
             keep_alive: Some(5),
             clean_session: true,
             client_id: None,
@@ -52,8 +52,8 @@ impl Default for ClientOptions {
 }
 
 
-impl ClientOptions {
-    /// Creates a new `ClientOptions` object which is used to set connection
+impl MqttOptions {
+    /// Creates a new `MqttOptions` object which is used to set connection
     /// options for new client. Below are defaults with which this object is
     /// created.
     ///
@@ -67,7 +67,7 @@ impl ClientOptions {
     /// | **pub_q_len**           | 50                       |
     /// | **sub_q_len**           | 5                        |
     ///
-    pub fn new() -> ClientOptions { ClientOptions { ..Default::default() } }
+    pub fn new() -> MqttOptions { MqttOptions { ..Default::default() } }
 
     /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange
@@ -171,7 +171,7 @@ impl ClientOptions {
     /// to connect to. Along with connection details, this object holds
     /// all the state information of a connection.
     ///
-    /// **NOTE**: This should be the final call of `ClientOptions` method
+    /// **NOTE**: This should be the final call of `MqttOptions` method
     /// chaining
     ///
     /// ```ignore
@@ -195,7 +195,7 @@ impl ClientOptions {
             last_flush: Instant::now(),
             last_pkid: PacketIdentifier(0),
             await_ping: false,
-            state: MqttClientState::Disconnected,
+            state: MqttState::Disconnected,
             opts: self.clone(),
 
             // Queues
@@ -208,7 +208,7 @@ impl ClientOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttClientState {
+enum MqttState {
     Handshake,
     Connected, // 0: No state, 1: ping, 2: subscribe, 3: publish, 4: retry
     Disconnected,
@@ -266,8 +266,7 @@ pub struct Subscriber {
 impl Subscriber {
     // TODO Add peek function
 
-    pub fn subscribe(&self, topics: Vec<(&str, QualityOfService)>) -> Result<()>
-    {
+    pub fn subscribe(&self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
         let mut sub_topics = vec![];
         for topic in topics {
             let topic = (try!(TopicFilter::new_checked(topic.0)), topic.1);
@@ -280,7 +279,7 @@ impl Subscriber {
     }
 
     pub fn message_callback<F>(&self, callback: F) -> Result<()>
-    where F: Fn(Message) + Send + Sync + 'static
+        where F: Fn(Message) + Send + Sync + 'static
     {
         try!(self.notifier.send(MioNotification::Callback));
         self.callback_send.send(Box::new(callback));
@@ -292,8 +291,8 @@ impl Subscriber {
 /// state and takes care of retransmissions.
 pub struct ProxyClient {
     addr: SocketAddr,
-    state: MqttClientState,
-    opts: ClientOptions,
+    state: MqttState,
+    opts: MqttOptions,
     stream: NetworkStream,
     last_flush: Instant,
     last_pkid: PacketIdentifier,
@@ -346,7 +345,7 @@ impl ProxyClient {
                     None => NetworkStream::Tcp(stream),
                 };
                 self.stream = stream;
-                self.state = MqttClientState::Disconnected;
+                self.state = MqttState::Disconnected;
 
                 // @ Timer for ping requests and retransmits
                 let mut ping_timer = mioco::timer::Timer::new();
@@ -366,7 +365,7 @@ impl ProxyClient {
                                 ping_timer.set_timeout(keep_alive as u64 * 900);
                                 resend_timer.set_timeout(self.opts.queue_timeout as u64 * 1000);
                             }
-                            self.state = MqttClientState::Handshake;
+                            self.state = MqttState::Handshake;
                         }
                         _ => panic!("There shouldln't be error here"),
                     }
@@ -387,7 +386,7 @@ impl ProxyClient {
                         // close at broker end
                                         error!("Error in receiving packet {:?}", err);
                                         self._unbind();
-                                        self.state = MqttClientState::Disconnected;
+                                        self.state = MqttState::Disconnected;
                                         if let Err(e) = self._try_reconnect() {
                                             error!("No Reconnect try --> {:?}", e);
                                             return Err(Error::NoReconnectTry);
@@ -417,7 +416,7 @@ impl ProxyClient {
 
                             r:ping_timer => {
                                 match self.state {
-                                    MqttClientState::Connected => {
+                                    MqttState::Connected => {
                                         if !self.await_ping {
                                             let _ = self.ping();
                                         } else {
@@ -426,8 +425,8 @@ impl ProxyClient {
                                     }
 
                                     // @ Timer stopped. Reconnection will start the timer again
-                                    MqttClientState::Disconnected |
-                                    MqttClientState::Handshake => {
+                                    MqttState::Disconnected |
+                                    MqttState::Handshake => {
                                         debug!("I won't ping.
                                                 Client is in disconnected/handshake state")
                                     }
@@ -443,12 +442,12 @@ impl ProxyClient {
 
                             r:resend_timer => {
                                 match self.state {
-                                    MqttClientState::Connected => {
+                                    MqttState::Connected => {
                                         debug!("^^^ QUEUE RESEND");
                                         self._try_retransmit();
                                     }
-                                    MqttClientState::Disconnected
-                                    | MqttClientState::Handshake => {
+                                    MqttState::Disconnected
+                                    | MqttState::Handshake => {
                                         debug!("I won't republish.
                                                 Client is in disconnected/handshake state")
                                     }
@@ -512,14 +511,14 @@ impl ProxyClient {
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
         match self.state {
-            MqttClientState::Handshake => {
+            MqttState::Handshake => {
                 match *packet {
                     VariablePacket::ConnackPacket(ref connack) => {
                         if connack.connect_return_code() != ConnectReturnCode::ConnectionAccepted {
                             error!("Failed to connect, err {:?}", connack.connect_return_code());
                             Ok(None)
                         } else {
-                            self.state = MqttClientState::Connected;
+                            self.state = MqttState::Connected;
                             Ok(None)
                         }
                     }
@@ -530,7 +529,7 @@ impl ProxyClient {
                 }
             }
 
-            MqttClientState::Connected => {
+            MqttState::Connected => {
                 match *packet {
                     VariablePacket::SubackPacket(..) => {
                         // if ack.packet_identifier() != 10
@@ -643,18 +642,18 @@ impl ProxyClient {
                 }
             }
 
-            MqttClientState::Disconnected => {
+            MqttState::Disconnected => {
                 match self._connect() {
                     // @ Change the state machine to handshake
                     // @ and event loop to readable to read
                     // @ CONACK packet
                     Ok(_) => {
-                        self.state = MqttClientState::Handshake;
+                        self.state = MqttState::Handshake;
                     }
 
                     _ => {
                         error!("There shouldln't be error here");
-                        self.state = MqttClientState::Disconnected;
+                        self.state = MqttState::Disconnected;
                     }
                 };
                 Ok(None)
@@ -739,7 +738,7 @@ impl ProxyClient {
 
     fn _try_retransmit(&mut self) {
         match self.state {
-            MqttClientState::Connected => {
+            MqttState::Connected => {
                 let outgoing_pub = self.outgoing_pub.clone(); //TODO: Remove the clone
                 let outgoing_rec = self.outgoing_rec.clone(); //TODO: Remove the clone
                 let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
@@ -762,8 +761,8 @@ impl ProxyClient {
                 }
             }
 
-            MqttClientState::Disconnected |
-            MqttClientState::Handshake => error!("I won't republish. Client isn't in connected state"),
+            MqttState::Disconnected |
+            MqttState::Handshake => error!("I won't republish. Client isn't in connected state"),
         }
     }
 
@@ -777,7 +776,7 @@ impl ProxyClient {
     fn _unbind(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
         self.await_ping = false;
-        self.state = MqttClientState::Disconnected;
+        self.state = MqttState::Disconnected;
         info!("  Disconnected {:?}", self.opts.client_id);
     }
 

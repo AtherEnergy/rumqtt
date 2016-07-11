@@ -59,9 +59,8 @@ impl From<RecvError> for Error {
     fn from(_: RecvError) -> Error { Error::MioNotify }
 }
 
-impl<'a, T: Packet<'a>> From<PacketError<'a, T>> for Error
-{
-    fn from(_: PacketError<'a, T>) -> Error { Error::MqttPacket}
+impl<'a, T: Packet<'a>> From<PacketError<'a, T>> for Error {
+    fn from(_: PacketError<'a, T>) -> Error { Error::MqttPacket }
 }
 
 impl From<SslError> for Error {
