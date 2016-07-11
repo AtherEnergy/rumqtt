@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 
-//#[test]
+#[test]
 fn basic_test() {
     let mut client_options = MqttOptions::new();
 
@@ -39,6 +39,87 @@ fn basic_test() {
     thread::sleep(Duration::new(3, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
     thread::sleep(Duration::new(3, 0));
+}
+
+#[test]
+fn reconnection_test() {
+    // Create client in clean_session = false for broker to
+    // remember your subscription after disconnect.
+    let mut client_options = MqttOptions::new();
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .set_client_id("client-1")
+                                    .set_clean_session(false)
+                                    .connect("test.mosquitto.org:1883");
+
+    let (mut publisher, subscriber) = proxy_client.start().expect("Coudn't start");
+
+    // Message count
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    // Register message callback and subscribe
+    let topics = vec![("hello/rust", QoS::Level2)];  
+    subscriber.message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        println!("message --> {:?}", message);
+    });
+    subscriber.subscribe(topics).expect("Subcription failure");
+
+    // Wait for mqtt connection to establish and disconnect
+    thread::sleep(Duration::new(1, 0));
+    publisher.disconnect();
+
+    // Wait for reconnection and publish
+    thread::sleep(Duration::new(6, 0));
+    let payload = format!("hello rust");
+    publisher.publish("hello/rust", QoS::Level2, payload.clone().into_bytes());
+
+    thread::sleep(Duration::new(2, 0));
+    assert!(1 == final_count.load(Ordering::SeqCst));
+}
+
+#[test]
+fn will_test() {
+    let mut client_options = MqttOptions::new();
+    let client1 = client_options.set_keep_alive(5)
+                                    .set_reconnect(15)
+                                    .set_client_id("client-1")
+                                    .set_clean_session(false)
+                                    .set_will("hello/world", "I'm dead")
+                                    .connect("test.mosquitto.org:1883");
+
+    let mut client_options = MqttOptions::new();
+    let client2 = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .set_client_id("client-2")
+                                    .connect("test.mosquitto.org:1883");
+
+    let (mut publisher1, _) = client1.start().expect("Coudn't start");
+    let (_, subscriber2) = client2.start().expect("Coudn't start");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    subscriber2.message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        println!("message --> {:?}", message);
+    });
+    subscriber2.subscribe(vec![("hello/world", QoS::Level0)]);
+
+    // LWT doesn't work on graceful disconnects
+    // publisher1.disconnect();
+
+    // Give some time for mqtt connection to be made on
+    // connected socket before shutting down the socket
+    thread::sleep(Duration::new(1, 0));
+    publisher1.shutdown();
+
+    // Wait for last will publish
+    thread::sleep(Duration::new(5, 0));
+    assert!(1 == final_count.load(Ordering::SeqCst));
 }
 
 //#[test]
@@ -75,49 +156,44 @@ fn retained_message_test() {
     thread::sleep(Duration::new(3, 0));
 }
 
+//------------------------------ MANUAL TESTS -----------------------------------
+
+/// Subscribe and publish at high speed for 1 min
+/// and see if PINGREQs are able to keep up
+// FIXME: Publish with QoS 2
 //#[test]
-fn will_test() {
+fn stress_test1() {
     let mut client_options = MqttOptions::new();
-    let client1 = client_options.set_keep_alive(5)
-                                    .set_reconnect(15)
-                                    .set_client_id("client-1")
-                                    .set_clean_session(false)
-                                    .set_will("hello/world", "I'm dead")
-                                    .connect("localhost:1883");
+    let client = client_options.set_keep_alive(5)
+                               .connect("localhost:1883");
 
-    let mut client_options = MqttOptions::new();
-    let client2 = client_options.set_keep_alive(5)
-                                    .set_reconnect(5)
-                                    .set_client_id("client-2")
-                                    .connect("localhost:1883");
+    let (publisher, subscriber) = client.start().expect("Coudn't start");
+    subscriber.message_callback(|message| println!("{:?}", String::from_utf8((*message.payload).clone())));
+    subscriber.subscribe(vec![("hello/rust", QoS::Level2)]);
 
-    let (mut publisher1, _) = client1.start().expect("Coudn't start");
-    let (_, subscriber2) = client2.start().expect("Coudn't start");
-
-    let count = Arc::new(AtomicUsize::new(0));
-    let final_count = count.clone();
-    let count = count.clone();
-
-    subscriber2.message_callback(move |message| {
-        count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
-    });
-    subscriber2.subscribe(vec![("hello/world", QoS::Level0)]);
-
-    // LWT doesn't work on graceful disconnects
-    // publisher1.disconnect();
-
-    // Give some time for mqtt connection to be made on
-    // connected socket before shutting down the socket
-    thread::sleep(Duration::new(1, 0));
-    publisher1.shutdown();
-
-    // Wait for last will publish
-    thread::sleep(Duration::new(5, 0));
-    assert!(1 == final_count.load(Ordering::SeqCst));
+    for i in 0..100000 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("hello/rust", QoS::Level0, payload.clone().into_bytes());
+        thread::sleep(Duration::new(0, 100000)); //1/10th of a second
+    }
+    thread::sleep(Duration::new(3, 0));
 }
 
-#[test]
+/// Publish high frequency data to this topic and see
+/// if client is able to send PINGREQs
+//#[test]
+fn keep_alive_stress_test() {
+    let mut client_options = MqttOptions::new();
+    let client = client_options.set_keep_alive(5)
+                               .connect("localhost:1883");
+
+    let (publisher, subscriber) = client.start().expect("Coudn't start");
+    subscriber.message_callback(|message| println!("{:?}", String::from_utf8((*message.payload).clone())));
+    subscriber.subscribe(vec![("hello/rust", QoS::Level2)]);
+    thread::sleep(Duration::new(60, 0));
+}
+
+//#[test]
 fn zero_len_client_id_test1() {
     let mut client_options = MqttOptions::new();
     let client = client_options.set_keep_alive(5)

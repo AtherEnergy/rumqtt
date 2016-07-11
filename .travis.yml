@@ -16,7 +16,7 @@ before_script:
 script:
 - |
   travis-cargo build &&
-  travis-cargo bench &&
+  travis-cargo test &&
   travis-cargo --only stable doc -- --no-deps
 after_success:
 - travis-cargo --only stable doc-upload

@@ -522,6 +522,7 @@ impl ProxyClient {
                                     }
 
                                     MioNotification::Disconnect => {
+                                        debug!("{:?}", self.state);
                                          match self.state {
                                             MqttState::Connected => {
                                                 let _ = self._disconnect();
