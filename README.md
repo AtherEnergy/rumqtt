@@ -2,7 +2,7 @@
 
 A pure rust mqtt client.
 
-[DOCUMENTATION](http://kteza1.github.io/rumqtt/rumqtt/)
+[DOCUMENTATION](https://github.com/Ather-Energy/RuMqtt)
 ## Features
 
 * Supports QoS 0, QoS 1 and QoS 2
@@ -14,4 +14,4 @@ A pure rust mqtt client.
 
 * LWT
 * Disk Persitance
-* Authentication
+* Authentication with username and password

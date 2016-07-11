@@ -1,6 +1,6 @@
 //! A fast, lock free Mqtt client implementation in Rust.
 //!
-//! NOTE**: Though (almost) everything in the spec is working, this crate is
+//! **NOTE**: Though (almost) everything in the spec is working, this crate is
 //! still in its early stages of development.
 //! So please be aware of breakages. If you don't find any of the APIs elegant
 //! or think that there is a
