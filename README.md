@@ -1,4 +1,6 @@
-# RUMQTT [![build status](https://travis-ci.org/kteza1/rumqtt.svg?branch=master)](https://travis-ci.org/kteza1/rumqtt)
+# RUMQTT [![build status]
+
+[![Build Status](https://travis-ci.org/Ather-Energy/RuMqtt.svg?branch=master)](https://travis-ci.org/Ather-Energy/RuMqtt)
 
 A pure rust mqtt client.
 

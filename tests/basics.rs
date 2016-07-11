@@ -100,7 +100,7 @@ fn publish_qos1_test() {
     thread::sleep(Duration::new(120, 0));
 }
 
-//#[test]
+#[test]
 fn subscribe_test() {
     env_logger::init().unwrap();
 
@@ -114,11 +114,13 @@ fn subscribe_test() {
     // Connects to a broker and returns a `Publisher` and `Subscriber`
     let (_, subscriber) = proxy_client.start().expect("Coudn't start");
         
-    let topics = vec![("hello/world", QoS::Level0), ("hello/rust", QoS::Level1)];
+    let topics = vec![("hello/+/world", QoS::Level0), ("hello/rust", QoS::Level1)];
 
-    subscriber.subscribe(topics, |message| {
+    subscriber.message_callback(|message| {
         println!("@@@ {:?}", message);
-    }).expect("Subcription failure");
+    });
+
+    subscriber.subscribe(topics).expect("Subcription failure");
 
     thread::sleep(Duration::new(120, 0));
 }

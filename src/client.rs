@@ -19,7 +19,6 @@ use std::thread;
 use chan;
 use tls::{SslContext, NetworkStream};
 use mioco::sync::mpsc::{self, Sender};
-use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ClientOptions {
@@ -218,6 +217,7 @@ enum MqttClientState {
 enum MioNotification {
     Pub(QualityOfService),
     Sub,
+    Callback,
 }
 
 pub struct Publisher {
@@ -266,8 +266,7 @@ pub struct Subscriber {
 impl Subscriber {
     // TODO Add peek function
 
-    pub fn subscribe<F>(&self, topics: Vec<(&str, QualityOfService)>, callback: F) -> Result<()>
-        where F: Fn(Message) + Send + Sync + 'static
+    pub fn subscribe(&self, topics: Vec<(&str, QualityOfService)>) -> Result<()>
     {
         let mut sub_topics = vec![];
         for topic in topics {
@@ -277,6 +276,13 @@ impl Subscriber {
 
         try!(self.notifier.send(MioNotification::Sub));
         self.subscribe_send.send(sub_topics);
+        Ok(())
+    }
+
+    pub fn message_callback<F>(&self, callback: F) -> Result<()>
+    where F: Fn(Message) + Send + Sync + 'static
+    {
+        try!(self.notifier.send(MioNotification::Callback));
         self.callback_send.send(Box::new(callback));
         Ok(())
     }
@@ -346,8 +352,8 @@ impl ProxyClient {
                 let mut ping_timer = mioco::timer::Timer::new();
                 let mut resend_timer = mioco::timer::Timer::new();
 
-                // Callback list
-                let mut callback_list: HashMap<String, Arc<SendableFn>> = HashMap::new();
+                // On Message Callback
+                let mut eloop_callback: Option<Arc<SendableFn>> = None;
 
                 'mqtt_connect: loop {
                     // @ Send Mqtt connect packet.
@@ -396,14 +402,11 @@ impl ProxyClient {
                                 match self.handle_packet(&packet) {
                                     Ok(message) => {
                                         if let Some(m) = message {
-                                            let topic =  m.topic.to_string();
-                                            match callback_list.get_mut(&topic) {
-                                                Some(callback) => {
-                                                    let callback2 = callback.clone();
-                                                    mioco::spawn(move || callback2(*m));
-                                                }
-                                                None => panic!("No callback"),
-                                            };
+                                            // let callback2 = callback.clone();
+                                            if let Some(ref eloop_callback) = eloop_callback {
+                                                let eloop_callback = eloop_callback.clone();
+                                                mioco::spawn(move || eloop_callback(*m));
+                                            }
                                         }
                                     }
                                     Err(err) => {
@@ -486,12 +489,12 @@ impl ProxyClient {
                                     MioNotification::Sub => {
                                         let topics = sub_recv.recv().unwrap();
                                         let _ = self._subscribe(topics.clone());
+                                    }
+
+                                    MioNotification::Callback => {
                                         let callback = callback_recv.recv().expect("Expected a callback");
-                                        let callback = Arc::new(callback);
-                                        for topic in topics {
-                                            let (topic, _) = topic;
-                                            callback_list.insert(topic.to_string(), callback.clone());
-                                        }
+                                        // Set eventloop callback
+                                        eloop_callback = Some(Arc::new(callback));
                                     }
                                 }
                             },
