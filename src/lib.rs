@@ -15,12 +15,12 @@
 //! ```ignore
 //! let mut client_options = ClientOptions::new();
 //!
-//! Specify client connection opthons and which broker to connect to
+//! //Specify client connection opthons and which broker to connect to
 //! let proxy_client = client_options.set_keep_alive(5)
 //!                                  .set_reconnect(5)
 //!                                  .connect("localhost:1883");
 //!
-//! Connects to a broker and returns a `Publisher` and `Subscriber`
+//! //Connects to a broker and returns a `Publisher` and `Subscriber`
 //! let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
 //! ```
 //!
@@ -38,14 +38,13 @@
 //! # Subscribing
 //!
 //! ```ignore
-//! let topics = vec![("hello/world", QoS::Level0),
+//! let topics = vec![("hello/+/world", QoS::Level0),
 //!                   ("hello/rust", QoS::Level1)];
 //!
-//! subscriber.subscribe(topics,
-//!                     |message| {
-//!                         println!("@@@ {:?}", message);
-//!                     })
-//!                     .expect("Subscribe error");
+//! subscriber.message_callback(|message| {
+//!        println!("@@@ {:?}", message);
+//! });
+//! subscriber.subscribe(topics).expect("Subscribe error");
 //! ```
 //!
 
