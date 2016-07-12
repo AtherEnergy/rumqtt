@@ -12,9 +12,9 @@ A pure rust mqtt client.
 * TLS support
 * Offline message buffering
 * LWT
+* Authentication with username and password
 
 
 ## To Do
 
 * Disk Persitance
-* Authentication with username and password

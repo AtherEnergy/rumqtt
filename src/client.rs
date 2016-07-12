@@ -113,17 +113,17 @@ impl MqttOptions {
         self
     }
 
-    /// Set `username` for broker to perform client authentivcation
+    /// Set `username` for broker to perform client authentication
     /// via `username` and `password`
-    pub fn set_username(&mut self, username: String) -> &mut Self {
-        self.username = Some(username);
+    pub fn set_user_name(&mut self, username: &str) -> &mut Self {
+        self.username = Some(username.to_string());
         self
     }
 
-    /// Set `password` for broker to perform client authentivation
+    /// Set `password` for broker to perform client authentication
     /// vis `username` and `password`
-    pub fn set_password(&mut self, password: String) -> &mut Self {
-        self.password = Some(password);
+    pub fn set_password(&mut self, password: &str) -> &mut Self {
+        self.password = Some(password.to_string());
         self
     }
 
@@ -718,7 +718,7 @@ impl ProxyClient {
                         };
                         try!(self._pubcomp(pkid));
 
-                        if let Some(message) =  message {
+                        if let Some(message) = message {
                             Ok(HandlePacket::Publish(message))
                         } else {
                             Ok(HandlePacket::Invalid)
@@ -967,6 +967,10 @@ impl ProxyClient {
             connect_packet.set_will_qos(self.opts.will_qos as u8);
             connect_packet.set_will_retain(self.opts.will_retain);
         }
+
+        // mqtt-protocol APIs are directly handling None cases.
+        connect_packet.set_user_name(self.opts.username.clone());
+        connect_packet.set_password(self.opts.password.clone());
 
         let mut buf = Vec::new();
 
