@@ -157,7 +157,7 @@ impl MqttOptions {
         self
     }
 
-    /// Set will for the client so that broker can send `will_message` 
+    /// Set will for the client so that broker can send `will_message`
     /// on `will_topic` when this client ungracefully dies.
     pub fn set_will(&mut self, will_topic: &str, will_message: &str) -> &mut Self {
         self.will = Some((will_topic.to_string(), will_message.to_string()));
@@ -170,7 +170,7 @@ impl MqttOptions {
         self
     }
 
-    /// Set will retian so that future clients subscribing to will topic 
+    /// Set will retian so that future clients subscribing to will topic
     /// knows of client's death.
     pub fn set_will_retain(&mut self, retain: bool) -> &mut Self {
         self.will_retain = retain;
@@ -357,6 +357,20 @@ impl ProxyClient {
         let (sub_send, sub_recv) = chan::sync::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
         let (callback_send, callback_recv) = chan::sync::<SendableFn>(0);
 
+        // synchronizes tcp connection. why ?
+        // start() call should fail if there a problem creating initial tcp
+        // connection. Since tcp connection is happening inside thread, 
+        // this method should be informed to return error instead of 
+        // (publisher, subscriber) in case connection fails.
+        // TODO: It might be good idea to synchronize for initial mqtt connection 
+        // instead of just tcp connection
+        let (connection_send, connection_recv) = chan::sync::<TcpStatus>(0);
+
+        enum TcpStatus {
+            Success,
+            Failed,
+        };
+
         // @ Create 'publisher' and 'subscriber'
         // @ These are the handles using which user interacts with rumqtt.
         let publisher = Publisher {
@@ -376,13 +390,31 @@ impl ProxyClient {
             mioco::start(move || -> Result<()> {
                 // @ Inital Tcp/Tls connection.
                 // @ Won't retry if connectin fails here
-                let stream: TcpStream = try!(TcpStream::connect(&self.addr));
+                let stream: TcpStream = match TcpStream::connect(&self.addr) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        connection_send.send(TcpStatus::Failed);
+                        return Err(Error::Io(e));
+                    }
+                };
+
+                // TODO: write a try_or macro
                 let stream = match self.opts.ssl {
-                    Some(ref ssl) => NetworkStream::Ssl(try!(ssl.connect(stream))),
+                    Some(ref ssl) => {
+                        let s = match ssl.connect(stream) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                connection_send.send(TcpStatus::Failed);
+                                return Err(e);
+                            }
+                        };
+                        NetworkStream::Ssl(s)
+                    }
                     None => NetworkStream::Tcp(stream),
                 };
                 self.stream = stream;
                 self.state = MqttState::Disconnected;
+                connection_send.send(TcpStatus::Success);
 
                 // @ Timer for ping requests and retransmits
                 let mut ping_timer = mioco::timer::Timer::new();
@@ -438,7 +470,7 @@ impl ProxyClient {
                                         let eloop_callback = eloop_callback.clone();
                                         mioco::spawn(move || eloop_callback(*m));
                                     }
-                                } 
+                                }
                             },
 
                             r:ping_timer => {
@@ -542,12 +574,15 @@ impl ProxyClient {
                         ); //select end
                     } //event loop end
                 } //mqtt connection loop end
-
             }); //mioco end
             Err(Error::EventLoop)
         }); //thread end
 
-        Ok((publisher, subscriber))
+        let conn = connection_recv.recv().expect("Connection sync recv error");
+        match conn {
+            TcpStatus::Success => Ok((publisher, subscriber)),
+            TcpStatus::Failed => Err(Error::ConnectionAbort),
+        }
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
