@@ -23,7 +23,7 @@ fn basic_test() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let topics = vec![("hello/rust", QoS::Level0)];
+    let topics = vec![("test/basic", QoS::Level0)];
 
     subscriber.subscribe(topics).expect("Subcription failure");  
     subscriber.message_callback(move |message| {
@@ -32,9 +32,9 @@ fn basic_test() {
     });
     
     let payload = format!("hello rust");
-    publisher.publish("hello/rust", QoS::Level0, payload.clone().into_bytes());
-    publisher.publish("hello/rust", QoS::Level1, payload.clone().into_bytes());
-    publisher.publish("hello/rust", QoS::Level2, payload.clone().into_bytes());
+    publisher.publish("test/basic", QoS::Level0, payload.clone().into_bytes());
+    publisher.publish("test/basic", QoS::Level1, payload.clone().into_bytes());
+    publisher.publish("test/basic", QoS::Level2, payload.clone().into_bytes());
 
     thread::sleep(Duration::new(3, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
@@ -48,7 +48,7 @@ fn reconnection_test() {
     let mut client_options = MqttOptions::new();
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .set_client_id("reconnection-test")
+                                    .set_client_id("test-reconnect-client")
                                     .set_clean_session(false)
                                     .connect("test.mosquitto.org:1883");
 
@@ -60,10 +60,10 @@ fn reconnection_test() {
     let count = count.clone();
 
     // Register message callback and subscribe
-    let topics = vec![("rumqtt/reconnect", QoS::Level2)];  
+    let topics = vec![("test/reconnect", QoS::Level2)];  
     subscriber.message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        // println!("message --> {:?}", message);
     });
     subscriber.subscribe(topics).expect("Subcription failure");
 
@@ -74,7 +74,7 @@ fn reconnection_test() {
     // Wait for reconnection and publish
     thread::sleep(Duration::new(10, 0));
     let payload = format!("hello rust");
-    publisher.publish("rumqtt/reconnect", QoS::Level2, payload.clone().into_bytes());
+    publisher.publish("test/reconnect", QoS::Level2, payload.clone().into_bytes());
 
     // Wait for count to be incremented by callback
     thread::sleep(Duration::new(5, 0));
@@ -86,15 +86,15 @@ fn will_test() {
     let mut client_options = MqttOptions::new();
     let client1 = client_options.set_keep_alive(5)
                                     .set_reconnect(15)
-                                    .set_client_id("will-test-c1")
+                                    .set_client_id("test-will-c1")
                                     .set_clean_session(false)
-                                    .set_will("hello/world", "I'm dead")
+                                    .set_will("test/will", "I'm dead")
                                     .connect("test.mosquitto.org:1883");
 
     let mut client_options = MqttOptions::new();
     let client2 = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .set_client_id("will-test-c2")
+                                    .set_client_id("test-will-c2")
                                     .connect("test.mosquitto.org:1883");
 
     let (mut publisher1, _) = client1.start().expect("Coudn't start");
@@ -108,7 +108,7 @@ fn will_test() {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("message --> {:?}", message);
     });
-    subscriber2.subscribe(vec![("hello/world", QoS::Level0)]);
+    subscriber2.subscribe(vec![("test/will", QoS::Level0)]);
 
     // LWT doesn't work on graceful disconnects
     // publisher1.disconnect();
