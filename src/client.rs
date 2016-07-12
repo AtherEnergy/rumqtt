@@ -396,15 +396,11 @@ impl ProxyClient {
                     // @ Change the state to handshake.
                     // @ Start PINGREQ/RETRANSMIT timer. But PINGREQs
                     // @ should only be sent in 'connected' state
-                    match self._connect() {
-                        Ok(_) => {
-                            if let Some(keep_alive) = self.opts.keep_alive {
-                                ping_timer.set_timeout(keep_alive as u64 * 900);
-                                resend_timer.set_timeout(self.opts.queue_timeout as u64 * 1000);
-                            }
-                            self.state = MqttState::Handshake;
-                        }
-                        _ => panic!("There shouldln't be error here"),
+                    try!(self._connect());
+                    self.state = MqttState::Handshake;
+                    if let Some(keep_alive) = self.opts.keep_alive {
+                        ping_timer.set_timeout(keep_alive as u64 * 900);
+                        resend_timer.set_timeout(self.opts.queue_timeout as u64 * 1000);
                     }
 
                     // @ Start the event loop
