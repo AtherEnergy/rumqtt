@@ -217,6 +217,7 @@ impl MqttOptions {
         ProxyClient {
             addr: addr,
             stream: NetworkStream::None,
+
             // State
             last_flush: Instant::now(),
             last_pkid: PacketIdentifier(0),
@@ -328,9 +329,11 @@ impl Subscriber {
 /// state and takes care of retransmissions.
 pub struct ProxyClient {
     addr: SocketAddr,
-    state: MqttState,
     opts: MqttOptions,
     stream: NetworkStream,
+
+    // state
+    state: MqttState,
     last_flush: Instant,
     last_pkid: PacketIdentifier,
     await_ping: bool,
@@ -346,6 +349,25 @@ pub struct ProxyClient {
     outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 }
 
+enum TcpStatus {
+    Success,
+    Failed,
+}
+
+enum HandlePacket {
+    ConnAck,
+    Publish(Box<Message>),
+    PubAck,
+    PubRec,
+    PubRel,
+    PubComp,
+    SubAck,
+    UnSubAck,
+    PingResp,
+    Disconnect,
+    Invalid,
+}
+
 impl ProxyClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns `Subscriber` and `Publisher` and handles reqests from them.
@@ -359,17 +381,10 @@ impl ProxyClient {
 
         // synchronizes tcp connection. why ?
         // start() call should fail if there a problem creating initial tcp
-        // connection. Since tcp connection is happening inside thread, 
-        // this method should be informed to return error instead of 
+        // connection & mqtt connection. Since connections are happening inside thread,
+        // this method should be informed to return error instead of
         // (publisher, subscriber) in case connection fails.
-        // TODO: It might be good idea to synchronize for initial mqtt connection 
-        // instead of just tcp connection
         let (connection_send, connection_recv) = chan::sync::<TcpStatus>(0);
-
-        enum TcpStatus {
-            Success,
-            Failed,
-        };
 
         // @ Create 'publisher' and 'subscriber'
         // @ These are the handles using which user interacts with rumqtt.
@@ -398,6 +413,7 @@ impl ProxyClient {
                     }
                 };
 
+                let mut initial_connect = true;
                 // TODO: write a try_or macro
                 let stream = match self.opts.ssl {
                     Some(ref ssl) => {
@@ -414,7 +430,6 @@ impl ProxyClient {
                 };
                 self.stream = stream;
                 self.state = MqttState::Disconnected;
-                connection_send.send(TcpStatus::Success);
 
                 // @ Timer for ping requests and retransmits
                 let mut ping_timer = mioco::timer::Timer::new();
@@ -440,15 +455,11 @@ impl ProxyClient {
                         select! (
                             r:try!(self.stream.get_ref()) => {
                                 let packet = match VariablePacket::decode(&mut self.stream) {
-                        // @ Decoded packet successfully.
                                     Ok(pk) => pk,
-                        // @ Set state machine to Disconnected.
-                        // @ Try to make a new Tcp connection.
-                        // @ If network goes down after this block, all the network operations ..
-                        // @ will fail until eventloop reaches here again and tries for reconnect.
                                     Err(err) => {
-                        // maybe size=0 while reading indicating socket
-                        // close at broker end
+                        // @ If network goes down after this block, all the
+                        // @ network operations will fail until eventloop
+                        // @ reaches here again and tries for reconnect.
                                         error!("Error in receiving packet {:?}", err);
                                         self._unbind();
                                         self.state = MqttState::Disconnected;
@@ -465,11 +476,22 @@ impl ProxyClient {
                                 // @ At this point, there is a connected TCP socket
                                 // @ Exits the event loop with error if handshake fails
                                 let message =  try!(self.handle_packet(&packet));
-                                if let Some(m) = message {
-                                    if let Some(ref eloop_callback) = eloop_callback {
-                                        let eloop_callback = eloop_callback.clone();
-                                        mioco::spawn(move || eloop_callback(*m));
+                                match message {
+                                    HandlePacket::Publish(m) => {
+                                        if let Some(ref eloop_callback) = eloop_callback {
+                                            let eloop_callback = eloop_callback.clone();
+                                            mioco::spawn(move || eloop_callback(*m));
+                                        }
                                     }
+
+                                    HandlePacket::ConnAck => {
+                                        if initial_connect == true {
+                                            connection_send.send(TcpStatus::Success);
+                                            initial_connect = false;
+                                        }
+                                    }
+
+                                    _ => info!("Don't care"),
                                 }
                             },
 
@@ -585,7 +607,7 @@ impl ProxyClient {
         }
     }
 
-    fn handle_packet(&mut self, packet: &VariablePacket) -> Result<Option<Box<Message>>> {
+    fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
         match self.state {
             MqttState::Handshake => {
                 match *packet {
@@ -596,12 +618,12 @@ impl ProxyClient {
                             Err(Error::ConnectionRefused(conn_ret_code))
                         } else {
                             self.state = MqttState::Connected;
-                            Ok(None)
+                            Ok(HandlePacket::ConnAck)
                         }
                     }
                     _ => {
                         error!("received invalid packet in handshake state --> {:?}", packet);
-                        Ok(None)
+                        Ok(HandlePacket::Invalid)
                     }
                 }
             }
@@ -612,18 +634,18 @@ impl ProxyClient {
                         // if ack.packet_identifier() != 10
                         // TODO: Maintain a subscribe queue and retry if
                         // subscribes are not successful
-                        Ok(None)
+                        Ok(HandlePacket::SubAck)
                     }
 
                     VariablePacket::PingrespPacket(..) => {
                         self.await_ping = false;
-                        Ok(None)
+                        Ok(HandlePacket::PingResp)
                     }
 
                     // @ Receives disconnect packet
                     VariablePacket::DisconnectPacket(..) => {
                         // TODO
-                        Ok(None)
+                        Ok(HandlePacket::Disconnect)
                     }
 
                     // @ Receives puback packet and verifies it with sub packet id
@@ -642,7 +664,7 @@ impl ProxyClient {
                                 error!("Oopssss..unsolicited ack");
                             }
                         };
-                        Ok(None)
+                        Ok(HandlePacket::PubAck)
                     }
 
                     // @ Receives publish packet
@@ -669,7 +691,7 @@ impl ProxyClient {
 
                         try!(self._pubrel(pkid));
                         self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
-                        Ok(None)
+                        Ok(HandlePacket::PubRec)
                     }
 
                     // @ Broker knows that client has the message
@@ -695,7 +717,12 @@ impl ProxyClient {
                             }
                         };
                         try!(self._pubcomp(pkid));
-                        Ok(message)
+
+                        if let Some(message) =  message {
+                            Ok(HandlePacket::Publish(message))
+                        } else {
+                            Ok(HandlePacket::Invalid)
+                        }
                     }
 
                     // @ Remove this pkid from 'outgoing_rel' queue
@@ -710,16 +737,17 @@ impl ProxyClient {
                                 None
                             }
                         };
-                        Ok(None)
+                        Ok(HandlePacket::PubComp)
                     }
 
-                    VariablePacket::UnsubackPacket(..) => Ok(None),
+                    VariablePacket::UnsubackPacket(..) => Ok(HandlePacket::UnSubAck),
 
-                    _ => Ok(None), //TODO: Replace this with panic later
+                    _ => Ok(HandlePacket::Invalid), //TODO: Replace this with panic later
                 }
             }
 
             MqttState::Disconnected => {
+                error!("Client in disconnected state. Invalid packet received");
                 match self._connect() {
                     // @ Change the state machine to handshake
                     // @ and event loop to readable to read
@@ -733,22 +761,22 @@ impl ProxyClient {
                         self.state = MqttState::Disconnected;
                     }
                 };
-                Ok(None)
+                Ok(HandlePacket::Invalid)
             }
         }
     }
 
-    fn _handle_message(&mut self, message: Box<Message>) -> Result<Option<Box<Message>>> {
+    fn _handle_message(&mut self, message: Box<Message>) -> Result<HandlePacket> {
         debug!("       Publish {:?} {:?} < {:?} bytes",
                message.qos,
                message.topic.to_string(),
 
                message.payload.len());
         match message.qos {
-            QoSWithPacketIdentifier::Level0 => Ok(Some(message)),
+            QoSWithPacketIdentifier::Level0 => Ok(HandlePacket::Publish(message)),
             QoSWithPacketIdentifier::Level1(pkid) => {
                 try!(self._puback(pkid));
-                Ok(Some(message))
+                Ok(HandlePacket::Publish(message))
             }
             // @ store the message in 'recorded' queue and send 'pubrec' to broker
             // @ if 'pubrec' is lost, broker will resend the message. so only pushback is pkid is new.
@@ -767,7 +795,7 @@ impl ProxyClient {
                 };
 
                 try!(self._pubrec(pkid));
-                Ok(None)
+                Ok(HandlePacket::PubRec)
             }
         }
     }

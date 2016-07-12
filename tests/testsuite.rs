@@ -7,17 +7,32 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Shouldn't try to reconnect if there is a connection problem
-/// during initial connect.
-
+/// during initial tcp connect.
 #[test]
 #[should_panic]
-fn inital_connect_failure_test() {
+fn inital_tcp_connect_failure_test() {
     let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
                                     .connect("localhost:1883");
+
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (_, _) = proxy_client.start().expect("Coudn't start");
+}
+
+/// Shouldn't try to reconnect if there is a connection problem
+/// during initial mqtt connect.
+#[test]
+#[should_panic]
+fn inital_mqtt_connect_failure_test() {
+    let mut client_options = MqttOptions::new();
+
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .connect("test.mosquitto.org:8883");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
     let (_, _) = proxy_client.start().expect("Coudn't start");
