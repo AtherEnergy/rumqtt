@@ -682,7 +682,7 @@ impl ProxyClient {
                             .iter()
                             .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
-                                self.outgoing_pub.remove(i);
+                                self.outgoing_rec.remove(i);
                             }
                             None => {
                                 error!("Oopssss..unsolicited record");
@@ -778,6 +778,7 @@ impl ProxyClient {
                 try!(self._puback(pkid));
                 Ok(HandlePacket::Publish(message))
             }
+            
             // @ store the message in 'recorded' queue and send 'pubrec' to broker
             // @ if 'pubrec' is lost, broker will resend the message. so only pushback is pkid is new.
             // @ and resend pubcomp.
