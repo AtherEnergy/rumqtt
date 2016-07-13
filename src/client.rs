@@ -267,7 +267,7 @@ impl Publisher {
 
         let message = Message {
             topic: topic,
-            retain: self.retain, // TODO: Verify this
+            retain: self.retain,
             qos: qos_pkid,
             payload: Arc::new(payload),
         };
@@ -895,8 +895,9 @@ impl ProxyClient {
         let qos = message.qos;
         let message = message.transform(Some(qos));
         let payload = &*message.payload;
+        let retain = message.retain;
 
-        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), payload.clone()));
+        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), retain, payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
@@ -1002,10 +1003,13 @@ impl ProxyClient {
         Ok(buf)
     }
 
-    fn _generate_publish_packet(&self, topic: TopicName, qos: QoSWithPacketIdentifier, payload: Vec<u8>) -> Result<Vec<u8>> {
-        let publish_packet = PublishPacket::new(topic, qos, payload);
+    // TODO: dup flag
+    fn _generate_publish_packet(&self, topic: TopicName, qos: QoSWithPacketIdentifier, 
+                                        retain: bool, payload: Vec<u8>) -> Result<Vec<u8>> {
+        let mut publish_packet = PublishPacket::new(topic, qos, payload);
         let mut buf = Vec::new();
-
+        publish_packet.set_retain(retain);
+        //publish_packet.set_dup(dup);
         try!(publish_packet.encode(&mut buf));
         Ok(buf)
     }

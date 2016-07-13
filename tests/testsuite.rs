@@ -16,7 +16,7 @@ fn inital_tcp_connect_failure_test() {
     // Specify client connection opthons and which broker to connect to
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .connect("localhost:1883");
+                                    .connect("localhost:9999");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
     let (_, _) = proxy_client.start().expect("Coudn't start");
@@ -71,6 +71,8 @@ fn basic_test() {
     assert!(3 == final_count.load(Ordering::SeqCst));
     thread::sleep(Duration::new(3, 0));
 }
+
+//TODO: Multiple mqtt connection
 
 #[test]
 fn reconnection_test() {
@@ -154,39 +156,55 @@ fn will_test() {
     assert!(1 == final_count.load(Ordering::SeqCst));
 }
 
-//#[test]
+/// Broker should retain published message on a topic and
+/// INSTANTLY publish them to new subscritions
+#[test]
 fn retained_message_test() {
     let mut client_options = MqttOptions::new();
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .set_client_id("client-1")
+                                    .set_client_id("test-retain-client")
                                     .set_clean_session(true)
-                                    .connect("localhost:1883");
-
+                                    .connect("broker.hivemq.com:1883");
+    //NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org" broker
     let (mut publisher, subscriber) = proxy_client.start().expect("Coudn't start");
 
+    // publish first
     let payload = format!("hello rust");
-    publisher.set_retain(true).publish("hello/1/world", QoS::Level0, payload.clone().into_bytes());
-    publisher.set_retain(true).publish("hello/2/world", QoS::Level1, payload.clone().into_bytes());
-    publisher.set_retain(true).publish("hello/3/world", QoS::Level2, payload.clone().into_bytes());
+    publisher.set_retain(true).publish("test/0/retain", QoS::Level0, payload.clone().into_bytes());
+    publisher.set_retain(true).publish("test/1/retain", QoS::Level1, payload.clone().into_bytes());
+    publisher.set_retain(true).publish("test/2/retain", QoS::Level2, payload.clone().into_bytes());
+
+    publisher.disconnect();
+
+    // wait for client to reconnect
+    thread::sleep(Duration::new(7, 0));
+
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
     let count = count.clone();
 
-    let topics = vec![("hello/world", QoS::Level0)];
+    // subscribe to the topic which broker has retained
+    let topics = vec![("test/+/retain", QoS::Level0)];
     subscriber.subscribe(topics).expect("Subcription failure");
     subscriber.message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     });
 
-    publisher.disconnect();
-
-    thread::sleep(Duration::new(180, 0));
+    // wait for messages
+    thread::sleep(Duration::new(3, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
     thread::sleep(Duration::new(3, 0));
+
+    //TODO: Clear retained messages
 }
+
+//TODO 1: Publish 100000 Qos0, 1, 2 messages and check received count (subscribing to same topic)
+//TODO 2: Perform 1 with big messages
+//TODO 3: Perform 1 with internet constantly going down
+//TODO 4: Perform 2 + 3
 
 //------------------------------ MANUAL TESTS -----------------------------------
 
