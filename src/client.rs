@@ -23,6 +23,12 @@ const MIO_PING_TIMER: u64 = 123;
 const MIO_QUEUE_TIMER: u64 = 321;
 const MIO_CLIENT_STREAM: Token = Token(1);
 
+// static mut N: i32 = 0;
+// unsafe {
+//     N += 1;
+//     println!("N: {}", N);
+// }
+
 #[derive(Clone)]
 pub struct MqttOptions {
     keep_alive: Option<u16>,
@@ -228,6 +234,10 @@ impl MqttOptions {
             state: MqttState::Disconnected,
             initial_connect: true,
             opts: self.clone(),
+            pub1_channel_pending: 0,
+            pub2_channel_pending: 0,
+            should_qos1_block: false,
+            should_qos2_block: false,
 
             // Channels
             pub0_rx: None,
@@ -235,6 +245,7 @@ impl MqttOptions {
             pub2_rx: None,
             sub_rx: None,
             connsync_tx: None,
+            mionotify_tx: None,
 
             // Queues
             incoming_rec: VecDeque::new(),
@@ -255,10 +266,20 @@ enum MqttState {
     Disconnected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PubNotify {
+    QoS0,
+    QoS1,
+    QoS1QueueDown,
+    QoS1Reconnect,
+    QoS2Reconnect,
+    QoS2,
+    QoS2QueueDown,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MioNotification {
-    Pub(QualityOfService),
+    Pub(PubNotify),
     Sub,
     Disconnect,
     Shutdown,
@@ -278,6 +299,10 @@ pub struct ProxyClient {
     last_pkid: PacketIdentifier,
     await_ping: bool,
     initial_connect: bool,
+    pub1_channel_pending: u32,
+    pub2_channel_pending: u32,
+    should_qos1_block: bool,
+    should_qos2_block: bool,
 
     // Channels
     pub0_rx: Option<mpsc::Receiver<Message>>,
@@ -285,6 +310,7 @@ pub struct ProxyClient {
     pub2_rx: Option<mpsc::Receiver<Message>>,
     sub_rx: Option<mpsc::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
     connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
+    mionotify_tx: Option<Sender<MioNotification>>,
 
     /// Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
@@ -463,9 +489,9 @@ impl Handler for ProxyClient {
         match self.state {
             MqttState::Connected => {
                 match notification_type {
-                    MioNotification::Pub(qos) => {
-                        match qos {
-                            QualityOfService::Level0 => {
+                    MioNotification::Pub(p) => {
+                        match p {
+                            PubNotify::QoS0 => {
                                 let message = {
                                     match self.pub0_rx {
                                         Some(ref pub0_rx) => pub0_rx.recv().unwrap(),
@@ -474,20 +500,77 @@ impl Handler for ProxyClient {
                                 };
                                 let _ = self._publish(message);
                             }
-                            QualityOfService::Level1 => {
-                                let mut message = {
-                                    match self.pub1_rx {
-                                        Some(ref pub1_rx) => pub1_rx.recv().unwrap(),
-                                        None => panic!("No publish recv channel"),
+                            PubNotify::QoS1 |
+                            PubNotify::QoS1QueueDown |
+                            PubNotify::QoS1Reconnect => {
+                                // Increment only if notificication is from publisher
+                                if p == PubNotify::QoS1 {
+                                    self.pub1_channel_pending += 1;
+                                }
+
+                                // Receive from publish channel only when outgoing pub queue
+                                // length is < max
+                                if self.should_qos1_block == false {
+                                    loop {
+                                        debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
+                                        // Before
+                                        if self.pub1_channel_pending == 0 {
+                                            debug!("Finished everything in channel");
+                                            break;
+                                        }
+                                        let mut message = {
+
+                                            match self.pub1_rx {
+                                                // Careful, this is a blocking call. Might
+                                                // be easier to find queue len bugs with this.
+                                                Some(ref pub1_rx) => pub1_rx.recv().unwrap(),
+                                                None => panic!("No publish recv channel"),
+                                            }
+                                        };
+                                        // Add next packet id to message and publish
+                                        let PacketIdentifier(pkid) = self._next_pkid();
+                                        message.set_pkid(pkid);
+                                        let _ = self._publish(message);
+                                        self.pub1_channel_pending -= 1;
                                     }
-                                };
-                                // Add next packet id to message and publish
-                                let PacketIdentifier(pkid) = self._next_pkid();
-                                message.set_pkid(pkid);
-                                let _ = self._publish(message);
+                                }
                             }
 
-                            _ => panic!("Invalid Qos"),
+                            PubNotify::QoS2 |
+                            PubNotify::QoS2QueueDown |
+                            PubNotify::QoS2Reconnect => {
+                                // Increment only if notificication is from publisher
+                                if p == PubNotify::QoS2 {
+                                    self.pub2_channel_pending += 1;
+                                }
+
+                                // Receive from publish channel only when outgoing pub queue
+                                // length is < max
+                                if self.should_qos2_block == false {
+                                    loop {
+                                        debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
+                                        // Before
+                                        if self.pub2_channel_pending == 0 {
+                                            debug!("Finished everything in channel");
+                                            break;
+                                        }
+                                        let mut message = {
+
+                                            match self.pub2_rx {
+                                                // Careful, this is a blocking call. Might
+                                                // be easier to find queue len bugs with this.
+                                                Some(ref pub2_rx) => pub2_rx.recv().unwrap(),
+                                                None => panic!("No publish recv channel"),
+                                            }
+                                        };
+                                        // Add next packet id to message and publish
+                                        let PacketIdentifier(pkid) = self._next_pkid();
+                                        message.set_pkid(pkid);
+                                        let _ = self._publish(message);
+                                        self.pub2_channel_pending -= 1;
+                                    }
+                                }
+                            }
                         }
                     }
                     MioNotification::Sub => {
@@ -538,6 +621,7 @@ impl ProxyClient {
     pub fn start(mut self) -> Result<(Publisher, Subscriber)> {
         let mut event_loop = EventLoop::new().unwrap();
         let mionotify_tx = event_loop.channel();
+        self.mionotify_tx = Some(mionotify_tx.clone());
 
         let (pub0_tx, pub0_rx) = mpsc::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub0_rx = Some(pub0_rx);
@@ -655,11 +739,16 @@ impl ProxyClient {
                                 error!("Oopssss..unsolicited ack");
                             }
                         };
+                        debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
                         Ok(HandlePacket::PubAck)
                     }
 
                     // @ Receives publish packet
                     VariablePacket::PublishPacket(ref publ) => {
+                        // unsafe {
+                        //     N += 1;
+                        //     println!("N: {}", N);
+                        // }
                         let message = try!(Message::from_pub(publ));
                         self._handle_message(message)
                     }
@@ -791,7 +880,7 @@ impl ProxyClient {
         }
     }
 
-     #[allow(non_snake_case)]
+    #[allow(non_snake_case)]
     fn STATE_read_incoming(&mut self, event_loop: &mut EventLoop<Self>) -> Result<VariablePacket> {
         match VariablePacket::decode(&mut self.stream) {
             // @ Decoded packet successfully.
@@ -826,7 +915,7 @@ impl ProxyClient {
         }
     }
 
-     #[allow(non_snake_case)]
+    #[allow(non_snake_case)]
     fn STATE_handle_packet(&mut self, packet: &VariablePacket, event_loop: &mut EventLoop<Self>) {
         if let Ok(p) = self.handle_packet(packet) {
             match p {
@@ -839,6 +928,16 @@ impl ProxyClient {
                                 self.initial_connect = false;
                             }
                             None => panic!("No connsync channel"),
+                        }
+                    } else {
+                        // Publisher won't stop even when disconnected until channel is full.
+                        // This notifies notify() to publish channel pending messages after reconnect.
+                        match self.mionotify_tx {
+                            Some(ref mionotify_tx) => {
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect)).expect("Send failed");
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect)).expect("Send failed");
+                            }
+                            None => panic!("No mionotify channel"),
                         }
                     }
                     event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000).unwrap();
@@ -853,6 +952,34 @@ impl ProxyClient {
                         thread::spawn(move || message_callback(*m));
                     }
                 }
+                // Sending a dummy notification saying tha queue size has reduced
+                HandlePacket::PubAck => {
+                    // Don't notify everytime q len is < max. This will always be true initially
+                    // leading to dup notify.
+                    // Send only for notify() to recover if channel is blocked.
+                    // Blocking = true is set during publish if pub q len is more than desired.
+                    if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block == true {
+                        match self.mionotify_tx {
+                            Some(ref mionotify_tx) => {
+                                self.should_qos1_block = false;
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("Send failed");
+                            }
+                            None => panic!("No mionotify channel"),
+                        }
+                    }
+                }
+                //TODO: Better read from channel again after PubComp instead of PubRec
+                HandlePacket::PubRec => {
+                    if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block == true {
+                        match self.mionotify_tx {
+                            Some(ref mionotify_tx) => {
+                                self.should_qos2_block = false;
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("Send failed");
+                            }
+                            None => panic!("No mionotify channel"),
+                        }
+                    }
+                }
                 _ => info!("packet handler says that he doesn't care"),
             }
         } else {
@@ -860,7 +987,7 @@ impl ProxyClient {
         }
     }
 
-     #[allow(non_snake_case)]
+    #[allow(non_snake_case)]
     fn STATE_try_reconnect(&mut self, event_loop: &mut EventLoop<Self>) {
         let _ = self._try_reconnect();
 
@@ -952,7 +1079,6 @@ impl ProxyClient {
     }
 
     fn _publish(&mut self, message: Message) -> Result<()> {
-
         let qos = message.qos;
         let message = message.transform(Some(qos));
         let payload = &*message.payload;
@@ -962,10 +1088,19 @@ impl ProxyClient {
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
-            QoSWithPacketIdentifier::Level1(_) => self.outgoing_pub.push_back((time::get_time().sec, message.clone())),
-            QoSWithPacketIdentifier::Level2(_) => self.outgoing_rec.push_back((time::get_time().sec, message.clone())),
+            QoSWithPacketIdentifier::Level1(_) => {
+                self.outgoing_pub.push_back((time::get_time().sec, message.clone()));
+                if self.outgoing_pub.len() >= self.opts.pub_q_len as usize {
+                    self.should_qos1_block = true;
+                }
+            }
+            QoSWithPacketIdentifier::Level2(_) => {
+                self.outgoing_rec.push_back((time::get_time().sec, message.clone()));
+                if self.outgoing_rec.len() >= self.opts.pub_q_len as usize {
+                    self.should_qos2_block = true;
+                }
+            }
         }
-
         debug!("       Publish {:?} {:?} > {} bytes", message.qos, message.topic.to_string(), message.payload.len());
 
         try!(self._write_packet(publish_packet));
@@ -1169,15 +1304,16 @@ impl Publisher {
         match qos {
             QualityOfService::Level0 => {
                 try!(self.pub0_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(qos)));
+                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS0)));
             }
             QualityOfService::Level1 => {
                 // Order important coz mioco is level triggered
                 try!(self.pub1_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(qos)));
+                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1)));
             }
             QualityOfService::Level2 => {
                 try!(self.pub2_tx.send(message));
+                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2)));
             }
         };
 

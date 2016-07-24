@@ -76,10 +76,10 @@ fn basic() {
     let payload = format!("hello rust");
     publisher.publish("test/basic", QoS::Level0, payload.clone().into_bytes()).unwrap();
     publisher.publish("test/basic", QoS::Level1, payload.clone().into_bytes()).unwrap();
-    //publisher.publish("test/basic", QoS::Level2, payload.clone().into_bytes()).unwrap();
+    publisher.publish("test/basic", QoS::Level2, payload.clone().into_bytes()).unwrap();
 
     thread::sleep(Duration::new(1, 0));
-    assert!(2 == final_count.load(Ordering::SeqCst));
+    assert!(3 == final_count.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -248,3 +248,67 @@ fn qos0_stress_publish() {
     thread::sleep(Duration::new(10, 0));
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }
+
+
+#[test]
+fn qos1_stress_publish() {
+    //env_logger::init().unwrap();
+    let mut client_options = MqttOptions::new();
+    let client = client_options.set_keep_alive(5)
+                               .set_pub_q_len(50)
+                               .connect("broker.hivemq.com:1883");
+    //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
+    // with mosquitto broker. local and remote)
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let (publisher, subscriber) = client.message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        //println!("message --> {:?}", message);
+    }).start().expect("Coudn't start");
+
+    subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
+
+    for i in 0..1000 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::new(0, 10000));
+    }
+
+    thread::sleep(Duration::new(300, 0));
+    println!("{:?}", final_count.load(Ordering::SeqCst));
+    assert!(1000 == final_count.load(Ordering::SeqCst));
+}
+
+#[test]
+fn qos2_stress_publish() {
+    let mut client_options = MqttOptions::new();
+    let client = client_options.set_keep_alive(5)
+                               .connect("broker.hivemq.com:1883");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let (publisher, subscriber) = client.message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        //println!("message --> {:?}", message);
+    }).start().expect("Coudn't start");
+    
+    subscriber.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");
+
+    for i in 0..1000 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("test/qos2/stress", QoS::Level2, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::new(0, 10000));
+    }
+
+    thread::sleep(Duration::new(500, 0));
+    assert!(1000 == final_count.load(Ordering::SeqCst));
+}
+
+//TODO 1: Publish 100000 Qos0, 1, 2 messages and check received count (subscribing to same topic)
+//TODO 2: Perform 1 with big messages
+//TODO 3: Perform 1 with internet constantly going down
+//TODO 4: Perform 2 + 3

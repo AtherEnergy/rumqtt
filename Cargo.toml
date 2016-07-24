@@ -1,12 +1,19 @@
 [package]
 authors = ["kteza1 <k.teza1@gmail.com>"]
 name = "rumqtt"
-version = "0.2.1"
+version = "0.4.0"
+description = "A fast, lockfree mqtt client"
+documentation = "http://ather-energy.github.io/RuMqtt/rumqtt/index.html"
+repository = "https://github.com/Ather-Energy/RuMqtt"
+readme = "README.md"
+license = "Unlicense/MIT"
+exclude = ["tests/test-utils"]
+keywords = ["mqtt", "iot"]
 
 [dependencies]
 chan = "0.1"
 log = "0.3"
-mio = "*"
+mio = "0.5"
 rand = "0.3"
 time = "0.1"
 mqtt-protocol = "0.1"
