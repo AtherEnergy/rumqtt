@@ -7,6 +7,9 @@ addons:
     - libelf-dev
     - libdw-dev
     - binutils-dev
+os:
+  - linux
+  - osx
 rust:
 - stable
 before_script:
