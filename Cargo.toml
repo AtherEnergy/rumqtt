@@ -9,9 +9,7 @@ log = "0.3"
 mio = "*"
 rand = "0.3"
 time = "0.1"
-
-[dependencies.mqtt-protocol]
-git = "https://github.com/kteza1/mqtt-rs.git"
+mqtt-protocol = "0.1"
 
 [dependencies.openssl]
 features = ["tlsv1_1", "tlsv1_2"]
