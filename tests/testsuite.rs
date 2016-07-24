@@ -1,3 +1,4 @@
+#![allow(unused_variables)] 
 extern crate rumqtt;
 
 use rumqtt::{MqttOptions, QoS};
@@ -10,9 +11,43 @@ extern crate log;
 extern crate env_logger;
 
 
+/// Shouldn't try to reconnect if there is a connection problem
+/// during initial tcp connect.
+#[test]
+#[should_panic]
+fn inital_tcp_connect_failure(){
+    //env_logger::init().unwrap();
+    let mut client_options = MqttOptions::new();
+
+    // Specify client connection opthons and which broker to connect to
+    // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .connect("localhost:9999");
+
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (_, _) = proxy_client.start().expect("Coudn't start");
+}
+
+/// Shouldn't try to reconnect if there is a connection problem
+/// during initial mqtt connect.
+/// TODO: Fix this --> client getting blocked
+//#[test]
+//#[should_panic]
+// fn inital_mqtt_connect_failure() {
+//     let mut client_options = MqttOptions::new();
+
+//     // Specify client connection opthons and which broker to connect to
+//     let proxy_client = client_options.set_keep_alive(5)
+//                                     .set_reconnect(5)
+//                                     .connect("test.mosquitto.org:8883");
+
+//     // Connects to a broker and returns a `Publisher` and `Subscriber`
+//     let (_, _) = proxy_client.start().expect("Coudn't start");
+// }
+
 #[test]
 fn basic() {
-    env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
@@ -28,9 +63,12 @@ fn basic() {
     let (publisher, subscriber) = proxy_client.
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
+    // TODO: Because of async io We are publishing before connection is actually made
+    // synchronize this and remove sleep
+    //thread::sleep(Duration::new(1, 0));
     let topics = vec![("test/basic", QoS::Level0)];
 
     subscriber.subscribe(topics).expect("Subcription failure");  
@@ -108,11 +146,11 @@ fn will() {
     // Connects to a broker and returns a `Publisher` and `Subscriber`
     // BUG NOTE: don't use _ for dummy subscriber, publisher. That implies
     // channel ends in struct are invalid
-    let (mut publisher1, subscriber1) = client1.start().expect("Coudn't start");
+    let (publisher1, subscriber1) = client1.start().expect("Coudn't start");
     let (publisher2, subscriber2) = client2.
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     })
     .start().expect("Coudn't start");
 
@@ -130,4 +168,83 @@ fn will() {
     // Wait for last will publish
     thread::sleep(Duration::new(5, 0));
     assert!(1 == final_count.load(Ordering::SeqCst));
+}
+
+/// Broker should retain published message on a topic and
+/// INSTANTLY publish them to new subscritions
+/// TDDO: Fix this. Receiving 3 messates
+#[test]
+#[ignore]
+fn retained_messages() {
+    env_logger::init().unwrap();
+    let mut client_options = MqttOptions::new();
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(3)
+                                    .set_client_id("test-retain-client")
+                                    .set_clean_session(true)
+                                    .connect("broker.hivemq.com:1883");
+    //NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org" broker
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let (mut publisher, subscriber) = proxy_client.
+    message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        println!("message --> {:?}", message);
+    }).start().expect("Coudn't start");
+
+    // publish first
+    let payload = format!("hello rust");
+    publisher.set_retain(true).publish("test/0/retain", QoS::Level0, payload.clone().into_bytes()).unwrap();
+    publisher.set_retain(true).publish("test/1/retain", QoS::Level1, payload.clone().into_bytes()).unwrap();
+    //publisher.set_retain(true).publish("test/2/retain", QoS::Level2, payload.clone().into_bytes()).unwrap();
+
+    //TODO: BUG -> Wait for some time before sending
+    //disconnect packet or else EOF isn't being detected
+    //in eventloop and reconnect isn't working
+    //NOTE: sleep in client.rs before disconnect isn't working
+    //. Strange..
+    thread::sleep(Duration::new(1, 0));
+    publisher.disconnect().unwrap();
+
+    // wait for client to reconnect
+    thread::sleep(Duration::new(10, 0));
+
+    // subscribe to the topic which broker has retained
+    let topics = vec![("test/+/retain", QoS::Level0)];
+    subscriber.subscribe(topics).expect("Subcription failure");
+
+    // wait for messages
+    thread::sleep(Duration::new(3, 0));
+    assert!(2 == final_count.load(Ordering::SeqCst));
+    //TODO: Clear retained messages
+}
+
+#[test]
+fn qos0_stress_publish() {
+    let mut client_options = MqttOptions::new();
+    let client = client_options.set_keep_alive(5)
+                               .connect("broker.hivemq.com:1883");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let (publisher, subscriber) = client.message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        // println!("message --> {:?}", message);
+    }).start().expect("Coudn't start");
+
+    subscriber.subscribe(vec![("test/qos0/stress", QoS::Level2)]).expect("Subcription failure");
+
+    for i in 0..1000 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("test/qos0/stress", QoS::Level0, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::new(0, 10000));
+    }
+
+    thread::sleep(Duration::new(10, 0));
+    assert!(1000 == final_count.load(Ordering::SeqCst));
 }

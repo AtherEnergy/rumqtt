@@ -13,7 +13,6 @@ pub type SslError = ssl::error::SslError;
 
 #[derive(Debug)]
 pub enum Error {
-    InvalidMosqClient,
     MqttEncode,
     Tls(i32),
     Subscribe(i32),
@@ -36,6 +35,7 @@ pub enum Error {
     Ssl,
     EventLoop,
     MioNotifyError,
+    Read,
 }
 
 impl From<io::Error> for Error {
