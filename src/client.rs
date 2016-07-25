@@ -193,7 +193,7 @@ impl MqttOptions {
     }
 
     fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
-        let addrs = addr.to_socket_addrs().unwrap();
+        let addrs = addr.to_socket_addrs().expect("Conversion Failed");
         for addr in addrs {
             if let SocketAddr::V4(_) = addr {
                 return addr;
@@ -400,7 +400,14 @@ impl Handler for ProxyClient {
                                 // @ connection is successful. Change the state machine
                                 // @ to handshake and event loop to readable to read
                                 // @ CONACK packet
-                                Ok(_) => self.state = MqttState::Handshake,
+                                Ok(_) => {
+                                    self.state = MqttState::Handshake;
+                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                            MIO_CLIENT_STREAM,
+                                            EventSet::readable(),
+                                            PollOpt::edge() | PollOpt::oneshot())
+                                    .unwrap();
+                                }
                                 // @ Writing connect packet failed. Tcp connection might
                                 // @ have failed. Try to establish a new Tcp connection
                                 // @ and set eventloop to writable to write connect packets
@@ -668,14 +675,13 @@ impl ProxyClient {
             self.state = MqttState::Disconnected;
             event_loop.register(self.stream.get_ref().unwrap(),
                           MIO_CLIENT_STREAM,
-                          EventSet::readable() | EventSet::writable(),
+                          EventSet::writable(),
                           PollOpt::edge() | PollOpt::oneshot())
                 .unwrap();
 
             event_loop.run(&mut self).unwrap();
         });
         let conn = connsync_rx.recv().expect("Connection sync recv error");
-
         match conn {
             MqttStatus::Success => Ok((publisher, subscriber)),
             MqttStatus::Failed => Err(Error::ConnectionAbort),

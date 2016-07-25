@@ -48,6 +48,7 @@ fn inital_tcp_connect_failure(){
 
 #[test]
 fn basic() {
+    env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
 
     // Specify client connection opthons and which broker to connect to
@@ -265,7 +266,7 @@ fn qos1_stress_publish() {
 
     let (publisher, subscriber) = client.message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
@@ -293,7 +294,7 @@ fn qos2_stress_publish() {
 
     let (publisher, subscriber) = client.message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
     
     subscriber.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");
