@@ -63,8 +63,11 @@ mod error;
 #[cfg(feature = "ssl")]
 mod tls;
 mod message;
+mod clientoptions;
+mod publisher;
+mod subscriber;
 mod client;
 
-pub use client::MqttOptions;
+pub use clientoptions::MqttOptions;
 pub use tls::SslContext;
 pub use mqtt::QualityOfService as QoS;

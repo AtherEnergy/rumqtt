@@ -1,10 +1,7 @@
 use std::time::{Duration, Instant};
 use time;
 
-use rand::{self, Rng};
-use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
-use error::{Error, Result};
-use message::Message;
+use std::net::{SocketAddr, Shutdown};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::str;
@@ -16,8 +13,14 @@ use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
-use tls::{SslContext, NetworkStream};
-use std::sync::mpsc::{self, SyncSender};
+use tls::{NetworkStream};
+use std::sync::mpsc;
+
+use error::{Error, Result};
+use message::Message;
+use clientoptions::{MqttOptions};
+use publisher::Publisher;
+use subscriber::{Subscriber, SendableFn};
 
 const MIO_PING_TIMER: u64 = 123;
 const MIO_QUEUE_TIMER: u64 = 321;
@@ -29,241 +32,17 @@ const MIO_CLIENT_STREAM: Token = Token(1);
 //     println!("N: {}", N);
 // }
 
-#[derive(Clone)]
-pub struct MqttOptions {
-    keep_alive: Option<u16>,
-    clean_session: bool,
-    client_id: Option<String>,
-    username: Option<String>,
-    password: Option<String>,
-    reconnect: Option<u16>,
-    will: Option<(String, String)>,
-    will_qos: QualityOfService,
-    will_retain: bool,
-    pub_q_len: u16,
-    sub_q_len: u16,
-    queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
-    ssl: Option<SslContext>,
-}
-
-impl Default for MqttOptions {
-    fn default() -> Self {
-        MqttOptions {
-            keep_alive: Some(5),
-            clean_session: true,
-            client_id: None,
-            username: None,
-            password: None,
-            reconnect: None,
-            will: None,
-            will_qos: QualityOfService::Level0,
-            will_retain: false,
-            pub_q_len: 50,
-            sub_q_len: 5,
-            queue_timeout: 60,
-            ssl: None,
-        }
-    }
-}
-
-
-impl MqttOptions {
-    /// Creates a new `MqttOptions` object which is used to set connection
-    /// options for new client. Below are defaults with which this object is
-    /// created.
-    ///
-    /// |                         |                          |
-    /// |-------------------------|--------------------------|
-    /// | **client_id**           | Randomly generated       |
-    /// | **clean_session**       | true                     |
-    /// | **keep_alive**          | 5 secs                   |
-    /// | **reconnect try**       | Doesn't try to reconnect |
-    /// | **retransmit try time** | 60 secs                  |
-    /// | **pub_q_len**           | 50                       |
-    /// | **sub_q_len**           | 5                        |
-    ///
-    pub fn new() -> MqttOptions { MqttOptions { ..Default::default() } }
-
-    /// Number of seconds after which client should ping the broker
-    /// if there is no other data exchange
-    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
-        self.keep_alive = Some(secs);
-        self
-    }
-
-    /// Client id of the client. A random client id will be selected
-
-    /// if you don't set one
-    pub fn set_client_id(&mut self, client_id: &str) -> &mut Self {
-        self.client_id = Some(client_id.to_string());
-        self
-    }
-
-    /// `clean_session = true` instructs the broker to clean all the client
-    /// state when it disconnects. Note that it is broker which is discarding
-    /// the client state. But this client will hold its queues and attemts to
-    /// to retransmit when reconnection happens.  (TODO: Verify this)
-    ///
-    /// When set `false`, broker will hold the client state and performs pending
-    /// operations on the client when reconnection with same `client_id`
-    /// happens.
-    ///
-    /// Hence **make sure that you manually set `client_id` when
-    /// `clean_session` is false**
-    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
-        self.clean_session = clean_session;
-        self
-    }
-
-    fn generate_client_id(&mut self) -> &mut Self {
-        let mut rng = rand::thread_rng();
-        let id = rng.gen::<u32>();
-        self.client_id = Some(format!("mqttc_{}", id));
-        self
-    }
-
-    /// Set `username` for broker to perform client authentication
-    /// via `username` and `password`
-    pub fn set_user_name(&mut self, username: &str) -> &mut Self {
-        self.username = Some(username.to_string());
-        self
-    }
-
-    /// Set `password` for broker to perform client authentication
-    /// vis `username` and `password`
-    pub fn set_password(&mut self, password: &str) -> &mut Self {
-        self.password = Some(password.to_string());
-        self
-    }
-
-    /// All the `QoS > 0` publishes state will be saved to attempt
-    /// retransmits incase ack from broker fails.
-    ///
-    /// If broker disconnects for some time, `Publisher` shouldn't throw error
-    /// immediately during publishes. At the same time, `Publisher` shouldn't be
-    /// allowed to infinitely push to the queue.
-    ///
-    /// Publish queue length specifies maximum queue capacity upto which
-    /// `Publisher`
-    /// can push with out blocking. Messages in this queue will published as
-    /// soon as
-    /// connection is reestablished and `Publisher` gets unblocked
-    pub fn set_pub_q_len(&mut self, len: u16) -> &mut Self {
-        self.pub_q_len = len;
-        self
-    }
-
-    pub fn set_sub_q_len(&mut self, len: u16) -> &mut Self {
-        self.sub_q_len = len;
-        self
-    }
-
-    /// Time interval after which client should retry for new
-    /// connection if there are any disconnections.
-    /// By default, no retry will happen
-    pub fn set_reconnect(&mut self, dur: u16) -> &mut Self {
-        self.reconnect = Some(dur);
-        self
-    }
-
-    /// Set will for the client so that broker can send `will_message`
-    /// on `will_topic` when this client ungracefully dies.
-    pub fn set_will(&mut self, will_topic: &str, will_message: &str) -> &mut Self {
-        self.will = Some((will_topic.to_string(), will_message.to_string()));
-        self
-    }
-
-    /// Set QoS for the will message
-    pub fn set_will_qos(&mut self, qos: QualityOfService) -> &mut Self {
-        self.will_qos = qos;
-        self
-    }
-
-    /// Set will retian so that future clients subscribing to will topic
-    /// knows of client's death.
-    pub fn set_will_retain(&mut self, retain: bool) -> &mut Self {
-        self.will_retain = retain;
-        self
-    }
-
-    /// Set a TLS connection
-    pub fn set_tls(&mut self, ssl: SslContext) -> &mut Self {
-        self.ssl = Some(ssl);
-        self
-    }
-
-    fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
-        let addrs = addr.to_socket_addrs().expect("Conversion Failed");
-        for addr in addrs {
-            if let SocketAddr::V4(_) = addr {
-                return addr;
-            }
-        }
-        unreachable!("Cannot lookup address");
-    }
-
-    /// Creates a new mqtt client with the broker address that you want
-    /// to connect to. Along with connection details, this object holds
-    /// all the state information of a connection.
-    ///
-    /// **NOTE**: This should be the final call of `MqttOptions` method
-    /// chaining
-    ///
-    /// ```ignore
-    /// let client = client_options.set_keep_alive(5)
-    ///                           .set_reconnect(5)
-    ///                           .set_client_id("my-client-id")
-    ///                           .set_clean_session(true)
-    ///                           .connect("localhost:1883");
-    ///
-    pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> ProxyClient {
-        if self.client_id == None {
-            self.generate_client_id();
-        }
-
-        let addr = Self::lookup_ipv4(addr);
-
-        ProxyClient {
-            addr: addr,
-            stream: NetworkStream::None,
-
-            // State
-            last_flush: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            await_ping: false,
-            state: MqttState::Disconnected,
-            initial_connect: true,
-            opts: self.clone(),
-            pub1_channel_pending: 0,
-            pub2_channel_pending: 0,
-            should_qos1_block: false,
-            should_qos2_block: false,
-
-            // Channels
-            pub0_rx: None,
-            pub1_rx: None,
-            pub2_rx: None,
-            sub_rx: None,
-            connsync_tx: None,
-            mionotify_tx: None,
-
-            // Queues
-            incoming_rec: VecDeque::new(),
-            outgoing_pub: VecDeque::new(),
-            outgoing_rec: VecDeque::new(),
-            outgoing_rel: VecDeque::new(),
-
-            // callback
-            callback: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttState {
+pub enum MqttState {
     Handshake,
     Connected,
     Disconnected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MqttStatus {
+    Success,
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,45 +64,59 @@ pub enum MioNotification {
     Shutdown,
 }
 
+enum HandlePacket {
+    ConnAck,
+    Publish(Box<Message>),
+    PubAck,
+    PubRec,
+    // PubRel,
+    PubComp,
+    SubAck,
+    UnSubAck,
+    PingResp,
+    Disconnect,
+    Invalid,
+}
+
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
 pub struct ProxyClient {
-    addr: SocketAddr,
-    opts: MqttOptions,
-    stream: NetworkStream,
+    pub addr: SocketAddr,
+    pub opts: MqttOptions,
+    pub stream: NetworkStream,
 
     // state
-    state: MqttState,
-    last_flush: Instant,
-    last_pkid: PacketIdentifier,
-    await_ping: bool,
-    initial_connect: bool,
-    pub1_channel_pending: u32,
-    pub2_channel_pending: u32,
-    should_qos1_block: bool,
-    should_qos2_block: bool,
+    pub state: MqttState,
+    pub last_flush: Instant,
+    pub last_pkid: PacketIdentifier,
+    pub await_ping: bool,
+    pub initial_connect: bool,
+    pub pub1_channel_pending: u32,
+    pub pub2_channel_pending: u32,
+    pub should_qos1_block: bool,
+    pub should_qos2_block: bool,
 
     // Channels
-    pub0_rx: Option<mpsc::Receiver<Message>>,
-    pub1_rx: Option<mpsc::Receiver<Message>>,
-    pub2_rx: Option<mpsc::Receiver<Message>>,
-    sub_rx: Option<mpsc::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
-    connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
-    mionotify_tx: Option<Sender<MioNotification>>,
+    pub pub0_rx: Option<mpsc::Receiver<Message>>,
+    pub pub1_rx: Option<mpsc::Receiver<Message>>,
+    pub pub2_rx: Option<mpsc::Receiver<Message>>,
+    pub sub_rx: Option<mpsc::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
+    pub connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
+    pub mionotify_tx: Option<Sender<MioNotification>>,
 
     /// Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
-    outgoing_pub: VecDeque<(i64, Box<Message>)>,
+    pub outgoing_pub: VecDeque<(i64, Box<Message>)>,
     /// For QoS 2. Store for incoming publishes to record.
-    incoming_rec: VecDeque<Box<Message>>, //
+    pub incoming_rec: VecDeque<Box<Message>>, //
     /// For QoS 2. Store for outgoing publishes.
-    outgoing_rec: VecDeque<(i64, Box<Message>)>,
+    pub outgoing_rec: VecDeque<(i64, Box<Message>)>,
     /// For Qos2. Store for outgoing `pubrel` packets.
-    outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
+    pub outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 
     /// On message callback
-    callback: Option<Arc<SendableFn>>,
+    pub callback: Option<Arc<SendableFn>>,
 }
 
 
@@ -1259,109 +1052,5 @@ impl ProxyClient {
         let PacketIdentifier(pkid) = self.last_pkid;
         self.last_pkid = PacketIdentifier(pkid + 1);
         self.last_pkid
-    }
-}
-
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttStatus {
-    Success,
-    Failed,
-}
-
-enum HandlePacket {
-    ConnAck,
-    Publish(Box<Message>),
-    PubAck,
-    PubRec,
-    // PubRel,
-    PubComp,
-    SubAck,
-    UnSubAck,
-    PingResp,
-    Disconnect,
-    Invalid,
-}
-
-pub struct Publisher {
-    pub0_tx: SyncSender<Message>,
-    pub1_tx: SyncSender<Message>,
-    pub2_tx: SyncSender<Message>,
-    mionotify_tx: Sender<MioNotification>,
-    retain: bool,
-}
-
-impl Publisher {
-    pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
-
-        let topic = try!(TopicName::new(topic.to_string()));
-        let qos_pkid = match qos {
-            QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
-            QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
-            QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
-        };
-
-        let message = Message {
-            topic: topic,
-            retain: self.retain,
-            qos: qos_pkid,
-            payload: Arc::new(payload),
-        };
-
-        // TODO: Check message sanity here and return error if not
-        match qos {
-            QualityOfService::Level0 => {
-                try!(self.pub0_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS0)));
-            }
-            QualityOfService::Level1 => {
-                // Order important coz mioco is level triggered
-                try!(self.pub1_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1)));
-            }
-            QualityOfService::Level2 => {
-                try!(self.pub2_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2)));
-            }
-        };
-
-        Ok(())
-    }
-
-    pub fn disconnect(&self) -> Result<()> {
-        try!(self.mionotify_tx.send(MioNotification::Disconnect));
-        Ok(())
-    }
-
-    pub fn shutdown(&self) -> Result<()> {
-        try!(self.mionotify_tx.send(MioNotification::Shutdown));
-        Ok(())
-    }
-
-    pub fn set_retain(&mut self, retain: bool) -> &mut Self {
-        self.retain = retain;
-        self
-    }
-}
-
-pub type SendableFn = Box<Fn(Message) + Send + Sync>;
-pub struct Subscriber {
-    subscribe_tx: SyncSender<Vec<(TopicFilter, QualityOfService)>>,
-    mionotify_tx: Sender<MioNotification>,
-}
-
-impl Subscriber {
-    // TODO Add peek function
-
-    pub fn subscribe(&self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
-        let mut sub_topics = vec![];
-        for topic in topics {
-            let topic = (try!(TopicFilter::new_checked(topic.0)), topic.1);
-            sub_topics.push(topic);
-        }
-
-        try!(self.subscribe_tx.send(sub_topics));
-        try!(self.mionotify_tx.send(MioNotification::Sub));
-        Ok(())
     }
 }
