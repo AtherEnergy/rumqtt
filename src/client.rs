@@ -431,7 +431,9 @@ impl Handler for ProxyClient {
                             }
                         }
                         MqttState::Handshake | MqttState::Connected => {
-                            error!("Incoming data in writable state ..");
+                            //error!("Incoming data in writable state ..");
+                            //TODO: Check if this is an error and we can do reads here
+                            //directly
                             event_loop.reregister(self.stream.get_ref().unwrap(),
                                             MIO_CLIENT_STREAM,
                                             EventSet::readable(),
