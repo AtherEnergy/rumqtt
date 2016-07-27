@@ -266,7 +266,7 @@ fn qos1_stress_publish() {
 
     let (publisher, subscriber) = client.message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        // println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
@@ -278,8 +278,8 @@ fn qos1_stress_publish() {
     }
 
     thread::sleep(Duration::new(300, 0));
-    println!("{:?}", final_count.load(Ordering::SeqCst));
-    assert!(1000 == final_count.load(Ordering::SeqCst));
+    println!("QoS1 Final Count = {:?}", final_count.load(Ordering::SeqCst));
+    assert!(1000 <= final_count.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -306,6 +306,7 @@ fn qos2_stress_publish() {
     }
 
     thread::sleep(Duration::new(500, 0));
+    println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }
 

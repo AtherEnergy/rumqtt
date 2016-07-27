@@ -12,8 +12,7 @@ branches:
   only:
     - mio2
 script:
-  - cargo build
-  - cargo test
+  - cargo build --release
   - cargo test --release
   - cargo doc
 
