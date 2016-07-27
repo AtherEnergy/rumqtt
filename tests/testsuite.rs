@@ -112,7 +112,7 @@ fn reconnection() {
 
     // Wait for mqtt connection to establish and disconnect
     // TODO: BUG -> Remove sleep and the test fails
-    thread::sleep(Duration::new(1, 0));
+    // thread::sleep(Duration::new(1, 0));
     publisher.disconnect().unwrap();
     // Wait for reconnection and publish
     thread::sleep(Duration::new(10, 0));
@@ -173,9 +173,7 @@ fn will() {
 
 /// Broker should retain published message on a topic and
 /// INSTANTLY publish them to new subscritions
-/// TDDO: Fix this. Receiving 3 messates
 #[test]
-#[ignore]
 fn retained_messages() {
     env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
@@ -193,21 +191,21 @@ fn retained_messages() {
     let (mut publisher, subscriber) = proxy_client.
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     // publish first
     let payload = format!("hello rust");
     publisher.set_retain(true).publish("test/0/retain", QoS::Level0, payload.clone().into_bytes()).unwrap();
     publisher.set_retain(true).publish("test/1/retain", QoS::Level1, payload.clone().into_bytes()).unwrap();
-    //publisher.set_retain(true).publish("test/2/retain", QoS::Level2, payload.clone().into_bytes()).unwrap();
+    publisher.set_retain(true).publish("test/2/retain", QoS::Level2, payload.clone().into_bytes()).unwrap();
 
     //TODO: BUG -> Wait for some time before sending
     //disconnect packet or else EOF isn't being detected
     //in eventloop and reconnect isn't working
     //NOTE: sleep in client.rs before disconnect isn't working
     //. Strange..
-    thread::sleep(Duration::new(1, 0));
+    //thread::sleep(Duration::new(1, 0));
     publisher.disconnect().unwrap();
 
     // wait for client to reconnect
@@ -219,7 +217,7 @@ fn retained_messages() {
 
     // wait for messages
     thread::sleep(Duration::new(3, 0));
-    assert!(2 == final_count.load(Ordering::SeqCst));
+    assert!(3 == final_count.load(Ordering::SeqCst));
     //TODO: Clear retained messages
 }
 
@@ -248,6 +246,7 @@ fn qos0_stress_publish() {
     }
 
     thread::sleep(Duration::new(10, 0));
+    println!("QoS0 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }
 
@@ -317,4 +316,4 @@ fn qos2_stress_publish() {
 //TODO 2: Perform 1 with big messages
 //TODO 3: Perform 1 with internet constantly going down
 //TODO 4: Perform 2 + 3
-//TODO 5: Reconnect with same client id
+//TODO 5: Multiple clients connecting with same client id
