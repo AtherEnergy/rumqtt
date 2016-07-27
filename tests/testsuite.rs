@@ -227,6 +227,7 @@ fn retained_messages() {
 fn qos0_stress_publish() {
     let mut client_options = MqttOptions::new();
     let client = client_options.set_keep_alive(5)
+                               .set_client_id("qos0-stress-publish")
                                .connect("broker.hivemq.com:1883");
 
     let count = Arc::new(AtomicUsize::new(0));
@@ -256,6 +257,7 @@ fn qos1_stress_publish() {
     //env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
     let client = client_options.set_keep_alive(5)
+                               .set_client_id("qos1-stress-publish")
                                .set_pub_q_len(50)
                                .connect("broker.hivemq.com:1883");
     //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
@@ -286,6 +288,7 @@ fn qos1_stress_publish() {
 fn qos2_stress_publish() {
     let mut client_options = MqttOptions::new();
     let client = client_options.set_keep_alive(5)
+                               .set_client_id("qos2-stress-publish")
                                .connect("broker.hivemq.com:1883");
 
     let count = Arc::new(AtomicUsize::new(0));
@@ -305,7 +308,7 @@ fn qos2_stress_publish() {
         thread::sleep(Duration::new(0, 10000));
     }
 
-    thread::sleep(Duration::new(500, 0));
+    thread::sleep(Duration::new(700, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }
@@ -314,3 +317,4 @@ fn qos2_stress_publish() {
 //TODO 2: Perform 1 with big messages
 //TODO 3: Perform 1 with internet constantly going down
 //TODO 4: Perform 2 + 3
+//TODO 5: Reconnect with same client id

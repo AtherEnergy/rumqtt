@@ -13,7 +13,7 @@ branches:
     - mio2
 script:
   - cargo build --release
-  - cargo test --release
+  - cargo test --release -- --nocapture
   - cargo doc
 
 notifications:
