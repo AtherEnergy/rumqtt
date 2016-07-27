@@ -266,7 +266,7 @@ fn qos1_stress_publish() {
 
     let (publisher, subscriber) = client.message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");

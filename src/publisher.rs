@@ -1,10 +1,10 @@
 use mio::*;
-use std::sync::mpsc::{SyncSender};
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 
-use error::{Result};
+use error::Result;
 use message::Message;
-use mqtt::{QualityOfService};
+use mqtt::QualityOfService;
 use mqtt::packet::*;
 use mqtt::topic_name::TopicName;
 

@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::time::{Instant};
+use std::time::Instant;
 
 use mqtt::control::variable_header::PacketIdentifier;
-use mqtt::{QualityOfService};
+use mqtt::QualityOfService;
 use tls::{SslContext, NetworkStream};
 use client::{ProxyClient, MqttState};
 

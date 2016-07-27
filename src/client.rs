@@ -13,12 +13,12 @@ use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
-use tls::{NetworkStream};
+use tls::NetworkStream;
 use std::sync::mpsc;
 
 use error::{Error, Result};
 use message::Message;
-use clientoptions::{MqttOptions};
+use clientoptions::MqttOptions;
 use publisher::Publisher;
 use subscriber::{Subscriber, SendableFn};
 
@@ -136,30 +136,45 @@ impl Handler for ProxyClient {
                 MIO_CLIENT_STREAM => {
                     match self.state {
                         MqttState::Connected | MqttState::Handshake => {
+                            // @ Get incoming packets from the broker.
                             let packet = match self.STATE_read_incoming(event_loop) {
-                                Ok(pk) => pk,
-                                Err(_) => return,
+                                Ok(pk) => {
+                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                                    MIO_CLIENT_STREAM,
+                                                    EventSet::readable(),
+                                                    PollOpt::edge() | PollOpt::oneshot())
+                                        .unwrap();
+                                    pk
+                                }
+                                // @ If failed with EOF error, server has closed the socket.
+                                // @ Set state to disconnected, make a new TCP connection (we need to register here)
+                                // @ and event loop to writable. Now writable state machine
+                                // @ will takeover restarting the mqtt connection procedure
+                                // TODO: Get proper error instead of Error::Read
+                                Err(e) => {
+                                    error!("Error reading incoming packets : {:?}", e);
+                                    self.state = MqttState::Disconnected;
+                                    self.STATE_try_reconnect(event_loop);
+                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                                    MIO_CLIENT_STREAM,
+                                                    EventSet::writable(),
+                                                    PollOpt::edge() | PollOpt::oneshot())
+                                        .unwrap();
+                                    return;
+                                }
                             };
-
 
                             trace!("{:?}", packet);
                             self.STATE_handle_packet(&packet, event_loop);
 
                         }
                         MqttState::Disconnected => {
-                            // Handles case where initial connection failures
-                            // E.g testsuite --> inital_mqtt_connect_failure_test
-                            if self.initial_connect == true {
-                                match self.connsync_tx {
-                                    Some(ref connsync_tx) => {
-                                        connsync_tx.send(MqttStatus::Failed).expect("Send failed");
-                                        self.initial_connect = false;
-                                    }
-                                    None => panic!("No connsync channel"),
-                                }
-                            } else {
-                                self.STATE_try_reconnect(event_loop);
-                            }
+                            error!("Disconnected state invalid in readable");
+                            event_loop.reregister(self.stream.get_ref().unwrap(),
+                                            MIO_CLIENT_STREAM,
+                                            EventSet::writable(),
+                                            PollOpt::edge() | PollOpt::oneshot())
+                                .unwrap();
                         }
                     }
                 }
@@ -196,37 +211,33 @@ impl Handler for ProxyClient {
                                 Ok(_) => {
                                     self.state = MqttState::Handshake;
                                     event_loop.reregister(self.stream.get_ref().unwrap(),
-                                            MIO_CLIENT_STREAM,
-                                            EventSet::readable(),
-                                            PollOpt::edge() | PollOpt::oneshot())
-                                    .unwrap();
+                                                    MIO_CLIENT_STREAM,
+                                                    EventSet::readable(),
+                                                    PollOpt::edge() | PollOpt::oneshot())
+                                        .unwrap();
                                 }
                                 // @ Writing connect packet failed. Tcp connection might
                                 // @ have failed. Try to establish a new Tcp connection
                                 // @ and set eventloop to writable to write connect packets
                                 // @ again
                                 Err(e) => {
-                                    error!("Connecion error {:?}", e);
-                                    // Handles case where initial connection failures
-                                    // E.g testsuite --> inital_mqtt_connect_failure_test
-                                    if self.initial_connect == true {
-                                        match self.connsync_tx {
-                                            Some(ref connsync_tx) => {
-                                                connsync_tx.send(MqttStatus::Failed).expect("Send failed");
-                                                self.initial_connect = false;
-                                            }
-                                            None => panic!("No connsync channel"),
-                                        }
-                                    } else {
-                                        self.STATE_try_reconnect(event_loop);
-                                    }
+                                    error!("Error establishing tcp connection --> {:?}", e);
+                                    self.state = MqttState::Disconnected;
+                                    self.STATE_try_reconnect(event_loop);
+                                    // Should be done after reconnect coz stream is updated
+                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                                    MIO_CLIENT_STREAM,
+                                                    EventSet::writable(),
+                                                    PollOpt::edge() | PollOpt::oneshot())
+                                        .unwrap();
                                 }
+
                             }
                         }
                         MqttState::Handshake | MqttState::Connected => {
-                            //error!("Incoming data in writable state ..");
-                            //TODO: Check if this is an error and we can do reads here
-                            //directly
+                            error!("Incoming data in writable state ..");
+                            // TODO: Check if this is an error and we can do reads here
+                            // directly
                             event_loop.reregister(self.stream.get_ref().unwrap(),
                                             MIO_CLIENT_STREAM,
                                             EventSet::readable(),
@@ -493,7 +504,6 @@ impl ProxyClient {
                             error!("Failed to connect, err {:?}", conn_ret_code);
                             Err(Error::ConnectionRefused(conn_ret_code))
                         } else {
-                            self.state = MqttState::Connected;
                             Ok(HandlePacket::ConnAck)
                         }
                     }
@@ -627,23 +637,7 @@ impl ProxyClient {
                 }
             }
 
-            MqttState::Disconnected => {
-                error!("Client in disconnected state. Invalid packet received");
-                match self._connect() {
-                    // @ Change the state machine to handshake
-                    // @ and event loop to readable to read
-                    // @ CONACK packet
-                    Ok(_) => {
-                        self.state = MqttState::Handshake;
-                    }
-
-                    _ => {
-                        error!("There shouldln't be error here");
-                        self.state = MqttState::Disconnected;
-                    }
-                };
-                Ok(HandlePacket::Invalid)
-            }
+            MqttState::Disconnected => panic!("Invalid state while handling packets"),
         }
     }
 
@@ -686,14 +680,7 @@ impl ProxyClient {
         match VariablePacket::decode(&mut self.stream) {
             // @ Decoded packet successfully.
             // @ Retrigger readable in evenloop
-            Ok(pk) => {
-                event_loop.reregister(self.stream.get_ref().unwrap(),
-                                MIO_CLIENT_STREAM,
-                                EventSet::readable() | EventSet::writable(),
-                                PollOpt::edge() | PollOpt::oneshot())
-                    .unwrap();
-                Ok(pk)
-            }
+            Ok(pk) => Ok(pk),
             // @ Try to make a new Tcp connection.
             // @ Set state machine to Disconnected.
             // @ Make eventloop writable to check connection status
@@ -702,15 +689,7 @@ impl ProxyClient {
                 // close at broker end
                 error!("Error in receiving packet {:?}", err);
                 self._unbind();
-
-                try!(self._try_reconnect());
-
-                self.state = MqttState::Disconnected;
-                event_loop.reregister(self.stream.get_ref().unwrap(),
-                                MIO_CLIENT_STREAM,
-                                EventSet::readable() | EventSet::writable(),
-                                PollOpt::edge() | PollOpt::oneshot())
-                    .unwrap();
+                //TODO: Return actual error
                 Err(Error::Read)
             }
         }
@@ -722,6 +701,7 @@ impl ProxyClient {
             match p {
                 // Mqtt connection established, start the timers
                 HandlePacket::ConnAck => {
+                    self.state = MqttState::Connected;
                     if self.initial_connect == true {
                         match self.connsync_tx {
                             Some(ref connsync_tx) => {
@@ -741,6 +721,8 @@ impl ProxyClient {
                             None => panic!("No mionotify channel"),
                         }
                     }
+
+                    // TODO: Bug?? Multiple timers after restart?
                     event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000).unwrap();
                     if let Some(keep_alive) = self.opts.keep_alive {
                         event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
@@ -769,7 +751,7 @@ impl ProxyClient {
                         }
                     }
                 }
-                //TODO: Better read from channel again after PubComp instead of PubRec
+                // TODO: Better read from channel again after PubComp instead of PubRec
                 HandlePacket::PubRec => {
                     if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block == true {
                         match self.mionotify_tx {
@@ -790,14 +772,19 @@ impl ProxyClient {
 
     #[allow(non_snake_case)]
     fn STATE_try_reconnect(&mut self, event_loop: &mut EventLoop<Self>) {
+        // Handles case where initial connection failures
+        // E.g testsuite --> inital_mqtt_connect_failure_test
+        if self.initial_connect == true {
+            match self.connsync_tx {
+                Some(ref connsync_tx) => {
+                    connsync_tx.send(MqttStatus::Failed).expect("Send failed");
+                    event_loop.shutdown();
+                }
+                None => panic!("No connsync channel"),
+            }
+            return;
+        }
         let _ = self._try_reconnect();
-
-        self.state = MqttState::Disconnected;
-        event_loop.reregister(self.stream.get_ref().unwrap(),
-                        MIO_CLIENT_STREAM,
-                        EventSet::readable() | EventSet::writable(),
-                        PollOpt::edge() | PollOpt::oneshot())
-            .unwrap();
     }
 
     fn _connect(&mut self) -> Result<()> {
@@ -823,7 +810,6 @@ impl ProxyClient {
                 match TcpStream::connect(&self.addr) {
                     Ok(stream) => self.stream = NetworkStream::Tcp(stream),
                     Err(err) => panic!("Error creating new stream {:?}", err),
-
                 }
                 Ok(())
             }

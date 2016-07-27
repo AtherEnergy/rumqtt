@@ -1,11 +1,11 @@
-use std::sync::mpsc::{SyncSender};
+use std::sync::mpsc::SyncSender;
 
-use error::{Result};
+use error::Result;
 use mio::*;
 use mqtt::{QualityOfService, TopicFilter};
 
 use message::Message;
-use client::{MioNotification};
+use client::MioNotification;
 
 pub type SendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct Subscriber {
