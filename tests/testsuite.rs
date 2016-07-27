@@ -31,20 +31,19 @@ fn inital_tcp_connect_failure(){
 
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial mqtt connect.
-/// TODO: Fix this --> client getting blocked
-//#[test]
-//#[should_panic]
-// fn inital_mqtt_connect_failure() {
-//     let mut client_options = MqttOptions::new();
+#[test]
+#[should_panic]
+fn inital_mqtt_connect_failure() {
+    let mut client_options = MqttOptions::new();
 
-//     // Specify client connection opthons and which broker to connect to
-//     let proxy_client = client_options.set_keep_alive(5)
-//                                     .set_reconnect(5)
-//                                     .connect("test.mosquitto.org:8883");
+    // Specify client connection opthons and which broker to connect to
+    let proxy_client = client_options.set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .connect("test.mosquitto.org:8883");
 
-//     // Connects to a broker and returns a `Publisher` and `Subscriber`
-//     let (_, _) = proxy_client.start().expect("Coudn't start");
-// }
+    // Connects to a broker and returns a `Publisher` and `Subscriber`
+    let (_, _) = proxy_client.start().expect("Coudn't start");
+}
 
 #[test]
 fn basic() {
