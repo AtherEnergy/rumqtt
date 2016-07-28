@@ -179,7 +179,7 @@ fn will() {
 /// INSTANTLY publish them to new subscritions
 #[test]
 fn retained_messages() {
-    env_logger::init().unwrap();
+    //env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(3)
@@ -311,7 +311,7 @@ fn qos2_stress_publish() {
         thread::sleep(Duration::new(0, 10000));
     }
 
-    thread::sleep(Duration::new(700, 0));
+    thread::sleep(Duration::new(1000, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }
