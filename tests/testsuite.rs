@@ -124,7 +124,7 @@ fn reconnection() {
 
 #[test]
 fn will() {
-    env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
     let client1 = client_options.set_keep_alive(5)
                                     .set_reconnect(15)
@@ -214,7 +214,10 @@ fn retained_messages() {
 #[test]
 fn qos0_stress_publish() {
     let mut client_options = MqttOptions::new();
+    //TODO: Add functionality to handle noreconnect option. This test case is panicking
+    // with out set_reconnect
     let client = client_options.set_keep_alive(5)
+                               .set_reconnect(3)
                                .set_client_id("qos0-stress-publish")
                                .connect("broker.hivemq.com:1883");
 
@@ -246,6 +249,7 @@ fn qos1_stress_publish() {
     //env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
     let client = client_options.set_keep_alive(5)
+                               .set_reconnect(3)
                                .set_client_id("qos1-stress-publish")
                                .set_pub_q_len(50)
                                .connect("broker.hivemq.com:1883");
@@ -277,6 +281,7 @@ fn qos1_stress_publish() {
 fn qos2_stress_publish() {
     let mut client_options = MqttOptions::new();
     let client = client_options.set_keep_alive(5)
+                               .set_reconnect(3)
                                .set_client_id("qos2-stress-publish")
                                .connect("broker.hivemq.com:1883");
 
