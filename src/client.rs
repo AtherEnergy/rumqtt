@@ -81,7 +81,7 @@ enum HandlePacket {
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
-pub struct ProxyClient {
+pub struct MqttClient {
     pub addr: SocketAddr,
     pub opts: MqttOptions,
     pub stream: NetworkStream,
@@ -96,6 +96,7 @@ pub struct ProxyClient {
     pub pub2_channel_pending: u32,
     pub should_qos1_block: bool,
     pub should_qos2_block: bool,
+    pub no_of_reconnections: u32,
 
     // Channels
     pub pub0_rx: Option<mpsc::Receiver<Message>>,
@@ -120,7 +121,7 @@ pub struct ProxyClient {
 }
 
 
-impl Handler for ProxyClient {
+impl Handler for MqttClient {
     type Timeout = u64;
     type Message = MioNotification;
 
@@ -129,7 +130,7 @@ impl Handler for ProxyClient {
     // state is at Writable@Connected. Hence ended up add STATE_reate,
     // STATE_handle_packet
     // to both readable and writable
-    fn ready(&mut self, event_loop: &mut EventLoop<ProxyClient>, token: Token, events: EventSet) {
+    fn ready(&mut self, event_loop: &mut EventLoop<MqttClient>, token: Token, events: EventSet) {
         if events.is_readable() {
             info!("@@@ Readable ... {:?}", self.state);
             match token {
@@ -420,7 +421,7 @@ impl Handler for ProxyClient {
     }
 }
 
-impl ProxyClient {
+impl MqttClient {
     // Note: Setting callback before subscriber & publisher
     // are created ensures that message callbacks are registered
     // before subscription & you don't need to pass callbacks through
@@ -495,7 +496,13 @@ impl ProxyClient {
         match conn {
             MqttStatus::Success => Ok((publisher, subscriber)),
             MqttStatus::Failed => Err(Error::ConnectionAbort),
-        }
+        } 
+    }
+
+    /// Return a count of (successful) mqtt connections that happened from the start.
+    /// Just to know how many times the client reconnected (coz of bad networks, broker crashes etc)
+    pub fn get_reconnection_count(&self) -> u32 {
+        self.no_of_reconnections
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
@@ -706,6 +713,7 @@ impl ProxyClient {
                 // Mqtt connection established, start the timers
                 HandlePacket::ConnAck => {
                     self.state = MqttState::Connected;
+                    self.no_of_reconnections += 1;
                     if self.initial_connect == true {
                         match self.connsync_tx {
                             Some(ref connsync_tx) => {
@@ -1046,3 +1054,17 @@ impl ProxyClient {
         self.last_pkid
     }
 }
+
+/*
+Why RuMqtt:
+GOALS
+-----
+1. Synchronous mqtt connects: No need of callback to check if mqtt connection is
+successful or not. You'll know of of errors (if any) synchronously
+2. Synchronous subscribes (TODO): Same as above
+3. Queued publishes: publishes won't throw errors by default. A queue (with user defined
+    length) will be buffered when the n/w is down. If n/w is down for some time and queue
+    becomes full, publishes are blocked
+4. No locks. Fast and efficient because of Rust and Mio
+5. Callback only for subscibed incoming message. Callbacks are executed using threadpool (mioco)
+*/

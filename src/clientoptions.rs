@@ -6,7 +6,7 @@ use std::time::Instant;
 use mqtt::control::variable_header::PacketIdentifier;
 use mqtt::QualityOfService;
 use tls::{SslContext, NetworkStream};
-use client::{ProxyClient, MqttState};
+use client::{MqttClient, MqttState};
 
 
 #[derive(Clone)]
@@ -196,14 +196,14 @@ impl MqttOptions {
     ///                           .set_clean_session(true)
     ///                           .connect("localhost:1883");
     ///
-    pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> ProxyClient {
+    pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> MqttClient {
         if self.client_id == None {
             self.generate_client_id();
         }
 
         let addr = Self::lookup_ipv4(addr);
 
-        ProxyClient {
+        MqttClient {
             addr: addr,
             stream: NetworkStream::None,
 
@@ -218,6 +218,7 @@ impl MqttOptions {
             pub2_channel_pending: 0,
             should_qos1_block: false,
             should_qos2_block: false,
+            no_of_reconnections: 0,
 
             // Channels
             pub0_rx: None,

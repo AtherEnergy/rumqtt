@@ -67,9 +67,6 @@ fn basic() {
         //println!("message --> {:?}", message);
     }).start().expect("Couldn't start");
 
-    // TODO: Because of async io We are publishing before connection is actually made
-    // synchronize this and remove sleep
-    //thread::sleep(Duration::new(1, 0));
     let topics = vec![("test/basic", QoS::Level0)];
 
     subscriber.subscribe(topics).expect("Subcription failure");  
@@ -110,9 +107,6 @@ fn reconnection() {
     let topics = vec![("test/reconnect", QoS::Level2)];  
     subscriber.subscribe(topics).expect("Subcription failure");
 
-    // Wait for mqtt connection to establish and disconnect
-    // TODO: BUG -> Remove sleep and the test fails
-    // thread::sleep(Duration::new(1, 0));
     publisher.disconnect().unwrap();
     // Wait for reconnection and publish
     thread::sleep(Duration::new(10, 0));
@@ -130,6 +124,7 @@ fn reconnection() {
 
 #[test]
 fn will() {
+    env_logger::init().unwrap();
     let mut client_options = MqttOptions::new();
     let client1 = client_options.set_keep_alive(5)
                                     .set_reconnect(15)
@@ -148,7 +143,6 @@ fn will() {
     let final_count = count.clone();
     let count = count.clone();
 
-    // Connects to a broker and returns a `Publisher` and `Subscriber`
     // BUG NOTE: don't use _ for dummy subscriber, publisher. That implies
     // channel ends in struct are invalid
     let (publisher1, subscriber1) = client1.start().expect("Coudn't start");
@@ -161,13 +155,11 @@ fn will() {
 
     subscriber2.subscribe(vec![("test/will", QoS::Level0)]).unwrap();
 
+    //TODO: Now we are waiting for cli-2 subscriber to finish before disconnecting
+    // cli-1. Make an sync version of subscribe()
+    thread::sleep(Duration::new(1, 0));
     // LWT doesn't work on graceful disconnects
     // publisher1.disconnect();
-
-    // Give some time for mqtt connection to be made on
-    // connected socket before shutting down the socket
-    // TODO: BUG -> Remove sleep and the test fails
-    thread::sleep(Duration::new(1, 0));
     publisher1.shutdown().unwrap();
 
     // Wait for last will publish
@@ -204,12 +196,6 @@ fn retained_messages() {
     publisher.set_retain(true).publish("test/1/retain", QoS::Level1, payload.clone().into_bytes()).unwrap();
     publisher.set_retain(true).publish("test/2/retain", QoS::Level2, payload.clone().into_bytes()).unwrap();
 
-    //TODO: BUG -> Wait for some time before sending
-    //disconnect packet or else EOF isn't being detected
-    //in eventloop and reconnect isn't working
-    //NOTE: sleep in client.rs before disconnect isn't working
-    //. Strange..
-    //thread::sleep(Duration::new(1, 0));
     publisher.disconnect().unwrap();
 
     // wait for client to reconnect
@@ -305,15 +291,15 @@ fn qos2_stress_publish() {
     
     subscriber.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");
 
-    for i in 0..1000 {
+    for i in 0..500 {
         let payload = format!("{}. hello rust", i);
         publisher.publish("test/qos2/stress", QoS::Level2, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
-    thread::sleep(Duration::new(1000, 0));
+    thread::sleep(Duration::new(500, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
-    assert!(1000 == final_count.load(Ordering::SeqCst));
+    assert!(500 == final_count.load(Ordering::SeqCst));
 }
 
 //TODO 1: Publish 100000 Qos0, 1, 2 messages and check received count (subscribing to same topic)
