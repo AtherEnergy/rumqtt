@@ -71,6 +71,7 @@ impl SslContext {
     }
 }
 
+//TODO: Make this a trait
 pub enum NetworkStream {
     Tcp(TcpStream),
     Ssl(SslStream),

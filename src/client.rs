@@ -155,11 +155,14 @@ impl Handler for ProxyClient {
                                     error!("Error reading incoming packets : {:?}", e);
                                     self.state = MqttState::Disconnected;
                                     self.STATE_try_reconnect(event_loop);
-                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                    let stream = self.stream.get_ref().expect("No Stream 22");
+                                    // NOTE: reregister isn't working for new streams in linux while
+                                    // it's working in mac osx
+                                    event_loop.register(stream,
                                                     MIO_CLIENT_STREAM,
                                                     EventSet::writable(),
                                                     PollOpt::edge() | PollOpt::oneshot())
-                                        .unwrap();
+                                        .expect("Couldn't reregister");
                                     return;
                                 }
                             };
@@ -225,7 +228,8 @@ impl Handler for ProxyClient {
                                     self.state = MqttState::Disconnected;
                                     self.STATE_try_reconnect(event_loop);
                                     // Should be done after reconnect coz stream is updated
-                                    event_loop.reregister(self.stream.get_ref().unwrap(),
+                                    let stream = self.stream.get_ref().expect("No stream 1");
+                                    event_loop.register(stream,
                                                     MIO_CLIENT_STREAM,
                                                     EventSet::writable(),
                                                     PollOpt::edge() | PollOpt::oneshot())
@@ -485,7 +489,7 @@ impl ProxyClient {
                           PollOpt::edge() | PollOpt::oneshot())
                 .unwrap();
 
-            event_loop.run(&mut self).unwrap();
+            event_loop.run(&mut self).expect("Couldn't Run EventLoop");
         });
         let conn = connsync_rx.recv().expect("Connection sync recv error");
         match conn {
@@ -732,6 +736,8 @@ impl ProxyClient {
                 HandlePacket::Publish(m) => {
                     if let Some(ref message_callback) = self.callback {
                         let message_callback = message_callback.clone();
+
+                        // Have a thread pool to handle message callbacks. Take the threadpool as a parameter
                         thread::spawn(move || message_callback(*m));
                     }
                 }

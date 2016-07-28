@@ -28,6 +28,7 @@ impl Publisher {
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
         };
 
+        //TODO: Why are qos and pkid in the same structure
         let message = Message {
             topic: topic,
             retain: self.retain,
@@ -65,6 +66,7 @@ impl Publisher {
         Ok(())
     }
 
+    // TODO: Add a different publish_retain method
     pub fn set_retain(&mut self, retain: bool) -> &mut Self {
         self.retain = retain;
         self

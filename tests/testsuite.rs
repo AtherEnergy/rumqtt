@@ -21,12 +21,13 @@ fn inital_tcp_connect_failure(){
 
     // Specify client connection opthons and which broker to connect to
     // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
+    // TODO: Rename proxy_client
     let proxy_client = client_options.set_keep_alive(5)
                                     .set_reconnect(5)
                                     .connect("localhost:9999");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (_, _) = proxy_client.start().expect("Coudn't start");
+    let (_, _) = proxy_client.start().expect("Couldn't start");
 }
 
 /// Shouldn't try to reconnect if there is a connection problem
@@ -42,7 +43,7 @@ fn inital_mqtt_connect_failure() {
                                     .connect("test.mosquitto.org:8883");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (_, _) = proxy_client.start().expect("Coudn't start");
+    let (_, _) = proxy_client.start().expect("Couldn't start");
 }
 
 #[test]
@@ -64,7 +65,7 @@ fn basic() {
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
-    }).start().expect("Coudn't start");
+    }).start().expect("Couldn't start");
 
     // TODO: Because of async io We are publishing before connection is actually made
     // synchronize this and remove sleep
@@ -116,6 +117,10 @@ fn reconnection() {
     // Wait for reconnection and publish
     thread::sleep(Duration::new(10, 0));
     let payload = format!("hello rust");
+    //TODO: This is failing if client is not able to reconnect.
+    //Ideally, this shouldn't fail but block
+    //Add a testcase where broker/internet is down for some time and this should block
+    //instead of failing
     publisher.publish("test/reconnect", QoS::Level1, payload.clone().into_bytes()).unwrap();
 
     // Wait for count to be incremented by callback
