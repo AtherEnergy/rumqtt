@@ -17,14 +17,8 @@ rand = "0.3"
 time = "0.1"
 mqtt-protocol = "0.1"
 
-[dependencies.openssl]
-features = ["tlsv1_1", "tlsv1_2"]
-optional = true
-version = "0.7"
+[dependencies.rustls]
+git = "https://github.com/ctz/rustls"
 
 [dev-dependencies]
 env_logger = "0.3"
-
-[features]
-default = ["ssl"]
-ssl = ["openssl"]

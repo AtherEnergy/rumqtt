@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 use time;
 
-use std::net::{SocketAddr, Shutdown};
+use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::str;
@@ -423,6 +423,44 @@ impl Handler for MqttClient {
 }
 
 impl MqttClient {
+    pub fn new(opts: MqttOptions) -> Self {
+        let addr = opts.addr;
+        //TODO: Move state initialization to MqttClient constructor
+        MqttClient {
+            addr: addr.expect("No address in client options"),
+            stream: NetworkStream::None,
+
+            // State
+            last_flush: Instant::now(),
+            last_pkid: PacketIdentifier(0),
+            await_ping: false,
+            state: MqttState::Disconnected,
+            initial_connect: true,
+            opts: opts,
+            pub1_channel_pending: 0,
+            pub2_channel_pending: 0,
+            should_qos1_block: false,
+            should_qos2_block: false,
+            no_of_reconnections: 0,
+
+            // Channels
+            pub0_rx: None,
+            pub1_rx: None,
+            pub2_rx: None,
+            sub_rx: None,
+            connsync_tx: None,
+            mionotify_tx: None,
+
+            // Queues
+            incoming_rec: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+
+            // callback
+            callback: None,
+        }
+    }
     // Note: Setting callback before subscriber & publisher
     // are created ensures that message callbacks are registered
     // before subscription & you don't need to pass callbacks through
@@ -437,7 +475,7 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns `Subscriber` and `Publisher` and handles reqests from them.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(mut self) -> Result<(Publisher, Subscriber)> {
+    fn start(mut self, opts: MqttOptions) -> Result<(Publisher, Subscriber)> {
         let mut event_loop = EventLoop::new().unwrap();
         let mionotify_tx = event_loop.channel();
         self.mionotify_tx = Some(mionotify_tx.clone());

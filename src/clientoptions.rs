@@ -1,16 +1,12 @@
-use std::collections::VecDeque;
 use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::time::Instant;
 
-use mqtt::control::variable_header::PacketIdentifier;
 use mqtt::QualityOfService;
-use tls::{SslContext, NetworkStream};
-use client::{MqttClient, MqttState};
+use tls::{TlsStream};
 
 
-#[derive(Clone)]
 pub struct MqttOptions {
+    pub addr: Option<SocketAddr>,//TODO: Use a default localhost here instead of option
     pub keep_alive: Option<u16>,
     pub clean_session: bool,
     pub client_id: Option<String>,
@@ -23,12 +19,13 @@ pub struct MqttOptions {
     pub pub_q_len: u16,
     pub sub_q_len: u16,
     pub queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
-    pub ssl: Option<SslContext>,
+    pub tls: Option<TlsStream>,
 }
 
 impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
+            addr: None,
             keep_alive: Some(5),
             clean_session: true,
             client_id: None,
@@ -41,7 +38,7 @@ impl Default for MqttOptions {
             pub_q_len: 50,
             sub_q_len: 5,
             queue_timeout: 60,
-            ssl: None,
+            tls: None,
         }
     }
 }
@@ -66,7 +63,7 @@ impl MqttOptions {
 
     /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
+    pub fn set_keep_alive(mut self, secs: u16) -> Self {
         self.keep_alive = Some(secs);
         self
     }
@@ -74,7 +71,7 @@ impl MqttOptions {
     /// Client id of the client. A random client id will be selected
 
     /// if you don't set one
-    pub fn set_client_id(&mut self, client_id: &str) -> &mut Self {
+    pub fn set_client_id(mut self, client_id: &str) -> Self {
         self.client_id = Some(client_id.to_string());
         self
     }
@@ -90,7 +87,7 @@ impl MqttOptions {
     ///
     /// Hence **make sure that you manually set `client_id` when
     /// `clean_session` is false**
-    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
+    pub fn set_clean_session(mut self, clean_session: bool) -> Self {
         self.clean_session = clean_session;
         self
     }
@@ -104,14 +101,14 @@ impl MqttOptions {
 
     /// Set `username` for broker to perform client authentication
     /// via `username` and `password`
-    pub fn set_user_name(&mut self, username: &str) -> &mut Self {
+    pub fn set_user_name(mut self, username: &str) -> Self {
         self.username = Some(username.to_string());
         self
     }
 
     /// Set `password` for broker to perform client authentication
     /// vis `username` and `password`
-    pub fn set_password(&mut self, password: &str) -> &mut Self {
+    pub fn set_password(mut self, password: &str) -> Self {
         self.password = Some(password.to_string());
         self
     }
@@ -128,12 +125,12 @@ impl MqttOptions {
     /// can push with out blocking. Messages in this queue will published as
     /// soon as
     /// connection is reestablished and `Publisher` gets unblocked
-    pub fn set_pub_q_len(&mut self, len: u16) -> &mut Self {
+    pub fn set_pub_q_len(mut self, len: u16) -> Self {
         self.pub_q_len = len;
         self
     }
 
-    pub fn set_sub_q_len(&mut self, len: u16) -> &mut Self {
+    pub fn set_sub_q_len(mut self, len: u16) -> Self {
         self.sub_q_len = len;
         self
     }
@@ -142,34 +139,34 @@ impl MqttOptions {
     /// connection if there are any disconnections.
     /// By default, no retry will happen
     //TODO: Rename
-    pub fn set_reconnect(&mut self, dur: u16) -> &mut Self {
+    pub fn set_reconnect(mut self, dur: u16) -> Self {
         self.reconnect = Some(dur);
         self
     }
 
     /// Set will for the client so that broker can send `will_message`
     /// on `will_topic` when this client ungracefully dies.
-    pub fn set_will(&mut self, will_topic: &str, will_message: &str) -> &mut Self {
+    pub fn set_will(mut self, will_topic: &str, will_message: &str) -> Self {
         self.will = Some((will_topic.to_string(), will_message.to_string()));
         self
     }
 
     /// Set QoS for the will message
-    pub fn set_will_qos(&mut self, qos: QualityOfService) -> &mut Self {
+    pub fn set_will_qos(mut self, qos: QualityOfService) -> Self {
         self.will_qos = qos;
         self
     }
 
     /// Set will retian so that future clients subscribing to will topic
     /// knows of client's death.
-    pub fn set_will_retain(&mut self, retain: bool) -> &mut Self {
+    pub fn set_will_retain(mut self, retain: bool) -> Self {
         self.will_retain = retain;
         self
     }
 
     /// Set a TLS connection
-    pub fn set_tls(&mut self, ssl: SslContext) -> &mut Self {
-        self.ssl = Some(ssl);
+    pub fn set_tls(mut self, tls: TlsStream) -> Self {
+        self.tls = Some(tls);
         self
     }
 
@@ -182,7 +179,6 @@ impl MqttOptions {
         }
         unreachable!("Cannot lookup address");
     }
-
     /// Creates a new mqtt client with the broker address that you want
     /// to connect to. Along with connection details, this object holds
     /// all the state information of a connection.
@@ -198,47 +194,11 @@ impl MqttOptions {
     ///                           .connect("localhost:1883");
     ///
     //TODO: Rename
-    pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> MqttClient {
+    pub fn broker<A: ToSocketAddrs>(mut self, addr: A) -> Self {
         if self.client_id == None {
             self.generate_client_id();
         }
-
-        let addr = Self::lookup_ipv4(addr);
-
-        //TODO: Move state initialization to MqttClient constructor
-        MqttClient {
-            addr: addr,
-            stream: NetworkStream::None,
-
-            // State
-            last_flush: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            await_ping: false,
-            state: MqttState::Disconnected,
-            initial_connect: true,
-            opts: self.clone(),
-            pub1_channel_pending: 0,
-            pub2_channel_pending: 0,
-            should_qos1_block: false,
-            should_qos2_block: false,
-            no_of_reconnections: 0,
-
-            // Channels
-            pub0_rx: None,
-            pub1_rx: None,
-            pub2_rx: None,
-            sub_rx: None,
-            connsync_tx: None,
-            mionotify_tx: None,
-
-            // Queues
-            incoming_rec: VecDeque::new(),
-            outgoing_pub: VecDeque::new(),
-            outgoing_rec: VecDeque::new(),
-            outgoing_rel: VecDeque::new(),
-
-            // callback
-            callback: None,
-        }
+        self.addr = Some(Self::lookup_ipv4(addr));
+        self
     }
 }
