@@ -2,24 +2,23 @@ use mio::tcp::TcpStream;
 use std::io::{self, Read, Write, BufReader};
 use std::fs::File;
 use std::sync::Arc;
-use std::net::{Shutdown};
+use std::net::Shutdown;
 
 use rustls;
 
 pub struct TlsStream {
     stream: TcpStream,
-    tls_session: rustls::ClientSession,
+    pub tls_session: rustls::ClientSession,
 }
 
 impl TlsStream {
     pub fn make_config() -> rustls::ClientConfig {
         let mut config = rustls::ClientConfig::new();
-        let certfile = File::open("/Users/ravitejareddy/Downloads/ca.crt").unwrap();
+        let certfile = File::open("/Users/ravitejareddy/Dropbox/mosuitto_certs/ca.crt").unwrap();
         let mut reader = BufReader::new(certfile);
         config.root_store
-            .add_pem_file(&mut reader)
-            .unwrap();
-
+                .add_pem_file(&mut reader)
+                .unwrap();
         config
     }
 

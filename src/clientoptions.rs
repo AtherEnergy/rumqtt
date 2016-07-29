@@ -2,11 +2,11 @@ use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
 
 use mqtt::QualityOfService;
-use tls::{TlsStream};
+use tls::TlsStream;
 
 
 pub struct MqttOptions {
-    pub addr: Option<SocketAddr>,//TODO: Use a default localhost here instead of option
+    pub addr: Option<SocketAddr>, // TODO: Use a default localhost here instead of option
     pub keep_alive: Option<u16>,
     pub clean_session: bool,
     pub client_id: Option<String>,
@@ -138,7 +138,7 @@ impl MqttOptions {
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections.
     /// By default, no retry will happen
-    //TODO: Rename
+    // TODO: Rename
     pub fn set_reconnect(mut self, dur: u16) -> Self {
         self.reconnect = Some(dur);
         self
@@ -179,6 +179,7 @@ impl MqttOptions {
         }
         unreachable!("Cannot lookup address");
     }
+    
     /// Creates a new mqtt client with the broker address that you want
     /// to connect to. Along with connection details, this object holds
     /// all the state information of a connection.
@@ -193,7 +194,7 @@ impl MqttOptions {
     ///                           .set_clean_session(true)
     ///                           .connect("localhost:1883");
     ///
-    //TODO: Rename
+    // TODO: Rename
     pub fn broker<A: ToSocketAddrs>(mut self, addr: A) -> Self {
         if self.client_id == None {
             self.generate_client_id();

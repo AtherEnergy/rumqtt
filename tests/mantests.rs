@@ -51,3 +51,16 @@ fn qos1_pub_block() {
     println!("{:?}", final_count.load(Ordering::SeqCst));
     assert!(100 == final_count.load(Ordering::SeqCst));
 }
+
+//#[ignore]
+#[test]
+fn tls_connect() {
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_pub_q_len(10)
+                                    .set_reconnect(3)
+                                    .broker("localhost:8883");
+
+    let (publisher, subscriber) = MqttClient::new(client_options).start().expect("Coudn't start");
+    thread::sleep(Duration::new(20, 0));
+}

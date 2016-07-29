@@ -28,7 +28,7 @@ impl Publisher {
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
         };
 
-        //TODO: Why are qos and pkid in the same structure
+        // TODO: Why are qos and pkid in the same structure
         let message = Message {
             topic: topic,
             retain: self.retain,
