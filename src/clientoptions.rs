@@ -141,6 +141,7 @@ impl MqttOptions {
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections.
     /// By default, no retry will happen
+    //TODO: Rename
     pub fn set_reconnect(&mut self, dur: u16) -> &mut Self {
         self.reconnect = Some(dur);
         self
@@ -196,6 +197,7 @@ impl MqttOptions {
     ///                           .set_clean_session(true)
     ///                           .connect("localhost:1883");
     ///
+    //TODO: Rename
     pub fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> MqttClient {
         if self.client_id == None {
             self.generate_client_id();
@@ -203,6 +205,7 @@ impl MqttOptions {
 
         let addr = Self::lookup_ipv4(addr);
 
+        //TODO: Move state initialization to MqttClient constructor
         MqttClient {
             addr: addr,
             stream: NetworkStream::None,

@@ -120,7 +120,7 @@ pub struct MqttClient {
     pub callback: Option<Arc<SendableFn>>,
 }
 
-
+// TODO: Use Mio::Handler, Unit test for state machine
 impl Handler for MqttClient {
     type Timeout = u64;
     type Message = MioNotification;
@@ -259,6 +259,7 @@ impl Handler for MqttClient {
     }
 
     fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timer: Self::Timeout) {
+        //TODO: Move timer handling logic to seperate methods
         match timer {
             MIO_PING_TIMER => {
                 debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
@@ -302,7 +303,7 @@ impl Handler for MqttClient {
         }
     }
 
-
+    //TODO: Make smaller methods
     fn notify(&mut self, _: &mut EventLoop<Self>, notification_type: MioNotification) {
         match self.state {
             MqttState::Connected => {
@@ -480,6 +481,7 @@ impl MqttClient {
         let stream = NetworkStream::Tcp(stream);
         self.stream = stream;
 
+        //TODO: Handle thread death
         thread::spawn(move || {
             // State machine: Disconnected. Check if 'writable' success
             // to know connection success
@@ -652,6 +654,7 @@ impl MqttClient {
         }
     }
 
+    //TODO: Rename to handle incoming publish
     fn _handle_message(&mut self, message: Box<Message>) -> Result<HandlePacket> {
         debug!("       Publish {:?} {:?} < {:?} bytes",
                message.qos,
@@ -816,6 +819,7 @@ impl MqttClient {
 
     fn _try_reconnect(&mut self) -> Result<()> {
         match self.opts.reconnect {
+            //TODO: Implement
             None => panic!("To be implemented"),
             Some(dur) => {
                 info!("  Will try Reconnect in {} seconds", dur);
