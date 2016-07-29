@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 use time;
 
-use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
+use std::net::{SocketAddr, Shutdown};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::str;
@@ -475,7 +475,7 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns `Subscriber` and `Publisher` and handles reqests from them.
     /// Also handles network events, reconnections and retransmissions.
-    fn start(mut self, opts: MqttOptions) -> Result<(Publisher, Subscriber)> {
+    pub fn start(mut self) -> Result<(Publisher, Subscriber)> {
         let mut event_loop = EventLoop::new().unwrap();
         let mionotify_tx = event_loop.channel();
         self.mionotify_tx = Some(mionotify_tx.clone());

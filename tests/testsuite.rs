@@ -1,7 +1,7 @@
 #![allow(unused_variables)] 
 extern crate rumqtt;
 
-use rumqtt::{MqttOptions, QoS};
+use rumqtt::{MqttOptions, MqttClient, QoS};
 use std::thread;
 use std::time::Duration;
 use std::sync::Arc;
@@ -17,17 +17,15 @@ extern crate env_logger;
 #[should_panic]
 fn inital_tcp_connect_failure(){
     //env_logger::init().unwrap();
-    let mut client_options = MqttOptions::new();
-
-    // Specify client connection opthons and which broker to connect to
     // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
-    // TODO: Rename proxy_client
-    let proxy_client = client_options.set_keep_alive(5)
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .connect("localhost:9999");
+                                    .broker("localhost:9999");
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (_, _) = proxy_client.start().expect("Couldn't start");
+    let (_, _) = MqttClient::new(client_options)
+                                .start().expect("Couldn't start");
 }
 
 /// Shouldn't try to reconnect if there is a connection problem
@@ -35,33 +33,32 @@ fn inital_tcp_connect_failure(){
 #[test]
 #[should_panic]
 fn inital_mqtt_connect_failure() {
-    let mut client_options = MqttOptions::new();
-
-    // Specify client connection opthons and which broker to connect to
-    let proxy_client = client_options.set_keep_alive(5)
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .connect("test.mosquitto.org:8883");
+                                    .broker("test.mosquitto.org:8883");
+
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (_, _) = proxy_client.start().expect("Couldn't start");
+    let (_, _) = MqttClient::new(client_options)
+                                .start().expect("Couldn't start");
 }
 
 #[test]
 fn basic() {
     //env_logger::init().unwrap();
-    let mut client_options = MqttOptions::new();
-
-    // Specify client connection opthons and which broker to connect to
-    let proxy_client = client_options.set_keep_alive(5)
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .connect("broker.hivemq.com:1883");
+                                    .broker("broker.hivemq.com:1883");
+
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
     let count = count.clone();
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (publisher, subscriber) = proxy_client.
+    let (publisher, subscriber) = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
@@ -84,12 +81,12 @@ fn basic() {
 fn reconnection() {
     // Create client in clean_session = false for broker to
     // remember your subscription after disconnect.
-    let mut client_options = MqttOptions::new();
-    let proxy_client = client_options.set_keep_alive(5)
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-reconnect-client")
                                     .set_clean_session(false)
-                                    .connect("broker.hivemq.com:1883");
+                                    .broker("broker.hivemq.com:1883");
 
     // Message count
     let count = Arc::new(AtomicUsize::new(0));
@@ -97,7 +94,7 @@ fn reconnection() {
     let count = count.clone();
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (publisher, subscriber) = proxy_client.
+    let (publisher, subscriber) = MqttClient::new(client_options).
     message_callback(move |_| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("message --> {:?}", message);
@@ -125,19 +122,19 @@ fn reconnection() {
 #[test]
 fn will() {
     // env_logger::init().unwrap();
-    let mut client_options = MqttOptions::new();
-    let client1 = client_options.set_keep_alive(5)
+    let client_options1 = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(15)
                                     .set_client_id("test-will-c1")
                                     .set_clean_session(false)
                                     .set_will("test/will", "I'm dead")
-                                    .connect("broker.hivemq.com:1883");
+                                    .broker("broker.hivemq.com:1883");
 
-    let mut client_options = MqttOptions::new();
-    let client2 = client_options.set_keep_alive(5)
+    let client_options2 = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-will-c2")
-                                    .connect("broker.hivemq.com:1883");
+                                    .broker("broker.hivemq.com:1883");
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
@@ -145,8 +142,8 @@ fn will() {
 
     // BUG NOTE: don't use _ for dummy subscriber, publisher. That implies
     // channel ends in struct are invalid
-    let (publisher1, subscriber1) = client1.start().expect("Coudn't start");
-    let (publisher2, subscriber2) = client2.
+    let (publisher1, subscriber1) = MqttClient::new(client_options1).start().expect("Coudn't start");
+    let (publisher2, subscriber2) = MqttClient::new(client_options2).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
@@ -172,19 +169,19 @@ fn will() {
 #[test]
 fn retained_messages() {
     //env_logger::init().unwrap();
-    let mut client_options = MqttOptions::new();
-    let proxy_client = client_options.set_keep_alive(5)
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("test-retain-client")
                                     .set_clean_session(true)
-                                    .connect("broker.hivemq.com:1883");
+                                    .broker("broker.hivemq.com:1883");
     //NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org" broker
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
     let count = count.clone();
 
-    let (mut publisher, subscriber) = proxy_client.
+    let (mut publisher, subscriber) = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
@@ -211,21 +208,21 @@ fn retained_messages() {
     //TODO: Clear retained messages
 }
 
+// TODO: Add functionality to handle noreconnect option. This test case is panicking
+// with out set_reconnect
 #[test]
 fn qos0_stress_publish() {
-    let mut client_options = MqttOptions::new();
-    //TODO: Add functionality to handle noreconnect option. This test case is panicking
-    // with out set_reconnect
-    let client = client_options.set_keep_alive(5)
-                               .set_reconnect(3)
-                               .set_client_id("qos0-stress-publish")
-                               .connect("broker.hivemq.com:1883");
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_reconnect(3)
+                                    .set_client_id("qos0-stress-publish")
+                                    .broker("broker.hivemq.com:1883");
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = client.message_callback(move |message| {
+    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
@@ -243,23 +240,24 @@ fn qos0_stress_publish() {
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }
 
-
 #[test]
 fn qos1_stress_publish() {
     //env_logger::init().unwrap();
-    let mut client_options = MqttOptions::new();
-    let client = client_options.set_keep_alive(5)
-                               .set_reconnect(3)
-                               .set_client_id("qos1-stress-publish")
-                               .set_pub_q_len(50)
-                               .connect("broker.hivemq.com:1883");
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_reconnect(3)
+                                    .set_client_id("qos1-stress-publish")
+                                    .set_pub_q_len(50)
+                                    .broker("broker.hivemq.com:1883");
+
     //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
     // with mosquitto broker. local and remote)
+
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = client.message_callback(move |message| {
+    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
@@ -279,17 +277,17 @@ fn qos1_stress_publish() {
 
 #[test]
 fn qos2_stress_publish() {
-    let mut client_options = MqttOptions::new();
-    let client = client_options.set_keep_alive(5)
-                               .set_reconnect(3)
-                               .set_client_id("qos2-stress-publish")
-                               .connect("broker.hivemq.com:1883");
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_reconnect(3)
+                                    .set_client_id("qos2-stress-publish")
+                                    .broker("broker.hivemq.com:1883");
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = client.message_callback(move |message| {
+    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");

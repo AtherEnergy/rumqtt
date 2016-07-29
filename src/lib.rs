@@ -68,3 +68,6 @@ mod client;
 
 pub use clientoptions::MqttOptions;
 pub use mqtt::QualityOfService as QoS;
+pub use client::MqttClient;
+pub use subscriber::Subscriber;
+pub use publisher::Publisher;
