@@ -13,7 +13,7 @@ use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
-use tls::NetworkStream;
+use tls::{NetworkStream, TlsStream};
 use std::sync::mpsc;
 
 use error::{Error, Result};
@@ -160,9 +160,9 @@ impl Handler for MqttClient {
                                     // NOTE: reregister isn't working for new streams in linux while
                                     // it's working in mac osx
                                     event_loop.register(stream,
-                                                    MIO_CLIENT_STREAM,
-                                                    EventSet::writable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
+                                                  MIO_CLIENT_STREAM,
+                                                  EventSet::writable(),
+                                                  PollOpt::edge() | PollOpt::oneshot())
                                         .expect("Couldn't reregister");
                                     return;
                                 }
@@ -231,9 +231,9 @@ impl Handler for MqttClient {
                                     // Should be done after reconnect coz stream is updated
                                     let stream = self.stream.get_ref().expect("No stream 1");
                                     event_loop.register(stream,
-                                                    MIO_CLIENT_STREAM,
-                                                    EventSet::writable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
+                                                  MIO_CLIENT_STREAM,
+                                                  EventSet::writable(),
+                                                  PollOpt::edge() | PollOpt::oneshot())
                                         .unwrap();
                                 }
 
@@ -259,7 +259,7 @@ impl Handler for MqttClient {
     }
 
     fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timer: Self::Timeout) {
-        //TODO: Move timer handling logic to seperate methods
+        // TODO: Move timer handling logic to seperate methods
         match timer {
             MIO_PING_TIMER => {
                 debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
@@ -303,7 +303,7 @@ impl Handler for MqttClient {
         }
     }
 
-    //TODO: Make smaller methods
+    // TODO: Make smaller methods
     fn notify(&mut self, _: &mut EventLoop<Self>, notification_type: MioNotification) {
         match self.state {
             MqttState::Connected => {
@@ -423,6 +423,44 @@ impl Handler for MqttClient {
 }
 
 impl MqttClient {
+    pub fn new(opts: MqttOptions) -> Self {
+        let addr = opts.addr;
+        // TODO: Move state initialization to MqttClient constructor
+        MqttClient {
+            addr: addr.expect("No address in client options"),
+            stream: NetworkStream::None,
+
+            // State
+            last_flush: Instant::now(),
+            last_pkid: PacketIdentifier(0),
+            await_ping: false,
+            state: MqttState::Disconnected,
+            initial_connect: true,
+            opts: opts,
+            pub1_channel_pending: 0,
+            pub2_channel_pending: 0,
+            should_qos1_block: false,
+            should_qos2_block: false,
+            no_of_reconnections: 0,
+
+            // Channels
+            pub0_rx: None,
+            pub1_rx: None,
+            pub2_rx: None,
+            sub_rx: None,
+            connsync_tx: None,
+            mionotify_tx: None,
+
+            // Queues
+            incoming_rec: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+
+            // callback
+            callback: None,
+        }
+    }
     // Note: Setting callback before subscriber & publisher
     // are created ensures that message callbacks are registered
     // before subscription & you don't need to pass callbacks through
@@ -478,10 +516,16 @@ impl MqttClient {
         // Whether connection is successfu or not is to found
         // out in eventloop
         let stream = try!(TcpStream::connect(&self.addr));
-        let stream = NetworkStream::Tcp(stream);
+        let stream = match self.opts.tls {
+            Some(ref tls) => {
+                let config = try!(TlsStream::make_config(tls));
+                NetworkStream::Tls(TlsStream::new(stream, "localhost", config))
+            }
+            None => NetworkStream::Tcp(stream),
+        };
         self.stream = stream;
 
-        //TODO: Handle thread death
+        // TODO: Handle thread death
         thread::spawn(move || {
             // State machine: Disconnected. Check if 'writable' success
             // to know connection success
@@ -498,14 +542,14 @@ impl MqttClient {
         match conn {
             MqttStatus::Success => Ok((publisher, subscriber)),
             MqttStatus::Failed => Err(Error::ConnectionAbort),
-        } 
+        }
     }
 
-    /// Return a count of (successful) mqtt connections that happened from the start.
-    /// Just to know how many times the client reconnected (coz of bad networks, broker crashes etc)
-    pub fn get_reconnection_count(&self) -> u32 {
-        self.no_of_reconnections
-    }
+    /// Return a count of (successful) mqtt connections that happened from the
+    /// start.
+    /// Just to know how many times the client reconnected (coz of bad
+    /// networks, broker crashes etc)
+    pub fn get_reconnection_count(&self) -> u32 { self.no_of_reconnections }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
         match self.state {
@@ -654,7 +698,7 @@ impl MqttClient {
         }
     }
 
-    //TODO: Rename to handle incoming publish
+    // TODO: Rename to handle incoming publish
     fn _handle_message(&mut self, message: Box<Message>) -> Result<HandlePacket> {
         debug!("       Publish {:?} {:?} < {:?} bytes",
                message.qos,
@@ -703,7 +747,7 @@ impl MqttClient {
                 // close at broker end
                 error!("Error in receiving packet {:?}", err);
                 self._unbind();
-                //TODO: Return actual error
+                // TODO: Return actual error
                 Err(Error::Read)
             }
         }
@@ -748,7 +792,8 @@ impl MqttClient {
                     if let Some(ref message_callback) = self.callback {
                         let message_callback = message_callback.clone();
 
-                        // Have a thread pool to handle message callbacks. Take the threadpool as a parameter
+                        // Have a thread pool to handle message callbacks. Take the threadpool as a
+                        // parameter
                         thread::spawn(move || message_callback(*m));
                     }
                 }
@@ -819,7 +864,7 @@ impl MqttClient {
 
     fn _try_reconnect(&mut self) -> Result<()> {
         match self.opts.reconnect {
-            //TODO: Implement
+            // TODO: Implement
             None => panic!("To be implemented"),
             Some(dur) => {
                 info!("  Will try Reconnect in {} seconds", dur);
@@ -1059,16 +1104,19 @@ impl MqttClient {
     }
 }
 
-/*
-Why RuMqtt:
-GOALS
------
-1. Synchronous mqtt connects: No need of callback to check if mqtt connection is
-successful or not. You'll know of of errors (if any) synchronously
-2. Synchronous subscribes (TODO): Same as above
-3. Queued publishes: publishes won't throw errors by default. A queue (with user defined
-    length) will be buffered when the n/w is down. If n/w is down for some time and queue
-    becomes full, publishes are blocked
-4. No locks. Fast and efficient because of Rust and Mio
-5. Callback only for subscibed incoming message. Callbacks are executed using threadpool (mioco)
-*/
+// Why RuMqtt:
+// GOALS
+// -----
+// 1. Synchronous mqtt connects: No need of callback to check if mqtt
+// connection is
+// successful or not. You'll know of of errors (if any) synchronously
+// 2. Synchronous subscribes (TODO): Same as above
+// 3. Queued publishes: publishes won't throw errors by default. A queue (with
+// user defined
+// length) will be buffered when the n/w is down. If n/w is down for some time
+// and queue
+// becomes full, publishes are blocked
+// 4. No locks. Fast and efficient because of Rust and Mio
+// 5. Callback only for subscibed incoming message. Callbacks are executed
+// using threadpool (mioco)
+//

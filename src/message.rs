@@ -13,8 +13,8 @@ pub struct Message {
     pub retain: bool,
     // Only for QoS 1,2
     pub qos: QoSWithPacketIdentifier,
-    
-    //TODO: Why does payload need to be atomic
+
+    // TODO: Why does payload need to be atomic
     pub payload: Arc<Vec<u8>>,
 }
 

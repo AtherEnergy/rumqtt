@@ -56,11 +56,9 @@ extern crate log;
 extern crate mio;
 extern crate mqtt;
 extern crate time;
-#[cfg(feature = "ssl")]
-extern crate openssl;
+extern crate rustls;
 
 mod error;
-#[cfg(feature = "ssl")]
 mod tls;
 mod message;
 mod clientoptions;
@@ -69,5 +67,7 @@ mod subscriber;
 mod client;
 
 pub use clientoptions::MqttOptions;
-pub use tls::SslContext;
 pub use mqtt::QualityOfService as QoS;
+pub use client::MqttClient;
+pub use subscriber::Subscriber;
+pub use publisher::Publisher;
