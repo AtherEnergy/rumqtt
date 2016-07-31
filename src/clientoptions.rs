@@ -1,9 +1,7 @@
 use rand::{self, Rng};
 use std::net::{SocketAddr, ToSocketAddrs};
-
+use std::path::{Path, PathBuf};
 use mqtt::QualityOfService;
-use tls::TlsStream;
-
 
 pub struct MqttOptions {
     pub addr: Option<SocketAddr>, // TODO: Use a default localhost here instead of option
@@ -19,7 +17,7 @@ pub struct MqttOptions {
     pub pub_q_len: u16,
     pub sub_q_len: u16,
     pub queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
-    pub tls: Option<TlsStream>,
+    pub tls: Option<PathBuf>,
 }
 
 impl Default for MqttOptions {
@@ -165,8 +163,9 @@ impl MqttOptions {
     }
 
     /// Set a TLS connection
-    pub fn set_tls(mut self, tls: TlsStream) -> Self {
-        self.tls = Some(tls);
+    pub fn set_tls<P>(mut self, cafile: P) -> Self
+    where P: AsRef<Path> {
+        self.tls = Some(cafile.as_ref().to_path_buf());
         self
     }
 
@@ -179,7 +178,7 @@ impl MqttOptions {
         }
         unreachable!("Cannot lookup address");
     }
-    
+
     /// Creates a new mqtt client with the broker address that you want
     /// to connect to. Along with connection details, this object holds
     /// all the state information of a connection.

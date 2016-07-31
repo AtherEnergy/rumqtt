@@ -52,15 +52,38 @@ fn qos1_pub_block() {
     assert!(100 == final_count.load(Ordering::SeqCst));
 }
 
-//#[ignore]
+#[ignore]
 #[test]
 fn tls_connect() {
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_pub_q_len(10)
                                     .set_reconnect(3)
+                                    .set_tls("/Users/ravitejareddy/Dropbox/mosquitto_certs/ca.crt")
                                     .broker("localhost:8883");
 
-    let (publisher, subscriber) = MqttClient::new(client_options).start().expect("Coudn't start");
-    thread::sleep(Duration::new(20, 0));
+    //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
+    // with mosquitto broker. local and remote)
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        println!("message --> {:?}", message);
+    }).start().expect("Coudn't start");
+
+    subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
+
+    for i in 0..1000 {
+        let payload = format!("{}. hello rust", i);
+        publisher.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::new(0, 10000));
+    }
+
+    thread::sleep(Duration::new(300, 0));
+    println!("QoS1 Final Count = {:?}", final_count.load(Ordering::SeqCst));
+    assert!(1000 <= final_count.load(Ordering::SeqCst));
 }

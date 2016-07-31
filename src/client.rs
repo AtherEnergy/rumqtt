@@ -518,7 +518,7 @@ impl MqttClient {
         let stream = try!(TcpStream::connect(&self.addr));
         let stream = match self.opts.tls {
             Some(ref tls) => {
-                let config = TlsStream::make_config();
+                let config = try!(TlsStream::make_config(tls));
                 NetworkStream::Tls(TlsStream::new(stream, "localhost", config))
             }
             None => NetworkStream::Tcp(stream),
