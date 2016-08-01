@@ -2,33 +2,38 @@ language: rust
 sudo: false
 cache:
   directories:
-    - $HOME/.cargo
+  - $HOME/.cargo
 rust:
-  - stable
+- stable
 os:
-  - linux
-  - osx
+- linux
+- osx
+matrix:
+  allow_failures:
+    - os: osx
 install:
-  - curl https://sh.rustup.rs -sSf | sh -s -- -y
-  - export PATH="$HOME/.cargo/bin:$PATH"
-  - rustup toolchain install stable
-  - rustup default stable
-  - rustup target add armv7-unknown-linux-gnueabihf
-  - rustc -V
-  - cargo -V
+- curl https://sh.rustup.rs -sSf | sh -s -- -y
+- export PATH="$HOME/.cargo/bin:$PATH"
+- rustup toolchain install stable
+- rustup default stable
+- rustup target add armv7-unknown-linux-gnueabihf
+- rustc -V
+- cargo -V
 branches:
   only:
-    - master
+  - master
 script:
-  - cargo build --release
-  - cargo test --release -- --nocapture
-  - cargo doc
+- cargo build --release
+- cargo test --release -- --nocapture
+- cargo doc --no-deps
 after_script:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then cargo build --target=armv7-unknown-linux-gnueabihf ; fi
-
+- if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then cargo build --target=armv7-unknown-linux-gnueabihf
+  ; fi
+after_success:
+  - test $TRAVIS_PULL_REQUEST == "false" && test $TRAVIS_BRANCH == "master" && bash docdeploy.sh
 notifications:
   email:
     on_success: never
 env:
   global:
-    secure: 0M/d7lRws5mjKxZUEp45caeO8LgI99PSUMlVPwDWmKIMXsk3qN45yVco/b9oQUFvt4daQucnKN2kaUDsmopk3yG8R0R8G5jwk2JwnzQTND7TGxXH7L+SRY+eRARg5vtL341avyyKBDyrbV7eLWmXrY/qjOgUTROM8uWuZZEm2MIgiaNU45nz/Yj4IrK68PMv6OeCDZaLp0qXMXYfBLnLZMAGZ0qrt0Xc9jQNL0ekJIQeT8UAveQeNaBLtFRPe+Esj8Y13WJjzrKcNnDjsYV15MPefaftdkJsGEVCaXMwC/JXjB+JtrX+rbJrQXe4iZUq4Tj3XGBpuv+ga43MIJzGyIDvTm+I8bqdYXoqLA+/Ir9m8N5OUscJx80LOcTcHheYerEhdQypbsqDoKi1up8yZeZlKWLhcxCyRhCrLOmpImiiNpezceayZLPq8MAuA6qtS7o780qRiNyugV2ZS8W5PXP8Oxb5hSgby47zUuBQkXcZZ1YJep5nNgfqJodCG9lyFSvvx98Hzt1nKFb0oFl8q2f+drXa0a4fgiA0W9LhydvOq1hZ40/cO43G1eTHwvy3cekM5Aa0jT3QWQ8PiL4IKoM0DTXnTq7cveYyQk1vYKiR1ZnqC8qq/DXfAOD0VBsE+zmX7eZhlruntKFtc1lgOtPEnyZS+HF4pD52JwO0Mfs=
+    secure: WOIz8O/G0UBwpllVPeQMN8DUNi0SaiKj9c0oGBjRUkO2KVaIobG3I9l9lR+o2VslW+wRbvOS73XVKMOI2jDm1tQKnG4e4Aso85hEC0OvvxZG/gTRhs6Ef6sVmgP+wsic8+JMOYMcnBNm/46VpFw9QETFRQ9XOV7cUvPXPp+5aSVub+mr/ARXKb0hSQTxAKTve9EZZdcMUihdxIdh/1vmTs2SCmozzMEKl6jqPMxakgKderSEFvaK3lrtdJTONxpmvkd9NSoG2TBXvpKnAhKLvyfFnJi08Kz8x4QVnUG7WKuzO2UjXcZeAALAh66s2I2vhzzPr2oZgGJMrZYAAtmxHPtX6MXdtaaR1ZgzLbE7ijsQjX3JQDRnZtWAXp6q3+jHEGq7Gj/M0cWF9oKKceDApJKtitvF+HBYoVJ8awVJIxBuBfLEVa8Yg9W6/tsiu+ZzdetRuwQUAbtztv3/MLvSPaEJCVF+U9eXwpo2hbY5uVQZV/iJUkKZI3yJs/gN9rA0Ahqgfd+tEAGoQYXVhIbSijPLSBo80Z9bq2HIlrLtB9x614Q7WeKLMdgegTS89BexQ58JmCR4Sno/b/hvmfJlX997NqNj9S0B6FjoObtKJduiRXdM/7zQ36PGQ74NmAi1ebzuh5qDFusiTXnZeIg3JVzxO25KxeziNvHtglKi/wg=

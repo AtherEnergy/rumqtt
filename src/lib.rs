@@ -14,15 +14,18 @@
 //! # Connecting to a broker
 //!
 //! ```ignore
-//! let mut client_options = MqttOptions::new();
+//! // Specify client connection opthons and which broker to connect to
+//! let client_options = MqttOptions::new()
+//!                                   .set_keep_alive(5)
+//!                                   .set_reconnect(3)
+//!                                   .set_client_id("qos0-stress-publish")
+//!                                   .broker("broker.hivemq.com:1883");
 //!
-//! //Specify client connection opthons and which broker to connect to
-//! let proxy_client = client_options.set_keep_alive(5)
-//!                                  .set_reconnect(5)
-//!                                  .connect("localhost:1883");
-//!
-//! //Connects to a broker and returns a `Publisher` and `Subscriber`
-//! let (publisher, subscriber) = proxy_client.start().expect("Coudn't start");
+//! // Connects to a broker and returns a `Publisher` and `Subscriber`
+//! // `.message_callback` is optional if you don't want to subscribe to any topic.
+//! let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+//!        println!("message --> {:?}", message);
+//!     }).start().expect("Coudn't start");
 //! ```
 //!
 //!
@@ -31,7 +34,7 @@
 //! ```ignore
 //! for i in 0..100 {
 //!     let payload = format!("{}. hello rust", i);
-//!     publisher.publish("hello/rust", QoS::Level1, payload.into_bytes());
+//!     publisher.publish("hello/rust", QoS::Level1, payload.into_bytes()).expect("Publish failure");
 //!     thread::sleep(Duration::new(1, 0));
 //! }
 //! ```
@@ -42,10 +45,7 @@
 //! let topics = vec![("hello/+/world", QoS::Level0),
 //!                   ("hello/rust", QoS::Level1)];
 //!
-//! subscriber.message_callback(|message| {
-//!        println!("@@@ {:?}", message);
-//! });
-//! subscriber.subscribe(topics).expect("Subscribe error");
+//! subscriber.subscribe(topics).expect("Subcription failure");
 //! ```
 //!
 
