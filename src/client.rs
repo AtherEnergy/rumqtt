@@ -305,118 +305,112 @@ impl Handler for MqttClient {
 
     // TODO: Make smaller methods
     fn notify(&mut self, _: &mut EventLoop<Self>, notification_type: MioNotification) {
-        match self.state {
-            MqttState::Connected => {
-                match notification_type {
-                    MioNotification::Pub(p) => {
-                        match p {
-                            PubNotify::QoS0 => {
-                                let message = {
-                                    match self.pub0_rx {
-                                        Some(ref pub0_rx) => pub0_rx.recv().unwrap(),
+        // No Mqtt state distiction here. Should receive messages from channel in all
+        // the states
+        match notification_type {
+            MioNotification::Pub(p) => {
+                match p {
+                    PubNotify::QoS0 => {
+                        let message = {
+                            match self.pub0_rx {
+                                Some(ref pub0_rx) => pub0_rx.recv().unwrap(),
+                                None => panic!("No publish recv channel"),
+                            }
+                        };
+                        let _ = self._publish(message);
+                    }
+                    PubNotify::QoS1 |
+                    PubNotify::QoS1QueueDown |
+                    PubNotify::QoS1Reconnect => {
+                        // Increment only if notificication is from publisher
+                        if p == PubNotify::QoS1 {
+                            self.pub1_channel_pending += 1;
+                        }
+
+                        // Receive from publish channel only when outgoing pub queue
+                        // length is < max
+                        if self.should_qos1_block == false {
+                            loop {
+                                debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
+                                // Before
+                                if self.pub1_channel_pending == 0 {
+                                    debug!("Finished everything in channel");
+                                    break;
+                                }
+                                let mut message = {
+
+                                    match self.pub1_rx {
+                                        // Careful, this is a blocking call. Might
+                                        // be easier to find queue len bugs with this.
+                                        Some(ref pub1_rx) => pub1_rx.recv().unwrap(),
                                         None => panic!("No publish recv channel"),
                                     }
                                 };
+                                // Add next packet id to message and publish
+                                let PacketIdentifier(pkid) = self._next_pkid();
+                                message.set_pkid(pkid);
                                 let _ = self._publish(message);
-                            }
-                            PubNotify::QoS1 |
-                            PubNotify::QoS1QueueDown |
-                            PubNotify::QoS1Reconnect => {
-                                // Increment only if notificication is from publisher
-                                if p == PubNotify::QoS1 {
-                                    self.pub1_channel_pending += 1;
-                                }
-
-                                // Receive from publish channel only when outgoing pub queue
-                                // length is < max
-                                if self.should_qos1_block == false {
-                                    loop {
-                                        debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
-                                        // Before
-                                        if self.pub1_channel_pending == 0 {
-                                            debug!("Finished everything in channel");
-                                            break;
-                                        }
-                                        let mut message = {
-
-                                            match self.pub1_rx {
-                                                // Careful, this is a blocking call. Might
-                                                // be easier to find queue len bugs with this.
-                                                Some(ref pub1_rx) => pub1_rx.recv().unwrap(),
-                                                None => panic!("No publish recv channel"),
-                                            }
-                                        };
-                                        // Add next packet id to message and publish
-                                        let PacketIdentifier(pkid) = self._next_pkid();
-                                        message.set_pkid(pkid);
-                                        let _ = self._publish(message);
-                                        self.pub1_channel_pending -= 1;
-                                    }
-                                }
-                            }
-
-                            PubNotify::QoS2 |
-                            PubNotify::QoS2QueueDown |
-                            PubNotify::QoS2Reconnect => {
-                                // Increment only if notificication is from publisher
-                                if p == PubNotify::QoS2 {
-                                    self.pub2_channel_pending += 1;
-                                }
-
-                                // Receive from publish channel only when outgoing pub queue
-                                // length is < max
-                                if self.should_qos2_block == false {
-                                    loop {
-                                        debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
-                                        // Before
-                                        if self.pub2_channel_pending == 0 {
-                                            debug!("Finished everything in channel");
-                                            break;
-                                        }
-                                        let mut message = {
-
-                                            match self.pub2_rx {
-                                                // Careful, this is a blocking call. Might
-                                                // be easier to find queue len bugs with this.
-                                                Some(ref pub2_rx) => pub2_rx.recv().unwrap(),
-                                                None => panic!("No publish recv channel"),
-                                            }
-                                        };
-                                        // Add next packet id to message and publish
-                                        let PacketIdentifier(pkid) = self._next_pkid();
-                                        message.set_pkid(pkid);
-                                        let _ = self._publish(message);
-                                        self.pub2_channel_pending -= 1;
-                                    }
-                                }
+                                self.pub1_channel_pending -= 1;
                             }
                         }
                     }
-                    MioNotification::Sub => {
-                        let topics = match self.sub_rx {
-                            Some(ref sub_rx) => sub_rx.recv().unwrap(),
-                            None => panic!("Expected a subscribe recieve channel"),
-                        };
-                        let _ = self._subscribe(topics);
-                    }
-                    MioNotification::Disconnect => {
-                        debug!("{:?}", self.state);
-                        match self.state {
-                            MqttState::Connected => {
-                                let _ = self._disconnect();
-                                self.state = MqttState::Disconnected;
-                            }
-                            _ => debug!("Mqtt connection not established"),
+
+                    PubNotify::QoS2 |
+                    PubNotify::QoS2QueueDown |
+                    PubNotify::QoS2Reconnect => {
+                        // Increment only if notificication is from publisher
+                        if p == PubNotify::QoS2 {
+                            self.pub2_channel_pending += 1;
                         }
-                    }
-                    MioNotification::Shutdown => {
-                        let _ = self.stream.shutdown(Shutdown::Both);
+
+                        // Receive from publish channel only when outgoing pub queue
+                        // length is < max
+                        if self.should_qos2_block == false {
+                            loop {
+                                debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
+                                // Before
+                                if self.pub2_channel_pending == 0 {
+                                    debug!("Finished everything in channel");
+                                    break;
+                                }
+                                let mut message = {
+
+                                    match self.pub2_rx {
+                                        // Careful, this is a blocking call. Might
+                                        // be easier to find queue len bugs with this.
+                                        Some(ref pub2_rx) => pub2_rx.recv().unwrap(),
+                                        None => panic!("No publish recv channel"),
+                                    }
+                                };
+                                // Add next packet id to message and publish
+                                let PacketIdentifier(pkid) = self._next_pkid();
+                                message.set_pkid(pkid);
+                                let _ = self._publish(message);
+                                self.pub2_channel_pending -= 1;
+                            }
+                        }
                     }
                 }
             }
-
-            MqttState::Disconnected | MqttState::Handshake => {
-                error!("cannot handle user request in handshake/disconnected state")
+            MioNotification::Sub => {
+                let topics = match self.sub_rx {
+                    Some(ref sub_rx) => sub_rx.recv().unwrap(),
+                    None => panic!("Expected a subscribe recieve channel"),
+                };
+                let _ = self._subscribe(topics);
+            }
+            MioNotification::Disconnect => {
+                debug!("{:?}", self.state);
+                match self.state {
+                    MqttState::Connected => {
+                        let _ = self._disconnect();
+                        self.state = MqttState::Disconnected;
+                    }
+                    _ => debug!("Mqtt connection not established"),
+                }
+            }
+            MioNotification::Shutdown => {
+                let _ = self.stream.shutdown(Shutdown::Both);
             }
         }
     }
@@ -882,21 +876,46 @@ impl MqttClient {
     fn _try_retransmit(&mut self) {
         match self.state {
             MqttState::Connected => {
-                let outgoing_pub = self.outgoing_pub.clone(); //TODO: Remove the clone
-                let outgoing_rec = self.outgoing_rec.clone(); //TODO: Remove the clone
-                let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
                 let timeout = self.opts.queue_timeout as i64;
 
                 // Republish Qos 1 outgoing publishes
-                for e in outgoing_pub.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
-                    let _ = self._publish(*e.1.clone());
+                let mut outgoing_pub_timedout_indices = vec![];
+                {
+                    let outgoing_pub = &mut self.outgoing_pub;
+                    // Collect all the indices which has timedout
+                    for (i, e) in outgoing_pub.iter().enumerate() {
+                        if time::get_time().sec - e.0 > timeout {
+                            outgoing_pub_timedout_indices.push(i);
+                        }
+                    }
+                }
+
+                // Pop the above elements and publis
+                for i in outgoing_pub_timedout_indices {
+                    if let Some(e) = self.outgoing_pub.remove(i) {
+                        let _ = self._publish(*e.1.clone());
+                    }
                 }
 
                 // Republish QoS 2 outgoing records
-                for e in outgoing_rec.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
-                    let _ = self._publish(*e.1.clone());
+                let mut outgoing_rec_timedout_indices = vec![];
+                {
+                    let outgoing_rec = &mut self.outgoing_rec;
+                    for (i, e) in outgoing_rec.iter().enumerate() {
+                        if time::get_time().sec - e.0 > timeout {
+                            outgoing_rec_timedout_indices.push(i);
+                        }
+                    }
                 }
 
+                // Pop the above elements and publish
+                for i in outgoing_rec_timedout_indices {
+                    if let Some(e) = self.outgoing_rec.remove(i) {
+                        let _ = self._publish(*e.1.clone());
+                    }
+                }
+
+                let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
                 // Resend QoS 2 outgoing release
                 for e in outgoing_rel.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
                     let PacketIdentifier(pkid) = e.1;

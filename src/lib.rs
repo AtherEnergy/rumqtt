@@ -22,8 +22,10 @@
 //!                                   .broker("broker.hivemq.com:1883");
 //!
 //! // Connects to a broker and returns a `Publisher` and `Subscriber`
-//! // `.message_callback` is optional if you don't want to subscribe to any topic.
-//! let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+//! // `.message_callback` is optional if you don't want to subscribe to any
+//! topic.
+//! let (publisher, subscriber) =
+//! MqttClient::new(client_options).message_callback(move |message| {
 //!        println!("message --> {:?}", message);
 //!     }).start().expect("Coudn't start");
 //! ```
@@ -34,7 +36,8 @@
 //! ```ignore
 //! for i in 0..100 {
 //!     let payload = format!("{}. hello rust", i);
-//!     publisher.publish("hello/rust", QoS::Level1, payload.into_bytes()).expect("Publish failure");
+//! publisher.publish("hello/rust", QoS::Level1,
+//! payload.into_bytes()).expect("Publish failure");
 //!     thread::sleep(Duration::new(1, 0));
 //! }
 //! ```

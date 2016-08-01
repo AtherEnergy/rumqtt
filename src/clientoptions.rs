@@ -133,6 +133,11 @@ impl MqttOptions {
         self
     }
 
+    pub fn set_q_timeout(mut self, secs: u16) -> Self {
+        self.queue_timeout = secs;
+        self
+    }
+
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections.
     /// By default, no retry will happen
@@ -164,7 +169,8 @@ impl MqttOptions {
 
     /// Set a TLS connection
     pub fn set_tls<P>(mut self, cafile: P) -> Self
-    where P: AsRef<Path> {
+        where P: AsRef<Path>
+    {
         self.tls = Some(cafile.as_ref().to_path_buf());
         self
     }

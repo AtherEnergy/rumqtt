@@ -15,13 +15,17 @@ extern crate env_logger;
 /// in regards to channel and queue.
 /// If queue holds 10 and then recv() stops, shouldn't 20 publishes
 /// happen from publisher ??
-#[ignore]
+//#[ignore]
 #[test]
 fn qos1_pub_block() {
+  env_logger::init().unwrap();
   let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_pub_q_len(10)
                                     .set_reconnect(3)
+                                    .set_q_timeout(10)
+                                    .set_client_id("test-pub-block")
+                                    .set_clean_session(false)
                                     .broker("localhost:1883");
 
     //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
@@ -32,10 +36,10 @@ fn qos1_pub_block() {
 
     let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
-    subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
+    subscriber.subscribe(vec![("test/qos1/block", QoS::Level1)]).expect("Subcription failure");
 
     println!("Take broker down in next 10 seconds !!!!!!");
     thread::sleep(Duration::new(10, 0));
@@ -43,7 +47,7 @@ fn qos1_pub_block() {
     for i in 0..100 {
         let payload = format!("{}. hello rust", i);
         println!("{}. Publishing ...", i);
-        publisher.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        publisher.publish("test/qos1/block", QoS::Level1, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
@@ -55,7 +59,6 @@ fn qos1_pub_block() {
 #[ignore]
 #[test]
 fn tls_connect() {
-    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_pub_q_len(10)

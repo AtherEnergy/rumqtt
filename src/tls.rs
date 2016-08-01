@@ -15,7 +15,8 @@ pub struct TlsStream {
 
 impl TlsStream {
     pub fn make_config<P>(cafile: P) -> Result<rustls::ClientConfig>
-    where P: AsRef<Path> {
+        where P: AsRef<Path>
+    {
         let mut config = rustls::ClientConfig::new();
         let certfile = try!(File::open(cafile));
         let mut reader = BufReader::new(certfile);
@@ -27,7 +28,7 @@ impl TlsStream {
         let cfg = Arc::new(cfg);
         TlsStream {
             stream: stream,
-            //NOTE: Hostname should match to server address or else --> Decode Error
+            // NOTE: Hostname should match to server address or else --> Decode Error
             tls_session: rustls::ClientSession::new(&cfg, hostname),
         }
     }
