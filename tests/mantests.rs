@@ -16,10 +16,10 @@ extern crate env_logger;
 /// channel has space for 10 more. total publisher publishes = 20
 /// NOTE: broker will remember subscriptions for clean_session=false
 /// only for n/w disconnections but not for crashes
-//#[ignore]
+#[ignore]
 #[test]
 fn qos1_pub_block() {
-  env_logger::init().unwrap();
+  // env_logger::init().unwrap();
   let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_pub_q_len(2)

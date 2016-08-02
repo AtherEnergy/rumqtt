@@ -909,40 +909,23 @@ impl MqttClient {
             MqttState::Connected => {
                 let timeout = self.opts.queue_timeout as i64;
 
-                // Republish Qos 1 outgoing publishes
-                let mut outgoing_pub_timedout_indices = vec![];
-                {
-                    let outgoing_pub = &mut self.outgoing_pub;
-                    // Collect all the indices which has timedout
-                    for (i, e) in outgoing_pub.iter().enumerate() {
-                        if time::get_time().sec - e.0 > timeout {
-                            outgoing_pub_timedout_indices.push(i);
-                        }
-                    }
-                }
-
-                // Pop the above elements and publis
-                for i in outgoing_pub_timedout_indices {
-                    if let Some(e) = self.outgoing_pub.remove(i) {
-                        let _ = self._publish(*e.1.clone());
+                // Republish QoS 1 outgoing publishes
+                loop {
+                    if let Some(index) = self.outgoing_pub.iter().position(|ref x|time::get_time().sec - x.0 > timeout) {
+                        let message = self.outgoing_pub.remove(index).expect("No such entry");
+                        let _ = self._publish(*message.1);
+                    } else {
+                        break;
                     }
                 }
 
                 // Republish QoS 2 outgoing records
-                let mut outgoing_rec_timedout_indices = vec![];
-                {
-                    let outgoing_rec = &mut self.outgoing_rec;
-                    for (i, e) in outgoing_rec.iter().enumerate() {
-                        if time::get_time().sec - e.0 > timeout {
-                            outgoing_rec_timedout_indices.push(i);
-                        }
-                    }
-                }
-
-                // Pop the above elements and publish
-                for i in outgoing_rec_timedout_indices {
-                    if let Some(e) = self.outgoing_rec.remove(i) {
-                        let _ = self._publish(*e.1.clone());
+                loop {
+                    if let Some(index) = self.outgoing_rec.iter().position(|ref x|time::get_time().sec - x.0 > timeout) {
+                        let message = self.outgoing_rec.remove(index).expect("No such entry");
+                        let _ = self._publish(*message.1);
+                    } else {
+                        break;
                     }
                 }
 
@@ -1006,7 +989,7 @@ impl MqttClient {
                 }
             }
         }
-        println!("       Publish {:?} {:?} > {} bytes",
+        debug!("       Publish {:?} {:?} > {} bytes",
                message.qos,
                message.topic.to_string(),
                message.payload.len());

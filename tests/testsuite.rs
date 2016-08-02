@@ -184,7 +184,7 @@ fn retained_messages() {
     let (mut publisher, subscriber) = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        // println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     // publish first
