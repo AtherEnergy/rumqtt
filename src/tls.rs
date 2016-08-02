@@ -68,10 +68,7 @@ impl Read for NetworkStream {
                         Ok(_) => {
                             match s.tls_session.process_new_packets() {
                                 Ok(_) => (),
-                                Err(e) => {
-                                    return Err(io::Error::new(io::ErrorKind::Other,
-                                                              format!("{:?}", e)))
-                                }
+                                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, format!("{:?}", e))),
                             }
                             while s.tls_session.wants_write() {
                                 try!(s.tls_session.write_tls(&mut s.stream));

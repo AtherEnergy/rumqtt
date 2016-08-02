@@ -58,12 +58,13 @@ fn qos1_pub_block() {
 #[ignore]
 #[test]
 fn tls_connect() {
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_pub_q_len(10)
                                     .set_reconnect(3)
-                                    .set_tls("/Users/ravitejareddy/Dropbox/mosquitto_certs/ca.crt")
-                                    .broker("localhost:8883");
+                                    .set_tls("/usr/local/ca.crt")
+                                    .broker("veh-test-mqtt-broker.atherengineering.in:8883");
 
     //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
     // with mosquitto broker. local and remote)
@@ -74,7 +75,7 @@ fn tls_connect() {
 
     let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");

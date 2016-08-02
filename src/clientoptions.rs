@@ -1,10 +1,9 @@
 use rand::{self, Rng};
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use mqtt::QualityOfService;
 
 pub struct MqttOptions {
-    pub addr: Option<SocketAddr>, // TODO: Use a default localhost here instead of option
+    pub addr: String, // TODO: Use a default localhost here instead of option
     pub keep_alive: Option<u16>,
     pub clean_session: bool,
     pub client_id: Option<String>,
@@ -24,7 +23,7 @@ pub struct MqttOptions {
 impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
-            addr: None,
+            addr: "localhost:1883".to_string(),
             keep_alive: Some(5),
             clean_session: true,
             client_id: None,
@@ -58,9 +57,7 @@ impl MqttOptions {
     /// | **pub_q_len**           | 50                       |
     /// | **sub_q_len**           | 5                        |
     ///
-    pub fn new() -> MqttOptions {
-        MqttOptions { ..Default::default() }
-    }
+    pub fn new() -> MqttOptions { MqttOptions { ..Default::default() } }
 
     /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange
@@ -178,16 +175,6 @@ impl MqttOptions {
         self
     }
 
-    fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
-        let addrs = addr.to_socket_addrs().expect("Conversion Failed");
-        for addr in addrs {
-            if let SocketAddr::V4(_) = addr {
-                return addr;
-            }
-        }
-        unreachable!("Cannot lookup address");
-    }
-
     /// Creates a new mqtt client with the broker address that you want
     /// to connect to. Along with connection details, this object holds
     /// all the state information of a connection.
@@ -203,11 +190,11 @@ impl MqttOptions {
     ///                           .connect("localhost:1883");
     ///
     // TODO: Rename
-    pub fn broker<A: ToSocketAddrs>(mut self, addr: A) -> Self {
+    pub fn broker(mut self, addr: &str) -> Self {
         if self.client_id == None {
             self.generate_client_id();
         }
-        self.addr = Some(Self::lookup_ipv4(addr));
+        self.addr = addr.to_string();
         self
     }
 }

@@ -3,7 +3,7 @@
 
 A pure rust mqtt client.
 
-[DOCUMENTATION](http://ather-energy.github.io/RuMqtt/)
+[DOCUMENTATION](http://ather-energy.github.io/RuMqtt/rumqtt)
 ## Features
 
 * Supports QoS 0, QoS 1 and QoS 2
