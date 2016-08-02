@@ -16,7 +16,8 @@ pub struct MqttOptions {
     pub will_retain: bool,
     pub pub_q_len: u16,
     pub sub_q_len: u16,
-    pub queue_timeout: u16, // wait time for ack beyond which packet(publish/subscribe) will be resent
+    // wait time for ack beyond which packet(publish/subscribe) will be resent
+    pub queue_timeout: u16,
     pub tls: Option<PathBuf>,
 }
 
@@ -57,7 +58,9 @@ impl MqttOptions {
     /// | **pub_q_len**           | 50                       |
     /// | **sub_q_len**           | 5                        |
     ///
-    pub fn new() -> MqttOptions { MqttOptions { ..Default::default() } }
+    pub fn new() -> MqttOptions {
+        MqttOptions { ..Default::default() }
+    }
 
     /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange

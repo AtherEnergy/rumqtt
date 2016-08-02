@@ -11,21 +11,20 @@ extern crate log;
 extern crate env_logger;
 
 /// This handles the case where messages in channel are being
-/// read but pubacks not being received. Fishy. Analyze blocks
-/// in regards to channel and queue.
-/// If queue holds 10 and then recv() stops, shouldn't 20 publishes
-/// happen from publisher ??
+/// read but pubacks not being received. 
+/// If queue holds 10, recv() stops after queue is full. publish
+/// channel has space for 10 more. total publisher publishes = 20
+/// NOTE: broker will remember subscriptions for clean_session=false
+/// only for n/w disconnections but not for crashes
 //#[ignore]
 #[test]
 fn qos1_pub_block() {
   env_logger::init().unwrap();
   let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
-                                    .set_pub_q_len(10)
+                                    .set_pub_q_len(2)
                                     .set_reconnect(3)
                                     .set_q_timeout(10)
-                                    .set_client_id("test-pub-block")
-                                    .set_clean_session(false)
                                     .broker("localhost:1883");
 
     //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
@@ -36,7 +35,7 @@ fn qos1_pub_block() {
 
     let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        println!("message --> {:?}", message);
+        // println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/block", QoS::Level1)]).expect("Subcription failure");
@@ -44,16 +43,16 @@ fn qos1_pub_block() {
     println!("Take broker down in next 10 seconds !!!!!!");
     thread::sleep(Duration::new(10, 0));
 
-    for i in 0..100 {
+    for i in 0..10 {
         let payload = format!("{}. hello rust", i);
         println!("{}. Publishing ...", i);
         publisher.publish("test/qos1/block", QoS::Level1, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
-    thread::sleep(Duration::new(20, 0));
-    println!("{:?}", final_count.load(Ordering::SeqCst));
-    assert!(100 == final_count.load(Ordering::SeqCst));
+    thread::sleep(Duration::new(10, 0));
+    println!("QoS 1 Count = {:?}", final_count.load(Ordering::SeqCst));
+    assert!(10 == final_count.load(Ordering::SeqCst));
 }
 
 #[ignore]

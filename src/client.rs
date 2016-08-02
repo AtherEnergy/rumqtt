@@ -116,6 +116,11 @@ pub struct MqttClient {
     /// For Qos2. Store for outgoing `pubrel` packets.
     pub outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
 
+    // clean_session=false will remember subscriptions only till lives.
+    // If broker crashes, all its state will be lost (most brokers).
+    // client wouldn't want to loose messages after it comes back up again
+    pub subscriptions: VecDeque<Vec<(TopicFilter, QualityOfService)>>,
+
     /// On message callback
     pub callback: Option<Arc<SendableFn>>,
 }
@@ -148,7 +153,8 @@ impl Handler for MqttClient {
                                     pk
                                 }
                                 // @ If failed with EOF error, server has closed the socket.
-                                // @ Set state to disconnected, make a new TCP connection (we need to register here)
+                                // @ Set state to disconnected, make a new TCP connection
+                                // @ (we need to register here)
                                 // @ and event loop to writable. Now writable state machine
                                 // @ will takeover restarting the mqtt connection procedure
                                 // TODO: Get proper error instead of Error::Read
@@ -262,7 +268,9 @@ impl Handler for MqttClient {
         // TODO: Move timer handling logic to seperate methods
         match timer {
             MIO_PING_TIMER => {
-                debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
+                debug!("client state --> {:?}, await_ping --> {}",
+                       self.state,
+                       self.await_ping);
 
                 match self.state {
                     MqttState::Connected => {
@@ -397,6 +405,7 @@ impl Handler for MqttClient {
                     Some(ref sub_rx) => sub_rx.recv().unwrap(),
                     None => panic!("Expected a subscribe recieve channel"),
                 };
+                self.subscriptions.push_back(topics.clone());
                 let _ = self._subscribe(topics);
             }
             MioNotification::Disconnect => {
@@ -451,6 +460,9 @@ impl MqttClient {
             outgoing_rec: VecDeque::new(),
             outgoing_rel: VecDeque::new(),
 
+            // Subscriptions
+            subscriptions: VecDeque::new(),
+
             // callback
             callback: None,
         }
@@ -481,7 +493,9 @@ impl MqttClient {
         let (pub2_tx, pub2_rx) = mpsc::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub2_rx = Some(pub2_rx);
 
-        let (sub_tx, sub_rx) = mpsc::sync_channel::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (sub_tx, sub_rx) =
+            mpsc::sync_channel::<Vec<(TopicFilter,
+                                      QualityOfService)>>(self.opts.sub_q_len as usize);
         self.sub_rx = Some(sub_rx);
 
         // synchronizes tcp connection. why ?
@@ -543,7 +557,9 @@ impl MqttClient {
     /// start.
     /// Just to know how many times the client reconnected (coz of bad
     /// networks, broker crashes etc)
-    pub fn get_reconnection_count(&self) -> u32 { self.no_of_reconnections }
+    pub fn get_reconnection_count(&self) -> u32 {
+        self.no_of_reconnections
+    }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
         match self.state {
@@ -559,7 +575,8 @@ impl MqttClient {
                         }
                     }
                     _ => {
-                        error!("received invalid packet in handshake state --> {:?}", packet);
+                        error!("received invalid packet in handshake state --> {:?}",
+                               packet);
                         Ok(HandlePacket::Invalid)
                     }
                 }
@@ -598,7 +615,7 @@ impl MqttClient {
                                 self.outgoing_pub.remove(i);
                             }
                             None => {
-                                error!("Oopssss..unsolicited ack");
+                                error!("Oopssss..unsolicited ack --> {:?}", puback);
                             }
                         };
                         debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
@@ -627,7 +644,7 @@ impl MqttClient {
                                 self.outgoing_rec.remove(i);
                             }
                             None => {
-                                error!("Oopssss..unsolicited record");
+                                error!("Oopssss..unsolicited record --> {:?}", pubrec);
                             }
                         };
 
@@ -654,7 +671,8 @@ impl MqttClient {
                                 }
                             }
                             None => {
-                                error!("Oopssss..unsolicited release. Message might have already been released");
+                                error!("Oopssss..unsolicited release. Message might have already \
+                                        been released --> {:?}", pubrel);
                                 None
                             }
                         };
@@ -675,7 +693,7 @@ impl MqttClient {
                             .position(|ref x| x.1 == PacketIdentifier(pkid)) {
                             Some(pos) => self.outgoing_rel.remove(pos),
                             None => {
-                                error!("Oopssss..unsolicited complete");
+                                error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
                                 None
                             }
                         };
@@ -706,8 +724,8 @@ impl MqttClient {
             }
 
             // @ store the message in 'recorded' queue and send 'pubrec' to broker
-            // @ if 'pubrec' is lost, broker will resend the message. so only pushback is pkid is new.
-            // @ and resend pubcomp.
+            // @ if 'pubrec' is lost, broker will resend the message.
+            // @ so only pushback is pkid is new. and resend pubcomp.
             // @ TODO: Analyze broker crash cases for all queues.
             QoSWithPacketIdentifier::Level2(pkid) => {
                 match self.incoming_rec
@@ -764,19 +782,28 @@ impl MqttClient {
                             None => panic!("No connsync channel"),
                         }
                     } else {
+                        // Resubscribe after a reconnection.
+                        for s in self.subscriptions.clone() {
+                            let _ = self._subscribe(s);
+                        }
                         // Publisher won't stop even when disconnected until channel is full.
-                        // This notifies notify() to publish channel pending messages after reconnect.
+                        // This notifies notify() to publish channel pending messages after
+                        // reconnect.
                         match self.mionotify_tx {
                             Some(ref mionotify_tx) => {
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect)).expect("Send failed");
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect)).expect("Send failed");
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect))
+                                    .expect("Send failed");
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect))
+                                    .expect("Send failed");
                             }
                             None => panic!("No mionotify channel"),
                         }
                     }
 
+
                     // TODO: Bug?? Multiple timers after restart?
-                    event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000).unwrap();
+                    event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
+                        .unwrap();
                     if let Some(keep_alive) = self.opts.keep_alive {
                         event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
                     }
@@ -797,11 +824,13 @@ impl MqttClient {
                     // leading to dup notify.
                     // Send only for notify() to recover if channel is blocked.
                     // Blocking = true is set during publish if pub q len is more than desired.
-                    if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block == true {
+                    if self.outgoing_pub.len() < self.opts.pub_q_len as usize &&
+                       self.should_qos1_block == true {
                         match self.mionotify_tx {
                             Some(ref mionotify_tx) => {
                                 self.should_qos1_block = false;
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("Send failed");
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown))
+                                    .expect("Send failed");
                             }
                             None => panic!("No mionotify channel"),
                         }
@@ -809,11 +838,13 @@ impl MqttClient {
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
                 HandlePacket::PubRec => {
-                    if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block == true {
+                    if self.outgoing_rec.len() < self.opts.pub_q_len as usize &&
+                       self.should_qos2_block == true {
                         match self.mionotify_tx {
                             Some(ref mionotify_tx) => {
                                 self.should_qos2_block = false;
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("Send failed");
+                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown))
+                                    .expect("Send failed");
                             }
                             None => panic!("No mionotify channel"),
                         }
@@ -923,7 +954,9 @@ impl MqttClient {
                 }
             }
 
-            MqttState::Disconnected | MqttState::Handshake => error!("I won't republish. Client isn't in connected state"),
+            MqttState::Disconnected | MqttState::Handshake => {
+                error!("I won't republish. Client isn't in connected state")
+            }
         }
     }
 
@@ -953,7 +986,10 @@ impl MqttClient {
         let payload = &*message.payload;
         let retain = message.retain;
 
-        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), retain, payload.clone()));
+        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(),
+                                               qos.clone(),
+                                               retain,
+                                               payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
@@ -970,8 +1006,12 @@ impl MqttClient {
                 }
             }
         }
-        debug!("       Publish {:?} {:?} > {} bytes", message.qos, message.topic.to_string(), message.payload.len());
+        println!("       Publish {:?} {:?} > {} bytes",
+               message.qos,
+               message.topic.to_string(),
+               message.payload.len());
 
+        //TODO: print error for failure here
         try!(self._write_packet(publish_packet));
         self._flush()
     }
@@ -1014,7 +1054,8 @@ impl MqttClient {
     }
 
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
-        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.opts.client_id.clone().unwrap());
+        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(),
+                                                    self.opts.client_id.clone().unwrap());
 
         connect_packet.set_clean_session(self.opts.clean_session);
 
@@ -1060,7 +1101,9 @@ impl MqttClient {
         Ok(buf)
     }
 
-    fn _generate_subscribe_packet(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<Vec<u8>> {
+    fn _generate_subscribe_packet(&self,
+                                  topics: Vec<(TopicFilter, QualityOfService)>)
+                                  -> Result<Vec<u8>> {
         let subscribe_packet = SubscribePacket::new(11, topics);
         let mut buf = Vec::new();
 
