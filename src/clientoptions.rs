@@ -57,9 +57,7 @@ impl MqttOptions {
     /// | **pub_q_len**           | 50                       |
     /// | **sub_q_len**           | 5                        |
     ///
-    pub fn new() -> MqttOptions {
-        MqttOptions { ..Default::default() }
-    }
+    pub fn new() -> MqttOptions { MqttOptions { ..Default::default() } }
 
     /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange
