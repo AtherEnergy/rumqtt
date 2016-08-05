@@ -37,29 +37,43 @@ pub enum Error {
 }
 
 impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error { Error::Io(err) }
+    fn from(err: io::Error) -> Error {
+        Error::Io(err)
+    }
 }
 
 impl From<TopicNameError> for Error {
-    fn from(_: TopicNameError) -> Error { Error::TopicName }
+    fn from(_: TopicNameError) -> Error {
+        Error::TopicName
+    }
 }
 
 impl From<TopicFilterError> for Error {
-    fn from(_: TopicFilterError) -> Error { Error::TopicFilter }
+    fn from(_: TopicFilterError) -> Error {
+        Error::TopicFilter
+    }
 }
 
 impl<T> From<SendError<T>> for Error {
-    fn from(_: SendError<T>) -> Error { Error::MioNotify }
+    fn from(_: SendError<T>) -> Error {
+        Error::MioNotify
+    }
 }
 
 impl From<RecvError> for Error {
-    fn from(_: RecvError) -> Error { Error::MioNotify }
+    fn from(_: RecvError) -> Error {
+        Error::MioNotify
+    }
 }
 
 impl<'a, T: Packet<'a>> From<PacketError<'a, T>> for Error {
-    fn from(_: PacketError<'a, T>) -> Error { Error::MqttPacket }
+    fn from(_: PacketError<'a, T>) -> Error {
+        Error::MqttPacket
+    }
 }
 
 impl<T> From<mio::NotifyError<T>> for Error {
-    fn from(_: mio::NotifyError<T>) -> Error { Error::MioNotifyError }
+    fn from(_: mio::NotifyError<T>) -> Error {
+        Error::MioNotifyError
+    }
 }

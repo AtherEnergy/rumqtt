@@ -5,7 +5,7 @@ use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::str;
-use mio::tcp::TcpStream;
+use std::net::TcpStream;
 use mio::*;
 use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
@@ -24,7 +24,6 @@ use subscriber::{Subscriber, SendableFn};
 
 const MIO_PING_TIMER: u64 = 123;
 const MIO_QUEUE_TIMER: u64 = 321;
-const MIO_CLIENT_STREAM: Token = Token(1);
 
 // static mut N: i32 = 0;
 // unsafe {
@@ -62,6 +61,7 @@ pub enum MioNotification {
     Sub,
     Disconnect,
     Shutdown,
+    Incoming,
 }
 
 enum HandlePacket {
@@ -103,7 +103,7 @@ pub struct MqttClient {
     pub pub1_rx: Option<mpsc::Receiver<Message>>,
     pub pub2_rx: Option<mpsc::Receiver<Message>>,
     pub sub_rx: Option<mpsc::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
-    pub connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
+    pub incoming_rx: Option<mpsc::Receiver<VariablePacket>>,
     pub mionotify_tx: Option<Sender<MioNotification>>,
 
     /// Queues. Note: 'record' is qos2 term for 'publish'
@@ -130,145 +130,13 @@ impl Handler for MqttClient {
     type Timeout = u64;
     type Message = MioNotification;
 
-    // TODO: Understand --> when connecting to localbroker, For Incoming publishes,
-    // state is at Readable@Connected state but while connecting to remote broker,
-    // state is at Writable@Connected. Hence ended up add STATE_reate,
-    // STATE_handle_packet
-    // to both readable and writable
-    fn ready(&mut self, event_loop: &mut EventLoop<MqttClient>, token: Token, events: EventSet) {
-        if events.is_readable() {
-            info!("@@@ Readable ... {:?}", self.state);
-            match token {
-                MIO_CLIENT_STREAM => {
-                    match self.state {
-                        MqttState::Connected | MqttState::Handshake => {
-                            // @ Get incoming packets from the broker.
-                            let packet = match self.STATE_read_incoming(event_loop) {
-                                Ok(pk) => {
-                                    event_loop.reregister(self.stream.get_ref().unwrap(),
-                                                    MIO_CLIENT_STREAM,
-                                                    EventSet::readable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
-                                        .unwrap();
-                                    pk
-                                }
-                                // @ If failed with EOF error, server has closed the socket.
-                                // @ Set state to disconnected, make a new TCP connection
-                                // @ (we need to register here)
-                                // @ and event loop to writable. Now writable state machine
-                                // @ will takeover restarting the mqtt connection procedure
-                                // TODO: Get proper error instead of Error::Read
-                                Err(e) => {
-                                    error!("Error reading incoming packets : {:?}", e);
-                                    self.state = MqttState::Disconnected;
-                                    self.STATE_try_reconnect(event_loop);
-                                    let stream = self.stream.get_ref().expect("No Stream 22");
-                                    // NOTE: reregister isn't working for new streams in linux while
-                                    // it's working in mac osx
-                                    event_loop.register(stream,
-                                                  MIO_CLIENT_STREAM,
-                                                  EventSet::writable(),
-                                                  PollOpt::edge() | PollOpt::oneshot())
-                                        .expect("Couldn't reregister");
-                                    return;
-                                }
-                            };
-
-                            trace!("{:?}", packet);
-                            self.STATE_handle_packet(&packet, event_loop);
-
-                        }
-                        MqttState::Disconnected => {
-                            error!("Disconnected state invalid in readable");
-                            event_loop.reregister(self.stream.get_ref().unwrap(),
-                                            MIO_CLIENT_STREAM,
-                                            EventSet::writable(),
-                                            PollOpt::edge() | PollOpt::oneshot())
-                                .unwrap();
-                        }
-                    }
-                }
-
-                _ => panic!("Invalid token .."),
-            }
-        }
-
-        // You do not need to register EventSet::writable() if you want to immediately
-        // write back
-        // to the socket you just read from. You can just perform the write as part of
-        // the current
-        // readable event. If you are performing an expensive task between the read and
-        // write, you may want to handle this differently. Whether you are reading or
-        // writing from
-        // the socket, you also need to be aware that the kernel might not be ready for
-        // your read
-        // r write.
-        //
-        // NOTE: THIS IS BEING INVOKED AFTER TCPSTREAM::CONNECT (server up or not)
-        // It might be READABLE for new incoming connections (for server) or data
-        if events.is_writable() {
-            info!("%%% Writable ... {:?}", self.state);
-            match token {
-                MIO_CLIENT_STREAM => {
-                    match self.state {
-                        MqttState::Disconnected => {
-                            debug!("sending mqtt connect packet ..");
-                            match self._connect() {
-                                // @ If writing connect packet is successful means TCP
-                                // @ connection is successful. Change the state machine
-                                // @ to handshake and event loop to readable to read
-                                // @ CONACK packet
-                                Ok(_) => {
-                                    self.state = MqttState::Handshake;
-                                    event_loop.reregister(self.stream.get_ref().unwrap(),
-                                                    MIO_CLIENT_STREAM,
-                                                    EventSet::readable(),
-                                                    PollOpt::edge() | PollOpt::oneshot())
-                                        .unwrap();
-                                }
-                                // @ Writing connect packet failed. Tcp connection might
-                                // @ have failed. Try to establish a new Tcp connection
-                                // @ and set eventloop to writable to write connect packets
-                                // @ again
-                                Err(e) => {
-                                    error!("Error establishing tcp connection --> {:?}", e);
-                                    self.state = MqttState::Disconnected;
-                                    self.STATE_try_reconnect(event_loop);
-                                    // Should be done after reconnect coz stream is updated
-                                    let stream = self.stream.get_ref().expect("No stream 1");
-                                    event_loop.register(stream,
-                                                  MIO_CLIENT_STREAM,
-                                                  EventSet::writable(),
-                                                  PollOpt::edge() | PollOpt::oneshot())
-                                        .unwrap();
-                                }
-
-                            }
-                        }
-                        MqttState::Handshake | MqttState::Connected => {
-                            error!("Incoming data in writable state ..");
-                            // TODO: Check if this is an error and we can do reads here
-                            // directly
-                            event_loop.reregister(self.stream.get_ref().unwrap(),
-                                            MIO_CLIENT_STREAM,
-                                            EventSet::readable(),
-                                            PollOpt::edge() | PollOpt::oneshot())
-                                .unwrap();
-
-                        }
-                    }
-                }
-
-                _ => panic!("Invalid token .."),
-            }
-        }
-    }
-
     fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timer: Self::Timeout) {
         // TODO: Move timer handling logic to seperate methods
         match timer {
             MIO_PING_TIMER => {
-                debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
+                debug!("client state --> {:?}, await_ping --> {}",
+                       self.state,
+                       self.await_ping);
 
                 match self.state {
                     MqttState::Connected => {
@@ -416,6 +284,15 @@ impl Handler for MqttClient {
                     _ => debug!("Mqtt connection not established"),
                 }
             }
+            MioNotification::Incoming => {
+                let packet = {
+                    match self.incoming_rx {
+                        Some(ref incoming_rx) => incoming_rx.recv().unwrap(),
+                        None => panic!("No incoming recv channel"),
+                    }
+                };
+                self.handle_packet(&packet);
+            }
             MioNotification::Shutdown => {
                 let _ = self.stream.shutdown(Shutdown::Both);
             }
@@ -460,7 +337,7 @@ impl MqttClient {
             pub1_rx: None,
             pub2_rx: None,
             sub_rx: None,
-            connsync_tx: None,
+            incoming_rx: None,
             mionotify_tx: None,
 
             // Queues
@@ -502,16 +379,14 @@ impl MqttClient {
         let (pub2_tx, pub2_rx) = mpsc::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub2_rx = Some(pub2_rx);
 
-        let (sub_tx, sub_rx) = mpsc::sync_channel::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (sub_tx, sub_rx) =
+            mpsc::sync_channel::<Vec<(TopicFilter,
+                                      QualityOfService)>>(self.opts.sub_q_len as usize);
         self.sub_rx = Some(sub_rx);
 
-        // synchronizes tcp connection. why ?
-        // start() call should fail if there a problem creating initial tcp
-        // connection & mqtt connection. Since connections are happening inside thread,
-        // this method should be informed to return error instead of
-        // (publisher, subscriber) in case connection fails.
-        let (connsync_tx, connsync_rx) = mpsc::sync_channel::<MqttStatus>(1);
-        self.connsync_tx = Some(connsync_tx);
+        let (incoming_tx, incoming_rx) = mpsc::sync_channel::<VariablePacket>(1);
+        self.incoming_rx = Some(incoming_rx);
+
         // @ Create 'publisher' and 'subscriber'
         // @ These are the handles using which user interacts with rumqtt.
         let publisher = Publisher {
@@ -524,50 +399,64 @@ impl MqttClient {
 
         let subscriber = Subscriber {
             subscribe_tx: sub_tx,
-            mionotify_tx: mionotify_tx,
+            mionotify_tx: mionotify_tx.clone(),
         };
 
-        // This is a non blocking call and almost never fails
-        // Whether connection is successfu or not is to found
-        // out in eventloop
-        let stream = try!(TcpStream::connect(&self.addr));
-        let stream = match self.opts.tls {
-            Some(ref tls) => {
-                let config = try!(TlsStream::make_config(tls));
-                let host = self.opts.addr.split(":");
-                let host: Vec<&str> = host.collect();
-                // println!("@@@@ {:?}", host);
-                NetworkStream::Tls(TlsStream::new(stream, host[0], config))
-            }
-            None => NetworkStream::Tcp(stream),
-        };
-        self.stream = stream;
+        // Initial Mqtt connection
+        try!(self._try_reconnect());
+        self.state = MqttState::Connected;
+        self.initial_connect = false;
 
+        let mut reader_stream = self.stream.try_clone().expect("Couldn't clone the stream");
+        // This is the thread that handles mio event loop.
+        // Mio event loop is intentionally made to use just notify and timers.
+        // Tcp Streams are std blocking streams.This helps avoiding the state
+        // machine hell.
+        // All the network writes also happen in this thread
         // TODO: Handle thread death
         thread::spawn(move || {
-            // State machine: Disconnected. Check if 'writable' success
-            // to know connection success
-            self.state = MqttState::Disconnected;
-            event_loop.register(self.stream.get_ref().unwrap(),
-                          MIO_CLIENT_STREAM,
-                          EventSet::writable(),
-                          PollOpt::edge() | PollOpt::oneshot())
-                .unwrap();
+            // Mqtt connnection is successful, start timers and event loop
+            event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
+                .expect("Couldn't start retransmit timer");
 
+            if let Some(keep_alive) = self.opts.keep_alive {
+                event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900)
+                    .expect("Couldn't start keep alive timer");
+            }
             event_loop.run(&mut self).expect("Couldn't Run EventLoop");
         });
-        let conn = connsync_rx.recv().expect("Connection sync recv error");
-        match conn {
-            MqttStatus::Success => Ok((publisher, subscriber)),
-            MqttStatus::Failed => Err(Error::ConnectionAbort),
-        }
+
+        // This thread handles network reads (coz they are blocking) and
+        // and sends them to event loop thread to handle mqtt state.
+        thread::spawn(move || {
+            loop {
+                let packet = match VariablePacket::decode(&mut reader_stream) {
+                    // @ Decoded packet successfully.
+                    Ok(pk) => pk,
+                    Err(err) => panic!("Error in receiving packet {:?}", err),
+                    // Err(err) => {
+                    //     // maybe size=0 while reading indicating socket
+                    //     // close at broker end
+                    //     panic!("Error in receiving packet {:?}", err);
+                    //     // self._unbind();
+                    //     // TODO: Return actual error
+                    //     //Err(Error::Read)
+                    // }
+                };
+                incoming_tx.send(packet).expect("Unable to send incoming message");
+                mionotify_tx.send(MioNotification::Incoming).expect("Unable to Notify");
+            }
+        });
+        Ok((publisher, subscriber))
     }
 
     /// Return a count of (successful) mqtt connections that happened from the
     /// start.
     /// Just to know how many times the client reconnected (coz of bad
     /// networks, broker crashes etc)
-    pub fn get_reconnection_count(&self) -> u32 { self.no_of_reconnections }
+    pub fn get_reconnection_count(&self) -> u32 {
+        self.no_of_reconnections
+    }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
         match self.state {
@@ -583,7 +472,8 @@ impl MqttClient {
                         }
                     }
                     _ => {
-                        error!("received invalid packet in handshake state --> {:?}", packet);
+                        error!("received invalid packet in handshake state --> {:?}",
+                               packet);
                         Ok(HandlePacket::Invalid)
                     }
                 }
@@ -753,133 +643,6 @@ impl MqttClient {
         }
     }
 
-    #[allow(non_snake_case)]
-    fn STATE_read_incoming(&mut self, event_loop: &mut EventLoop<Self>) -> Result<VariablePacket> {
-        match VariablePacket::decode(&mut self.stream) {
-            // @ Decoded packet successfully.
-            // @ Retrigger readable in evenloop
-            Ok(pk) => Ok(pk),
-            // @ Try to make a new Tcp connection.
-            // @ Set state machine to Disconnected.
-            // @ Make eventloop writable to check connection status
-            Err(err) => {
-                // maybe size=0 while reading indicating socket
-                // close at broker end
-                error!("Error in receiving packet {:?}", err);
-                self._unbind();
-                // TODO: Return actual error
-                Err(Error::Read)
-            }
-        }
-    }
-
-    #[allow(non_snake_case)]
-    fn STATE_handle_packet(&mut self, packet: &VariablePacket, event_loop: &mut EventLoop<Self>) {
-        if let Ok(p) = self.handle_packet(packet) {
-            match p {
-                // Mqtt connection established, start the timers
-                HandlePacket::ConnAck => {
-                    self.state = MqttState::Connected;
-                    self.no_of_reconnections += 1;
-                    if self.initial_connect == true {
-                        match self.connsync_tx {
-                            Some(ref connsync_tx) => {
-                                connsync_tx.send(MqttStatus::Success).expect("Send failed");
-                                self.initial_connect = false;
-                            }
-                            None => panic!("No connsync channel"),
-                        }
-                    } else {
-                        // Resubscribe after a reconnection.
-                        for s in self.subscriptions.clone() {
-                            let _ = self._subscribe(s);
-                        }
-                        // Publisher won't stop even when disconnected until channel is full.
-                        // This notifies notify() to publish channel pending messages after
-                        // reconnect.
-                        match self.mionotify_tx {
-                            Some(ref mionotify_tx) => {
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect))
-                                    .expect("Send failed");
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect))
-                                    .expect("Send failed");
-                            }
-                            None => panic!("No mionotify channel"),
-                        }
-                    }
-
-
-                    // TODO: Bug?? Multiple timers after restart?
-                    event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
-                        .unwrap();
-                    if let Some(keep_alive) = self.opts.keep_alive {
-                        event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
-                    }
-
-                }
-                HandlePacket::Publish(m) => {
-                    if let Some(ref message_callback) = self.callback {
-                        let message_callback = message_callback.clone();
-
-                        // Have a thread pool to handle message callbacks. Take the threadpool as a
-                        // parameter
-                        thread::spawn(move || message_callback(*m));
-                    }
-                }
-                // Sending a dummy notification saying tha queue size has reduced
-                HandlePacket::PubAck => {
-                    // Don't notify everytime q len is < max. This will always be true initially
-                    // leading to dup notify.
-                    // Send only for notify() to recover if channel is blocked.
-                    // Blocking = true is set during publish if pub q len is more than desired.
-                    if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block == true {
-                        match self.mionotify_tx {
-                            Some(ref mionotify_tx) => {
-                                self.should_qos1_block = false;
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown))
-                                    .expect("Send failed");
-                            }
-                            None => panic!("No mionotify channel"),
-                        }
-                    }
-                }
-                // TODO: Better read from channel again after PubComp instead of PubRec
-                HandlePacket::PubRec => {
-                    if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block == true {
-                        match self.mionotify_tx {
-                            Some(ref mionotify_tx) => {
-                                self.should_qos2_block = false;
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown))
-                                    .expect("Send failed");
-                            }
-                            None => panic!("No mionotify channel"),
-                        }
-                    }
-                }
-                _ => info!("packet handler says that he doesn't care"),
-            }
-        } else {
-            error!("Error handling the packet");
-        }
-    }
-
-    #[allow(non_snake_case)]
-    fn STATE_try_reconnect(&mut self, event_loop: &mut EventLoop<Self>) {
-        // Handles case where initial connection failures
-        // E.g testsuite --> inital_mqtt_connect_failure_test
-        if self.initial_connect == true {
-            match self.connsync_tx {
-                Some(ref connsync_tx) => {
-                    connsync_tx.send(MqttStatus::Failed).expect("Send failed");
-                    event_loop.shutdown();
-                }
-                None => panic!("No connsync channel"),
-            }
-            return;
-        }
-        let _ = self._try_reconnect();
-    }
-
     fn _connect(&mut self) -> Result<()> {
         let connect = try!(self._generate_connect_packet());
         try!(self._write_packet(connect));
@@ -898,13 +661,23 @@ impl MqttClient {
             // TODO: Implement
             None => panic!("To be implemented"),
             Some(dur) => {
-                info!("  Will try Reconnect in {} seconds", dur);
-                thread::sleep(Duration::new(dur as u64, 0));
-                // Almost never fails
-                match TcpStream::connect(&self.addr) {
-                    Ok(stream) => self.stream = NetworkStream::Tcp(stream),
-                    Err(err) => panic!("Error creating new stream {:?}", err),
+                if self.initial_connect {
+                    info!("  Will try Reconnect in {} seconds", dur);
+                    thread::sleep(Duration::new(dur as u64, 0));
                 }
+                let stream = try!(TcpStream::connect(&self.addr));
+                let stream = match self.opts.tls {
+                    Some(ref tls) => {
+                        let config = try!(TlsStream::make_config(tls));
+                        let host = self.opts.addr.split(":");
+                        let host: Vec<&str> = host.collect();
+                        // println!("@@@@ {:?}", host);
+                        NetworkStream::Tls(TlsStream::new(stream, host[0], config))
+                    }
+                    None => NetworkStream::Tcp(stream),
+                };
+                self.stream = stream;
+                try!(self._connect());
                 Ok(())
             }
         }
@@ -917,7 +690,9 @@ impl MqttClient {
 
                 // Republish QoS 1 outgoing publishes
                 loop {
-                    if let Some(index) = self.outgoing_pub.iter().position(|ref x| time::get_time().sec - x.0 > timeout) {
+                    if let Some(index) = self.outgoing_pub
+                        .iter()
+                        .position(|ref x| time::get_time().sec - x.0 > timeout) {
                         let message = self.outgoing_pub.remove(index).expect("No such entry");
                         let _ = self._publish(*message.1);
                     } else {
@@ -927,7 +702,9 @@ impl MqttClient {
 
                 // Republish QoS 2 outgoing records
                 loop {
-                    if let Some(index) = self.outgoing_rec.iter().position(|ref x| time::get_time().sec - x.0 > timeout) {
+                    if let Some(index) = self.outgoing_rec
+                        .iter()
+                        .position(|ref x| time::get_time().sec - x.0 > timeout) {
                         let message = self.outgoing_rec.remove(index).expect("No such entry");
                         let _ = self._publish(*message.1);
                     } else {
@@ -943,7 +720,9 @@ impl MqttClient {
                 }
             }
 
-            MqttState::Disconnected | MqttState::Handshake => error!("I won't republish. Client isn't in connected state"),
+            MqttState::Disconnected | MqttState::Handshake => {
+                error!("I won't republish. Client isn't in connected state")
+            }
         }
     }
 
@@ -973,7 +752,10 @@ impl MqttClient {
         let payload = &*message.payload;
         let retain = message.retain;
 
-        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), retain, payload.clone()));
+        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(),
+                                               qos.clone(),
+                                               retain,
+                                               payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
@@ -990,7 +772,10 @@ impl MqttClient {
                 }
             }
         }
-        debug!("       Publish {:?} {:?} > {} bytes", message.qos, message.topic.to_string(), message.payload.len());
+        debug!("       Publish {:?} {:?} > {} bytes",
+               message.qos,
+               message.topic.to_string(),
+               message.payload.len());
 
         // TODO: print error for failure here
         try!(self._write_packet(publish_packet));
@@ -1035,7 +820,8 @@ impl MqttClient {
     }
 
     fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
-        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.opts.client_id.clone().unwrap());
+        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(),
+                                                    self.opts.client_id.clone().unwrap());
 
         connect_packet.set_clean_session(self.opts.clean_session);
 
@@ -1081,7 +867,9 @@ impl MqttClient {
         Ok(buf)
     }
 
-    fn _generate_subscribe_packet(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<Vec<u8>> {
+    fn _generate_subscribe_packet(&self,
+                                  topics: Vec<(TopicFilter, QualityOfService)>)
+                                  -> Result<Vec<u8>> {
         let subscribe_packet = SubscribePacket::new(11, topics);
         let mut buf = Vec::new();
 

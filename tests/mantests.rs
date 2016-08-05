@@ -10,6 +10,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
+#[test]
+fn send_ping_reqs_in_time() {
+    env_logger::init().unwrap();
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_pub_q_len(2)
+                                    .set_reconnect(3)
+                                    .set_q_timeout(10)
+                                    .broker("localhost:1883");
+
+    let (publisher, subscriber) = MqttClient::new(client_options)
+                                            .start()
+                                            .expect("Coudn't start");
+
+    thread::sleep(Duration::new(60, 0));
+}
+
 /// This handles the case where messages in channel are being
 /// read but pubacks not being received. 
 /// If queue holds 10, recv() stops after queue is full. publish

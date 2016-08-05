@@ -1,4 +1,4 @@
-use mio::tcp::TcpStream;
+use std::net::TcpStream;
 use std::io::{self, Read, Write, BufReader};
 use std::fs::File;
 use std::sync::Arc;
@@ -6,7 +6,7 @@ use std::net::Shutdown;
 use std::path::Path;
 
 use rustls::{self, Session};
-use error::Result;
+use error::{Error, Result};
 
 pub struct TlsStream {
     stream: TcpStream,
@@ -49,6 +49,18 @@ impl NetworkStream {
         }
     }
 
+    pub fn try_clone(&self) -> Result<Self> {
+        match *self {
+            NetworkStream::Tcp(ref s) => Ok(NetworkStream::Tcp(try!(s.try_clone()))),
+            NetworkStream::Tls(ref s) => {
+                Err(Error::Io(io::Error::new(io::ErrorKind::Other, "No Tls stream!")))
+            }
+            NetworkStream::None => {
+                Err(Error::Io(io::Error::new(io::ErrorKind::Other, "No Tls stream!")))
+            }
+        }
+    }
+
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         match *self {
             NetworkStream::Tcp(ref s) => s.shutdown(how),
@@ -68,7 +80,10 @@ impl Read for NetworkStream {
                         Ok(_) => {
                             match s.tls_session.process_new_packets() {
                                 Ok(_) => (),
-                                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, format!("{:?}", e))),
+                                Err(e) => {
+                                    return Err(io::Error::new(io::ErrorKind::Other,
+                                                              format!("{:?}", e)))
+                                }
                             }
                             while s.tls_session.wants_write() {
                                 try!(s.tls_session.write_tls(&mut s.stream));
