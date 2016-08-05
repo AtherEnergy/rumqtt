@@ -106,6 +106,7 @@ pub struct MqttClient {
     pub incoming_rx: Option<mpsc::Receiver<VariablePacket>>,
     pub mionotify_tx: Option<Sender<MioNotification>>,
     pub connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
+    pub streamupdate_tx: Option<mpsc::SyncSender<NetworkStream>>,
 
     /// Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
@@ -339,6 +340,7 @@ impl MqttClient {
             incoming_rx: None,
             mionotify_tx: None,
             connsync_tx: None,
+            streamupdate_tx: None,
 
             // Queues
             incoming_rec: VecDeque::new(),
@@ -393,6 +395,9 @@ impl MqttClient {
         let (connsync_tx, connsync_rx) = mpsc::sync_channel::<MqttStatus>(1);
         self.connsync_tx = Some(connsync_tx);
 
+        let (streamupdate_tx, streamupdate_rx) = mpsc::sync_channel::<NetworkStream>(1);
+        self.streamupdate_tx = Some(streamupdate_tx.clone());
+
         // @ Create 'publisher' and 'subscriber'
         // @ These are the handles using which user interacts with rumqtt.
         let publisher = Publisher {
@@ -411,8 +416,10 @@ impl MqttClient {
         // Initial Mqtt connection
         try!(self._try_reconnect());
         self.state = MqttState::Handshake;
-        
+
         let reader_stream = self.stream.try_clone().expect("Couldn't clone the stream");
+        try!(streamupdate_tx.send(reader_stream));
+
         // This is the thread that handles mio event loop.
         // Mio event loop is intentionally made to use just notify and timers.
         // Tcp Streams are std blocking streams.This helps avoiding the state
@@ -426,23 +433,28 @@ impl MqttClient {
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn(move || {
-            let mut stream = reader_stream;
-            loop {
-                let packet = match VariablePacket::decode(&mut stream) {
-                    // @ Decoded packet successfully.
-                    Ok(pk) => pk,
-                    Err(err) => panic!("Error in receiving packet {:?}", err),
-                    // Err(err) => {
-                    //     // maybe size=0 while reading indicating socket
-                    //     // close at broker end
-                    //     panic!("Error in receiving packet {:?}", err);
-                    //     // self._unbind();
-                    //     // TODO: Return actual error
-                    //     //Err(Error::Read)
-                    // }
-                };
-                incoming_tx.send(packet).expect("Unable to send incoming message");
-                mionotify_tx.send(MioNotification::Incoming).expect("Unable to Notify");
+            'update_stream: loop {
+                let mut stream = streamupdate_rx.recv().expect("Stream update channel error");
+                loop {
+                    let packet = match VariablePacket::decode(&mut stream) {
+                        // @ Decoded packet successfully.
+                        Ok(pk) => pk,
+                        Err(err) => {
+                            error!("Error in receiving packet {:?}", err); 
+                            break;
+                        }
+                        // Err(err) => {
+                        //     // maybe size=0 while reading indicating socket
+                        //     // close at broker end
+                        //     panic!("Error in receiving packet {:?}", err);
+                        //     // self._unbind();
+                        //     // TODO: Return actual error
+                        //     //Err(Error::Read)
+                        // }
+                    };
+                    incoming_tx.send(packet).expect("Unable to send incoming message");
+                    mionotify_tx.send(MioNotification::Incoming).expect("Unable to Notify");
+                }
             }
         });
 
@@ -461,7 +473,8 @@ impl MqttClient {
 
     #[allow(non_snake_case)]
     fn STATE_handle_packet(&mut self, packet: &VariablePacket, event_loop: &mut EventLoop<Self>) {
-        if let Ok(p) = self.handle_packet(packet) {
+        let handle = self.handle_packet(packet);
+        if let Ok(p) = handle {
             match p {
                 // Mqtt connection established, start the timers
                 HandlePacket::ConnAck => {
@@ -543,8 +556,8 @@ impl MqttClient {
                 }
                 _ => info!("packet handler says that he doesn't care"),
             }
-        } else {
-            error!("Error handling the packet");
+        } else if let Err(err) = handle {
+            error!("Error handling the packet {:?}", err);
         }
     }
 
