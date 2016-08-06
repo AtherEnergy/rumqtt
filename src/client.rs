@@ -188,10 +188,8 @@ impl Handler for MqttClient {
                 match p {
                     PubNotify::QoS0 => {
                         let message = {
-                            match self.pub0_rx {
-                                Some(ref pub0_rx) => pub0_rx.recv().unwrap(),
-                                None => panic!("No publish recv channel"),
-                            }
+                            let pub0_rx = self.pub0_rx.as_ref().unwrap();
+                            pub0_rx.recv().expect("Pub0 Rx Recv Error")
                         };
                         let _ = self._publish(message);
                     }
@@ -214,13 +212,8 @@ impl Handler for MqttClient {
                                     break;
                                 }
                                 let mut message = {
-
-                                    match self.pub1_rx {
-                                        // Careful, this is a blocking call. Might
-                                        // be easier to find queue len bugs with this.
-                                        Some(ref pub1_rx) => pub1_rx.recv().unwrap(),
-                                        None => panic!("No publish recv channel"),
-                                    }
+                                    let pub1_rx = self.pub1_rx.as_ref().unwrap();
+                                    pub1_rx.recv().expect("Pub1 Rx Recv Error")
                                 };
                                 // Add next packet id to message and publish
                                 let PacketIdentifier(pkid) = self._next_pkid();
@@ -250,13 +243,10 @@ impl Handler for MqttClient {
                                     break;
                                 }
                                 let mut message = {
-
-                                    match self.pub2_rx {
-                                        // Careful, this is a blocking call. Might
-                                        // be easier to find queue len bugs with this.
-                                        Some(ref pub2_rx) => pub2_rx.recv().unwrap(),
-                                        None => panic!("No publish recv channel"),
-                                    }
+                                    // Careful, this is a blocking call. Might
+                                    // be easier to find queue len bugs with this.
+                                    let pub2_rx = self.pub2_rx.as_ref().unwrap();
+                                    pub2_rx.recv().expect("Pub2 Rx Recv Error")
                                 };
                                 // Add next packet id to message and publish
                                 let PacketIdentifier(pkid) = self._next_pkid();
@@ -269,9 +259,9 @@ impl Handler for MqttClient {
                 }
             }
             MioNotification::Sub => {
-                let topics = match self.sub_rx {
-                    Some(ref sub_rx) => sub_rx.recv().unwrap(),
-                    None => panic!("Expected a subscribe recieve channel"),
+                let topics = {
+                    let sub_rx = self.sub_rx.as_ref().unwrap();
+                    sub_rx.recv().expect("Sub Rx Recv Error")
                 };
                 self.subscriptions.push_back(topics.clone());
                 let _ = self._subscribe(topics);
@@ -287,10 +277,8 @@ impl Handler for MqttClient {
             }
             MioNotification::Incoming => {
                 let packet = {
-                    match self.incoming_rx {
-                        Some(ref incoming_rx) => incoming_rx.recv().unwrap(),
-                        None => panic!("No incoming recv channel"),
-                    }
+                    let incoming_rx = self.incoming_rx.as_ref().unwrap();
+                    incoming_rx.recv().expect("Incoming Rx Recv Error")
                 };
                 self.STATE_handle_packet(&packet, event_loop);
             }
@@ -309,21 +297,13 @@ impl Handler for MqttClient {
                 // packets are sent (_try_reconnect) but broker closed the connection without
                 // sending CONNACK. Broker might be expecting TLS or username & password
                 if self.initial_connect == true {
-                    match self.connsync_tx {
-                        Some(ref connsync_tx) => {
-                            connsync_tx.send(MqttStatus::Failed).expect("Send failed");
-                            event_loop.shutdown();
-                        }
-                        None => panic!("No connsync channel"),
-                    }
+                    let connsync_tx = self.connsync_tx.as_ref().unwrap();
+                    connsync_tx.send(MqttStatus::Failed).expect("ConnSync Tx Send Error");
+                    event_loop.shutdown();
                 } else {
-                    match self.streamupdate_tx {
-                        Some(ref streamupdate_tx) => {
-                            let stream = self.stream.try_clone().expect("Couldn't clone network stream");
-                            streamupdate_tx.send(stream).expect("Couldn't send updated stream");
-                        }
-                        None => panic!("No stream update channel"),
-                    }
+                    let streamupdate_tx = self.streamupdate_tx.as_ref().unwrap();
+                    let stream = self.stream.try_clone().expect("Stream Clone Error");
+                    streamupdate_tx.send(stream).expect("StreamUpdate Tx Send Error");
                 }
             }
             MioNotification::Shutdown => {
@@ -521,13 +501,9 @@ impl MqttClient {
                     self.state = MqttState::Connected;
                     self.no_of_reconnections += 1;
                     if self.initial_connect == true {
-                        match self.connsync_tx {
-                            Some(ref connsync_tx) => {
-                                connsync_tx.send(MqttStatus::Success).expect("Send failed");
-                                self.initial_connect = false;
-                            }
-                            None => panic!("No connsync channel"),
-                        }
+                        let connsync_tx = self.connsync_tx.as_ref().unwrap();
+                        connsync_tx.send(MqttStatus::Success).expect("ConnSync Tx Send Error");
+                        self.initial_connect = false;
                     } else {
                         // Resubscribe after a reconnection.
                         for s in self.subscriptions.clone() {
@@ -536,18 +512,12 @@ impl MqttClient {
                         // Publisher won't stop even when disconnected until channel is full.
                         // This notifies notify() to publish channel pending messages after
                         // reconnect.
-                        match self.mionotify_tx {
-                            Some(ref mionotify_tx) => {
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect))
-                                    .expect("Send failed");
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect))
-                                    .expect("Send failed");
-                            }
-                            None => panic!("No mionotify channel"),
-                        }
+                        let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
+                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect)).expect("MioNotify Tx Send Error");
+                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect)).expect("MioNotify Tx Send Error");
                     }
 
-                    // TODO: Bug?? Multiple timers after restart?
+                    // TODO: Bug?? Multiple timers after restart? Doesn't seem so based on pings
                     event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
                         .unwrap();
                     if let Some(keep_alive) = self.opts.keep_alive {
@@ -571,27 +541,17 @@ impl MqttClient {
                     // Send only for notify() to recover if channel is blocked.
                     // Blocking = true is set during publish if pub q len is more than desired.
                     if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block == true {
-                        match self.mionotify_tx {
-                            Some(ref mionotify_tx) => {
-                                self.should_qos1_block = false;
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown))
-                                    .expect("Send failed");
-                            }
-                            None => panic!("No mionotify channel"),
-                        }
+                        let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
+                        self.should_qos1_block = false;
+                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("MioNotify Tx Send Error");
                     }
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
                 HandlePacket::PubRec => {
                     if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block == true {
-                        match self.mionotify_tx {
-                            Some(ref mionotify_tx) => {
-                                self.should_qos2_block = false;
-                                mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown))
-                                    .expect("Send failed");
-                            }
-                            None => panic!("No mionotify channel"),
-                        }
+                        let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
+                        self.should_qos2_block = false;
+                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("MioNotify Tx Send Error");
                     }
                 }
                 _ => info!("packet handler says that he doesn't care"),
