@@ -1,4 +1,4 @@
-[![](https://travis-ci.org/Ather-Energy/RuMqtt.svg?branch=mio2)](https://travis-ci.org/Ather-Energy/RuMqtt)
+[![](https://travis-ci.org/Ather-Energy/RuMqtt.svg?branch=master)](https://travis-ci.org/Ather-Energy/RuMqtt)
 [![](http://meritbadge.herokuapp.com/rumqtt)](https://crates.io/crates/rumqtt)
 
 A pure rust mqtt client.
