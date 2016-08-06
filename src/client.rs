@@ -295,26 +295,34 @@ impl Handler for MqttClient {
             }
             MioNotification::Reconnect => {
                 debug!("{:?}", self.state);
-                match self.state {
-                    MqttState::Connected => {
-                        self.state = MqttState::Disconnected;
-                        loop {
-                            match self._try_reconnect() {
-                                Ok(_) => break,
-                                Err(_) => continue,
-                            }
-                        }
+
+                self.state = MqttState::Disconnected;
+                loop {
+                    match self._try_reconnect() {
+                        Ok(_) => break,
+                        Err(_) => continue,
                     }
-                    _ => debug!("Mqtt connection not established"),
                 }
-                // TODO: Change states properly in one location
-                self.state = MqttState::Handshake;
-                match self.streamupdate_tx {
-                    Some(ref streamupdate_tx) => {
-                        let stream = self.stream.try_clone().expect("Couldn't clone network stream");
-                        streamupdate_tx.send(stream).expect("Couldn't send updated stream");
+
+                // Handles the case where initial tcp connect is successful and mqtt connect
+                // packets are sent (_try_reconnect) but broker closed the connection without
+                // sending CONNACK. Broker might be expecting TLS or username & password
+                if self.initial_connect == true {
+                    match self.connsync_tx {
+                        Some(ref connsync_tx) => {
+                            connsync_tx.send(MqttStatus::Failed).expect("Send failed");
+                            event_loop.shutdown();
+                        }
+                        None => panic!("No connsync channel"),
                     }
-                    None => panic!("No stream update channel"),
+                } else {
+                    match self.streamupdate_tx {
+                        Some(ref streamupdate_tx) => {
+                            let stream = self.stream.try_clone().expect("Couldn't clone network stream");
+                            streamupdate_tx.send(stream).expect("Couldn't send updated stream");
+                        }
+                        None => panic!("No stream update channel"),
+                    }
                 }
             }
             MioNotification::Shutdown => {
@@ -439,7 +447,6 @@ impl MqttClient {
 
         // Initial Mqtt connection
         try!(self._try_reconnect());
-        self.state = MqttState::Handshake;
 
         let reader_stream = self.stream.try_clone().expect("Couldn't clone the stream");
         try!(streamupdate_tx.send(reader_stream));
@@ -458,6 +465,7 @@ impl MqttClient {
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn(move || {
             'update_stream: loop {
+                thread::sleep(Duration::new(2, 0));
                 let mut stream = streamupdate_rx.recv().expect("Stream update channel error");
                 loop {
                     let packet = match VariablePacket::decode(&mut stream) {
@@ -505,7 +513,7 @@ impl MqttClient {
         let handle = self.handle_packet(packet);
         if let Ok(p) = handle {
             match p {
-                // Mqtt connection established, start the timers
+                // Mqtt connection established, release (publisher, subscriber) & start the timers
                 HandlePacket::ConnAck => {
                     self.state = MqttState::Connected;
                     self.no_of_reconnections += 1;
@@ -812,6 +820,8 @@ impl MqttClient {
                 };
                 self.stream = stream;
                 try!(self._connect());
+                // TODO: Change states properly in one location
+                self.state = MqttState::Handshake;
                 Ok(())
             }
         }

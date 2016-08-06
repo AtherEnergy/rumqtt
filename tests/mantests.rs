@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
+#[ignore]
 #[test]
 fn send_ping_reqs_in_time() {
     env_logger::init().unwrap();
@@ -52,7 +53,7 @@ fn qos1_pub_block() {
 
     let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        // println!("message --> {:?}", message);
+        println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/block", QoS::Level1)]).expect("Subcription failure");
@@ -67,7 +68,7 @@ fn qos1_pub_block() {
         thread::sleep(Duration::new(0, 10000));
     }
 
-    thread::sleep(Duration::new(10, 0));
+    thread::sleep(Duration::new(20, 0));
     println!("QoS 1 Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(10 == final_count.load(Ordering::SeqCst));
 }
