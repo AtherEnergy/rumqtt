@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::thread;
 use tls::{NetworkStream, TlsStream};
 use std::sync::mpsc;
+use jobsteal;
 
 use error::{Error, Result};
 use message::Message;
@@ -394,6 +395,8 @@ impl MqttClient {
     pub fn message_callback<F>(mut self, callback: F) -> Self
         where F: Fn(Message) + Send + Sync + 'static
     {
+        // Build a pool with 4 threads, including this one.
+        let mut pool = jobsteal::make_pool(4).expect("couldn't create thread pool");
         self.callback = Some(Arc::new(Box::new(callback)));
         self
     }
