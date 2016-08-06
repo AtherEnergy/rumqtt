@@ -79,13 +79,11 @@ fn basic() {
 
 #[test]
 fn reconnection() {
-    // Create client in clean_session = false for broker to
-    // remember your subscription after disconnect.
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-reconnect-client")
-                                    .set_clean_session(false)
                                     .broker("broker.hivemq.com:1883");
 
     // Message count
@@ -95,9 +93,9 @@ fn reconnection() {
 
     // Connects to a broker and returns a `Publisher` and `Subscriber`
     let (publisher, subscriber) = MqttClient::new(client_options).
-    message_callback(move |_| {
+    message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        // println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     // Register message callback and subscribe
@@ -224,7 +222,7 @@ fn qos0_stress_publish() {
 
     let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        // println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos0/stress", QoS::Level2)]).expect("Subcription failure");
@@ -259,7 +257,7 @@ fn qos1_stress_publish() {
 
     let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        // println!("message --> {:?}", message);
+        //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
     subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");

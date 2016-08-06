@@ -62,6 +62,7 @@ pub enum MioNotification {
     Disconnect,
     Shutdown,
     Incoming,
+    Reconnect,
 }
 
 enum HandlePacket {
@@ -279,7 +280,6 @@ impl Handler for MqttClient {
                 match self.state {
                     MqttState::Connected => {
                         let _ = self._disconnect();
-                        self.state = MqttState::Disconnected;
                     }
                     _ => debug!("Mqtt connection not established"),
                 }
@@ -292,6 +292,30 @@ impl Handler for MqttClient {
                     }
                 };
                 self.STATE_handle_packet(&packet, event_loop);
+            }
+            MioNotification::Reconnect => {
+                debug!("{:?}", self.state);
+                match self.state {
+                    MqttState::Connected => {
+                        self.state = MqttState::Disconnected;
+                        loop {
+                            match self._try_reconnect() {
+                                Ok(_) => break,
+                                Err(_) => continue,
+                            }
+                        }
+                    }
+                    _ => debug!("Mqtt connection not established"),
+                }
+                // TODO: Change states properly in one location
+                self.state = MqttState::Handshake;
+                match self.streamupdate_tx {
+                    Some(ref streamupdate_tx) => {
+                        let stream = self.stream.try_clone().expect("Couldn't clone network stream");
+                        streamupdate_tx.send(stream).expect("Couldn't send updated stream");
+                    }
+                    None => panic!("No stream update channel"),
+                }
             }
             MioNotification::Shutdown => {
                 let _ = self.stream.shutdown(Shutdown::Both);
@@ -440,7 +464,12 @@ impl MqttClient {
                         // @ Decoded packet successfully.
                         Ok(pk) => pk,
                         Err(err) => {
-                            error!("Error in receiving packet {:?}", err); 
+                            // Socket error are readily available here as soon as
+                            // disconnection happens. So it might be right for this
+                            // thread to ask for reconnection rather than reconnecting
+                            // during write failures
+                            error!("Error in receiving packet {:?}", err);
+                            mionotify_tx.send(MioNotification::Reconnect).expect("Unable to Notify");
                             break;
                         }
                         // Err(err) => {
@@ -706,7 +735,10 @@ impl MqttClient {
                 }
             }
 
-            MqttState::Disconnected => panic!("Invalid state while handling packets"),
+            MqttState::Disconnected => {
+                error!("Invalid (Disconnected) state while handling packets");
+                Ok(HandlePacket::Invalid)
+            }
         }
     }
 
@@ -763,8 +795,8 @@ impl MqttClient {
             // TODO: Implement
             None => panic!("To be implemented"),
             Some(dur) => {
-                if self.initial_connect {
-                    info!("  Will try Reconnect in {} seconds", dur);
+                if !self.initial_connect {
+                    error!("  Will try Reconnect in {} seconds", dur);
                     thread::sleep(Duration::new(dur as u64, 0));
                 }
                 let stream = try!(TcpStream::connect(&self.addr));
