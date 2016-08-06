@@ -127,6 +127,7 @@ pub struct MqttClient {
 
     /// On message callback
     pub callback: Option<Arc<SendableFn>>,
+    pub pool: Option<jobsteal::Pool>,
 }
 
 // TODO: Use Mio::Handler, Unit test for state machine
@@ -366,6 +367,7 @@ impl MqttClient {
 
             // callback
             callback: None,
+            pool: None,
         }
     }
     // Note: Setting callback before subscriber & publisher
@@ -376,7 +378,8 @@ impl MqttClient {
         where F: Fn(Message) + Send + Sync + 'static
     {
         // Build a pool with 4 threads, including this one.
-        let mut pool = jobsteal::make_pool(4).expect("couldn't create thread pool");
+        let pool = jobsteal::make_pool(4).expect("couldn't create thread pool");
+        self.pool = Some(pool);
         self.callback = Some(Arc::new(Box::new(callback)));
         self
     }
@@ -531,7 +534,9 @@ impl MqttClient {
 
                         // Have a thread pool to handle message callbacks. Take the threadpool as a
                         // parameter
-                        thread::spawn(move || message_callback(*m));
+                        let pool = self.pool.as_mut().unwrap();
+                        pool.submit(move || message_callback(*m));
+                        //thread::spawn(move || message_callback(*m));
                     }
                 }
                 // Sending a dummy notification saying tha queue size has reduced
@@ -1020,6 +1025,7 @@ impl MqttClient {
         Ok(buf)
     }
 
+    //http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
     #[inline]
     fn _next_pkid(&mut self) -> PacketIdentifier {
         let PacketIdentifier(pkid) = self.last_pkid;
