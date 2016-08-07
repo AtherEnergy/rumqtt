@@ -29,10 +29,9 @@ pub enum Error {
     TopicFilter,
     NoReconnectTry,
     MqttPacket,
-    MioNotify,
     Ssl,
     EventLoop,
-    MioNotifyError,
+    MioNotify,
     Read,
 }
 
@@ -61,5 +60,5 @@ impl<'a, T: Packet<'a>> From<PacketError<'a, T>> for Error {
 }
 
 impl<T> From<mio::NotifyError<T>> for Error {
-    fn from(_: mio::NotifyError<T>) -> Error { Error::MioNotifyError }
+    fn from(_: mio::NotifyError<T>) -> Error { Error::MioNotify }
 }

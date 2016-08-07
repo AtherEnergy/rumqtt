@@ -204,7 +204,7 @@ impl Handler for MqttClient {
 
                         // Receive from publish channel only when outgoing pub queue
                         // length is < max
-                        if self.should_qos1_block == false {
+                        if !self.should_qos1_block {
                             loop {
                                 debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
                                 // Before
@@ -235,7 +235,7 @@ impl Handler for MqttClient {
 
                         // Receive from publish channel only when outgoing pub queue
                         // length is < max
-                        if self.should_qos2_block == false {
+                        if !self.should_qos2_block {
                             loop {
                                 debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
                                 // Before
@@ -297,7 +297,7 @@ impl Handler for MqttClient {
                 // Handles the case where initial tcp connect is successful and mqtt connect
                 // packets are sent (_try_reconnect) but broker closed the connection without
                 // sending CONNACK. Broker might be expecting TLS or username & password
-                if self.initial_connect == true {
+                if self.initial_connect {
                     let connsync_tx = self.connsync_tx.as_ref().unwrap();
                     connsync_tx.send(MqttStatus::Failed).expect("ConnSync Tx Send Error");
                     event_loop.shutdown();
@@ -451,7 +451,6 @@ impl MqttClient {
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn(move || {
             'update_stream: loop {
-                thread::sleep(Duration::new(2, 0));
                 let mut stream = streamupdate_rx.recv().expect("Stream update channel error");
                 loop {
                     let packet = match VariablePacket::decode(&mut stream) {
@@ -464,7 +463,7 @@ impl MqttClient {
                             // during write failures
                             error!("Error in receiving packet {:?}", err);
                             mionotify_tx.send(MioNotification::Reconnect).expect("Unable to Notify");
-                            break;
+                            continue 'update_stream;
                         }
                         // Err(err) => {
                         //     // maybe size=0 while reading indicating socket
@@ -503,7 +502,7 @@ impl MqttClient {
                 HandlePacket::ConnAck => {
                     self.state = MqttState::Connected;
                     self.no_of_reconnections += 1;
-                    if self.initial_connect == true {
+                    if self.initial_connect {
                         let connsync_tx = self.connsync_tx.as_ref().unwrap();
                         connsync_tx.send(MqttStatus::Success).expect("ConnSync Tx Send Error");
                         self.initial_connect = false;
@@ -536,7 +535,7 @@ impl MqttClient {
                         // parameter
                         let pool = self.pool.as_mut().unwrap();
                         pool.submit(move || message_callback(*m));
-                        //thread::spawn(move || message_callback(*m));
+                        // thread::spawn(move || message_callback(*m));
                     }
                 }
                 // Sending a dummy notification saying tha queue size has reduced
@@ -545,7 +544,7 @@ impl MqttClient {
                     // leading to dup notify.
                     // Send only for notify() to recover if channel is blocked.
                     // Blocking = true is set during publish if pub q len is more than desired.
-                    if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block == true {
+                    if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block {
                         let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
                         self.should_qos1_block = false;
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("MioNotify Tx Send Error");
@@ -553,7 +552,7 @@ impl MqttClient {
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
                 HandlePacket::PubRec => {
-                    if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block == true {
+                    if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block {
                         let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
                         self.should_qos2_block = false;
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("MioNotify Tx Send Error");
@@ -779,7 +778,7 @@ impl MqttClient {
                 let stream = match self.opts.tls {
                     Some(ref tls) => {
                         let config = try!(TlsStream::make_config(tls));
-                        let host = self.opts.addr.split(":");
+                        let host = self.opts.addr.split(':');
                         let host: Vec<&str> = host.collect();
                         // println!("@@@@ {:?}", host);
                         NetworkStream::Tls(TlsStream::new(stream, host[0], config))
@@ -801,27 +800,19 @@ impl MqttClient {
                 let timeout = self.opts.queue_timeout as i64;
 
                 // Republish QoS 1 outgoing publishes
-                loop {
-                    if let Some(index) = self.outgoing_pub
-                        .iter()
-                        .position(|ref x| time::get_time().sec - x.0 > timeout) {
-                        let message = self.outgoing_pub.remove(index).expect("No such entry");
-                        let _ = self._publish(*message.1);
-                    } else {
-                        break;
-                    }
+                while let Some(index) = self.outgoing_pub
+                    .iter()
+                    .position(|ref x| time::get_time().sec - x.0 > timeout) {
+                    let message = self.outgoing_pub.remove(index).expect("No such entry");
+                    let _ = self._publish(*message.1);
                 }
 
                 // Republish QoS 2 outgoing records
-                loop {
-                    if let Some(index) = self.outgoing_rec
-                        .iter()
-                        .position(|ref x| time::get_time().sec - x.0 > timeout) {
-                        let message = self.outgoing_rec.remove(index).expect("No such entry");
-                        let _ = self._publish(*message.1);
-                    } else {
-                        break;
-                    }
+                while let Some(index) = self.outgoing_rec
+                    .iter()
+                    .position(|ref x| time::get_time().sec - x.0 > timeout) {
+                    let message = self.outgoing_rec.remove(index).expect("No such entry");
+                    let _ = self._publish(*message.1);
                 }
 
                 let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
@@ -859,9 +850,9 @@ impl MqttClient {
     fn _publish(&mut self, message: Message) -> Result<()> {
 
         let qos = message.qos;
-        let message_box = message.transform(Some(qos.clone()));
+        let message_box = message.transform(Some(qos));
         let topic = message.topic;
-        let ref payload = *message.payload;
+        let payload = &*message.payload;
         let retain = message.retain;
 
         let publish_packet = try!(self._generate_publish_packet(topic, qos, retain, payload.clone()));
@@ -881,7 +872,8 @@ impl MqttClient {
                 }
             }
         }
-        //debug!("       Publish {:?} {:?} > {} bytes", message.qos, topic.clone().to_string(), message.payload.len());
+        // debug!("       Publish {:?} {:?} > {} bytes", message.qos,
+        // topic.clone().to_string(), message.payload.len());
 
         // TODO: print error for failure here
         try!(self._write_packet(publish_packet));
@@ -1027,7 +1019,8 @@ impl MqttClient {
         Ok(buf)
     }
 
-    //http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
+    // http://stackoverflow.
+    // com/questions/11115364/mqtt-messageid-practical-implementation
     #[inline]
     fn _next_pkid(&mut self) -> PacketIdentifier {
         let PacketIdentifier(pkid) = self.last_pkid;
