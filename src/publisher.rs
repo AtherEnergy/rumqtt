@@ -33,6 +33,7 @@ impl Publisher {
             topic: topic,
             retain: self.retain,
             qos: qos_pkid,
+            //Optimizes clones
             payload: Arc::new(payload),
         };
 

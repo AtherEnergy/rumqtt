@@ -857,29 +857,31 @@ impl MqttClient {
     }
 
     fn _publish(&mut self, message: Message) -> Result<()> {
+
         let qos = message.qos;
-        let message = message.transform(Some(qos));
-        let payload = &*message.payload;
+        let message_box = message.transform(Some(qos.clone()));
+        let topic = message.topic;
+        let ref payload = *message.payload;
         let retain = message.retain;
 
-        let publish_packet = try!(self._generate_publish_packet(message.topic.clone(), qos.clone(), retain, payload.clone()));
+        let publish_packet = try!(self._generate_publish_packet(topic, qos, retain, payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
-                self.outgoing_pub.push_back((time::get_time().sec, message.clone()));
+                self.outgoing_pub.push_back((time::get_time().sec, message_box.clone()));
                 if self.outgoing_pub.len() >= self.opts.pub_q_len as usize {
                     self.should_qos1_block = true;
                 }
             }
             QoSWithPacketIdentifier::Level2(_) => {
-                self.outgoing_rec.push_back((time::get_time().sec, message.clone()));
+                self.outgoing_rec.push_back((time::get_time().sec, message_box.clone()));
                 if self.outgoing_rec.len() >= self.opts.pub_q_len as usize {
                     self.should_qos2_block = true;
                 }
             }
         }
-        debug!("       Publish {:?} {:?} > {} bytes", message.qos, message.topic.to_string(), message.payload.len());
+        //debug!("       Publish {:?} {:?} > {} bytes", message.qos, topic.clone().to_string(), message.payload.len());
 
         // TODO: print error for failure here
         try!(self._write_packet(publish_packet));
@@ -1048,5 +1050,5 @@ impl MqttClient {
 // becomes full, publishes are blocked
 // 4. No locks. Fast and efficient because of Rust and Mio
 // 5. Callback only for subscibed incoming message. Callbacks are executed
-// using threadpool (mioco)
+// using threadpool
 //
