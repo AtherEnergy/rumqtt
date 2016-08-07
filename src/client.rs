@@ -48,12 +48,13 @@ pub enum MqttStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PubNotify {
     QoS0,
+    QoS0Reconnect,
     QoS1,
     QoS1QueueDown,
     QoS1Reconnect,
-    QoS2Reconnect,
     QoS2,
     QoS2QueueDown,
+    QoS2Reconnect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,10 +95,19 @@ pub struct MqttClient {
     pub last_pkid: PacketIdentifier,
     pub await_ping: bool,
     pub initial_connect: bool,
+    // no. of pending messages in qos0 pub channel
+    pub pub0_channel_pending: u32,
+    // no. of pending messages in qos1 pub channel
     pub pub1_channel_pending: u32,
+    // no. of pending messages in qos2 pub channel
     pub pub2_channel_pending: u32,
+    // stop reading from all the publish channels when disconnected
+    pub disconnect_block: bool,
+    // stop reading from pub1 channel when qos1 queue is full(didn't get acks)
     pub should_qos1_block: bool,
+    // stop reading from pub2 channel when qos2 queue is full
     pub should_qos2_block: bool,
+    // no. of successful reconnections
     pub no_of_reconnections: u32,
 
     // Channels
@@ -187,12 +197,32 @@ impl Handler for MqttClient {
         match notification_type {
             MioNotification::Pub(p) => {
                 match p {
-                    PubNotify::QoS0 => {
-                        let message = {
-                            let pub0_rx = self.pub0_rx.as_ref().unwrap();
-                            pub0_rx.recv().expect("Pub0 Rx Recv Error")
-                        };
-                        let _ = self._publish(message);
+                    // FIX THIS: All the QoS0 publishes before listener thread notifies
+                    // event loop (this) that connection is lost (where disconnect_block is set)
+                    // are lost
+                    PubNotify::QoS0 |
+                    PubNotify::QoS0Reconnect => {
+                        // Increment only if notificication is from publisher
+                        if p == PubNotify::QoS0 {
+                            self.pub0_channel_pending += 1;
+                        }
+
+                        debug!("Channel pending @@@@@ {}", self.pub0_channel_pending);
+                        // Receive from publish qos0 channel only when connected.
+                        if !self.disconnect_block {
+                            loop {
+                                if self.pub0_channel_pending == 0 {
+                                    debug!("Finished everything in channel");
+                                    break;
+                                }
+                                let message = {
+                                    let pub0_rx = self.pub0_rx.as_ref().unwrap();
+                                    pub0_rx.recv().expect("Pub0 Rx Recv Error")
+                                };
+                                let _ = self._publish(message);
+                                self.pub0_channel_pending -= 1;
+                            }
+                        }
                     }
                     PubNotify::QoS1 |
                     PubNotify::QoS1QueueDown |
@@ -202,12 +232,11 @@ impl Handler for MqttClient {
                             self.pub1_channel_pending += 1;
                         }
 
-                        // Receive from publish channel only when outgoing pub queue
-                        // length is < max
-                        if !self.should_qos1_block {
+                        debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
+                        // Receive from publish qos1 channel only when outgoing pub queue
+                        // length is < max and in connected state
+                        if !self.should_qos1_block && !self.disconnect_block {
                             loop {
-                                debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
-                                // Before
                                 if self.pub1_channel_pending == 0 {
                                     debug!("Finished everything in channel");
                                     break;
@@ -233,11 +262,11 @@ impl Handler for MqttClient {
                             self.pub2_channel_pending += 1;
                         }
 
-                        // Receive from publish channel only when outgoing pub queue
-                        // length is < max
-                        if !self.should_qos2_block {
+                        debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
+                        // Receive from publish qos2 channel only when outgoing pub queue
+                        // length is < max and in connected state
+                        if !self.should_qos2_block && !self.disconnect_block {
                             loop {
-                                debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
                                 // Before
                                 if self.pub2_channel_pending == 0 {
                                     debug!("Finished everything in channel");
@@ -287,6 +316,7 @@ impl Handler for MqttClient {
                 debug!("{:?}", self.state);
 
                 self.state = MqttState::Disconnected;
+                self.disconnect_block = true;
                 loop {
                     match self._try_reconnect() {
                         Ok(_) => break,
@@ -340,8 +370,10 @@ impl MqttClient {
             state: MqttState::Disconnected,
             initial_connect: true,
             opts: opts,
+            pub0_channel_pending: 0,
             pub1_channel_pending: 0,
             pub2_channel_pending: 0,
+            disconnect_block: false,
             should_qos1_block: false,
             should_qos2_block: false,
             no_of_reconnections: 0,
@@ -461,6 +493,8 @@ impl MqttClient {
                             // disconnection happens. So it might be right for this
                             // thread to ask for reconnection rather than reconnecting
                             // during write failures
+                            // UPDATE: Lot of publishes are being written by the time this notified
+                            // the eventloop thread. Setting disconnect_block = true during write failure
                             error!("Error in receiving packet {:?}", err);
                             mionotify_tx.send(MioNotification::Reconnect).expect("Unable to Notify");
                             continue 'update_stream;
@@ -511,10 +545,15 @@ impl MqttClient {
                         for s in self.subscriptions.clone() {
                             let _ = self._subscribe(s);
                         }
+                        // Retransmit QoS1,2 queues after reconnection. Clears the queue by the time
+                        // QoS*Reconnect notifications are sent to read pending messages in the channel
+                        self._force_retransmit();
                         // Publisher won't stop even when disconnected until channel is full.
                         // This notifies notify() to publish channel pending messages after
                         // reconnect.
                         let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
+                        self.disconnect_block = false;
+                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS0Reconnect)).expect("MioNotify Tx Send Error");
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect)).expect("MioNotify Tx Send Error");
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect)).expect("MioNotify Tx Send Error");
                     }
@@ -827,6 +866,36 @@ impl MqttClient {
         }
     }
 
+    // Spec says that client (for QoS > 0, clean session) should retransmit all the
+    // unacked messages after reconnection. Instead of waiting for retransmit
+    // timeout
+    // to kickin, this methods retransmits everthing in the queue immediately
+    // NOTE: outgoing_rels are handled in _try_retransmit. Sending duplicate pubrels
+    // isn't a problem (I guess ?). Broker will just resend pubcomps
+    fn _force_retransmit(&mut self) {
+        if self.opts.clean_session {
+            // We are anyway going to clear the queues if they aren't empty
+            self.should_qos1_block = false;
+            self.should_qos2_block = false;
+            match self.state {
+                MqttState::Connected => {
+                    for index in 0..self.outgoing_pub.len() {
+                        let message = self.outgoing_pub.remove(index).expect("No such entry");
+                        let _ = self._publish(*message.1);
+                    }
+
+                    for index in 0..self.outgoing_rec.len() {
+                        let message = self.outgoing_rec.remove(index).expect("No such entry");
+                        let _ = self._publish(*message.1);
+                    }
+                }
+                MqttState::Disconnected | MqttState::Handshake => {
+                    error!("I won't force republish. Client isn't in connected state")
+                }
+            }
+        }
+    }
+
     fn ping(&mut self) -> Result<()> {
         let ping = try!(self._generate_pingreq_packet());
         self.await_ping = true;
@@ -912,8 +981,16 @@ impl MqttClient {
 
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
-        // broker.hivemq.com!("@@@ WRITING PACKET\n{:?}", packet);
-        try!(self.stream.write_all(&packet));
+        // debug!("@@@ WRITING PACKET\n{:?}", packet);
+        match self.stream.write_all(&packet) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("{:?}", e);
+                // disconnect block in case of socket errors. verify
+                // self.disconnect_block = true
+                return Err(e.into());
+            }
+        };
         Ok(())
     }
 
