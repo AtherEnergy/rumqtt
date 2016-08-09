@@ -15,7 +15,8 @@ use std::sync::Arc;
 use std::thread;
 use tls::{NetworkStream, TlsStream};
 use std::sync::mpsc;
-use jobsteal;
+//use jobsteal;
+use threadpool::ThreadPool;
 
 use error::{Error, Result};
 use message::Message;
@@ -137,7 +138,7 @@ pub struct MqttClient {
 
     /// On message callback
     pub callback: Option<Arc<SendableFn>>,
-    pub pool: Option<jobsteal::Pool>,
+    pub pool: Option<ThreadPool>,
 }
 
 // TODO: Use Mio::Handler, Unit test for state machine
@@ -410,7 +411,7 @@ impl MqttClient {
         where F: Fn(Message) + Send + Sync + 'static
     {
         // Build a pool with 4 threads, including this one.
-        let pool = jobsteal::make_pool(4).expect("couldn't create thread pool");
+        let pool = ThreadPool::new(4);
         self.pool = Some(pool);
         self.callback = Some(Arc::new(Box::new(callback)));
         self
@@ -573,7 +574,7 @@ impl MqttClient {
                         // Have a thread pool to handle message callbacks. Take the threadpool as a
                         // parameter
                         let pool = self.pool.as_mut().unwrap();
-                        pool.submit(move || message_callback(*m));
+                        pool.execute(move || message_callback(*m));
                         // thread::spawn(move || message_callback(*m));
                     }
                 }
