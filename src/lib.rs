@@ -68,6 +68,7 @@ mod publisher;
 mod subscriber;
 mod client;
 
+pub use error::{Error, Result};
 pub use clientoptions::MqttOptions;
 pub use mqtt::QualityOfService as QoS;
 pub use client::MqttClient;
