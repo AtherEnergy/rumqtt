@@ -597,7 +597,7 @@ impl MqttClient {
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("MioNotify Tx Send Error");
                     }
                 }
-                _ => info!("packet handler says that he doesn't care"),
+                _ => debug!("packet handler says that he doesn't care"),
             }
         } else if let Err(err) = handle {
             error!("Error handling the packet {:?}", err);
