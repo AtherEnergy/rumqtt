@@ -15,14 +15,13 @@ use std::sync::Arc;
 use std::thread;
 use tls::{NetworkStream, TlsStream};
 use std::sync::mpsc;
-//use jobsteal;
 use threadpool::ThreadPool;
 
 use error::{Error, Result};
 use message::Message;
 use clientoptions::MqttOptions;
 use publisher::Publisher;
-use subscriber::{Subscriber, SendableFn};
+use subscriber::Subscriber;
 
 const MIO_PING_TIMER: u64 = 123;
 const MIO_QUEUE_TIMER: u64 = 321;
@@ -71,8 +70,8 @@ pub enum MioNotification {
 enum HandlePacket {
     ConnAck,
     Publish(Box<Message>),
-    PubAck,
-    PubRec,
+    PubAck(u16),
+    PubRec(u16),
     // PubRel,
     PubComp,
     SubAck,
@@ -82,6 +81,8 @@ enum HandlePacket {
     Invalid,
 }
 
+pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
+pub type PublishSendableFn = Box<Fn(u16) + Send + Sync>;
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
@@ -137,7 +138,9 @@ pub struct MqttClient {
     pub subscriptions: VecDeque<Vec<(TopicFilter, QualityOfService)>>,
 
     /// On message callback
-    pub callback: Option<Arc<SendableFn>>,
+    pub message_callback: Option<Arc<MessageSendableFn>>,
+    /// On publish callback
+    pub publish_callback: Option<Arc<PublishSendableFn>>,
     pub pool: Option<ThreadPool>,
 }
 
@@ -398,22 +401,45 @@ impl MqttClient {
             // Subscriptions
             subscriptions: VecDeque::new(),
 
-            // callback
-            callback: None,
+            // Callbacks
+            message_callback: None,
+            publish_callback: None,
+
+            // Threadpool
             pool: None,
         }
     }
+    
     // Note: Setting callback before subscriber & publisher
     // are created ensures that message callbacks are registered
     // before subscription & you don't need to pass callbacks through
     // channels (simplifies code)
+
+    /// Set the message callback.  This is called when a message is 
+    /// received from the broker.
     pub fn message_callback<F>(mut self, callback: F) -> Self
         where F: Fn(Message) + Send + Sync + 'static
     {
-        // Build a pool with 4 threads, including this one.
-        let pool = ThreadPool::new(4);
-        self.pool = Some(pool);
-        self.callback = Some(Arc::new(Box::new(callback)));
+        // Build a pool with 4 threads
+        if self.pool.is_none() {
+            let pool = ThreadPool::new(4);
+            self.pool = Some(pool);
+        }
+        self.message_callback = Some(Arc::new(Box::new(callback)));
+        self
+    }
+
+    /// Set the publish callback.  This is called when a published
+    /// message has been sent to the broker successfully. 
+    pub fn publish_callback<F>(mut self, callback: F) -> Self
+        where F: Fn(u16) + Send + Sync + 'static
+    {
+        // Build a pool with 4 threads
+        if self.pool.is_none() {
+            let pool = ThreadPool::new(4);
+            self.pool = Some(pool);
+        }
+        self.publish_callback = Some(Arc::new(Box::new(callback)));
         self
     }
 
@@ -568,18 +594,15 @@ impl MqttClient {
 
                 }
                 HandlePacket::Publish(m) => {
-                    if let Some(ref message_callback) = self.callback {
+                    if let Some(ref message_callback) = self.message_callback {
                         let message_callback = message_callback.clone();
 
-                        // Have a thread pool to handle message callbacks. Take the threadpool as a
-                        // parameter
                         let pool = self.pool.as_mut().unwrap();
                         pool.execute(move || message_callback(*m));
-                        // thread::spawn(move || message_callback(*m));
                     }
                 }
                 // Sending a dummy notification saying tha queue size has reduced
-                HandlePacket::PubAck => {
+                HandlePacket::PubAck(pkid) => {
                     // Don't notify everytime q len is < max. This will always be true initially
                     // leading to dup notify.
                     // Send only for notify() to recover if channel is blocked.
@@ -589,13 +612,27 @@ impl MqttClient {
                         self.should_qos1_block = false;
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("MioNotify Tx Send Error");
                     }
+
+                    if let Some(ref publish_callback) = self.publish_callback {
+                        let publish_callback = publish_callback.clone();
+
+                        let pool = self.pool.as_mut().unwrap();
+                        pool.execute(move || publish_callback(pkid));
+                    }
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
-                HandlePacket::PubRec => {
+                HandlePacket::PubRec(pkid) => {
                     if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block {
                         let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
                         self.should_qos2_block = false;
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("MioNotify Tx Send Error");
+                    }
+
+                    if let Some(ref publish_callback) = self.publish_callback {
+                        let publish_callback = publish_callback.clone();
+
+                        let pool = self.pool.as_mut().unwrap();
+                        pool.execute(move || publish_callback(pkid));
                     }
                 }
                 _ => debug!("packet handler says that he doesn't care"),
@@ -662,7 +699,7 @@ impl MqttClient {
                             }
                         };
                         debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
-                        Ok(HandlePacket::PubAck)
+                        Ok(HandlePacket::PubAck(pkid))
                     }
 
                     // @ Receives publish packet
@@ -693,7 +730,7 @@ impl MqttClient {
 
                         try!(self._pubrel(pkid));
                         self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
-                        Ok(HandlePacket::PubRec)
+                        Ok(HandlePacket::PubRec(pkid))
                     }
 
                     // @ Broker knows that client has the message
@@ -787,7 +824,7 @@ impl MqttClient {
                 };
 
                 try!(self._pubrec(pkid));
-                Ok(HandlePacket::PubRec)
+                Ok(HandlePacket::PubRec(pkid))
             }
         }
     }

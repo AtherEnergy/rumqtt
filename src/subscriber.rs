@@ -4,10 +4,8 @@ use error::Result;
 use mio::*;
 use mqtt::{QualityOfService, TopicFilter};
 
-use message::Message;
 use client::MioNotification;
 
-pub type SendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct Subscriber {
     pub subscribe_tx: SyncSender<Vec<(TopicFilter, QualityOfService)>>,
     pub mionotify_tx: Sender<MioNotification>,
