@@ -1,42 +1,54 @@
 use std::net::TcpStream;
-use std::io::{self, Read, Write, BufReader};
-use std::fs::File;
+use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::net::Shutdown;
 use std::path::Path;
 
-use rustls::{self, Session};
+use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE};
+use openssl::x509::X509FileType;
+
+pub type SslStream = ssl::SslStream<TcpStream>;
+pub type SslError = ssl::error::SslError;
+
 use error::{Error, Result};
 
-pub struct TlsStream {
-    stream: TcpStream,
-    pub tls_session: rustls::ClientSession,
+pub struct SslContext {
+    pub inner: Arc<ssl::SslContext>,
 }
 
-impl TlsStream {
-    pub fn make_config<P>(cafile: P) -> Result<rustls::ClientConfig>
-        where P: AsRef<Path>
+impl SslContext {
+    pub fn ck<C,K>(cert: C, key: K) -> Result<Self>
+    where C: AsRef<Path>, K: AsRef<Path>
     {
-        let mut config = rustls::ClientConfig::new();
-        let certfile = try!(File::open(cafile));
-        let mut reader = BufReader::new(certfile);
-        config.root_store.add_pem_file(&mut reader).unwrap();
-        Ok(config)
+        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
+        try!(ctx.set_cipher_list("DEFAULT"));
+        try!(ctx.set_certificate_file(cert.as_ref(), X509FileType::PEM));
+        try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
+        ctx.set_verify(SSL_VERIFY_NONE, None);
+        Ok(SslContext { inner: Arc::new(ctx) })
     }
 
-    pub fn new(stream: TcpStream, hostname: &str, cfg: rustls::ClientConfig) -> Self {
-        let cfg = Arc::new(cfg);
-        TlsStream {
-            stream: stream,
-            // NOTE: Hostname should match to server address or else --> Decode Error
-            tls_session: rustls::ClientSession::new(&cfg, hostname),
+    pub fn ca<CA>(ca: CA) -> Result<Self>
+    where CA: AsRef<Path>
+    {
+        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
+        try!(ctx.set_cipher_list("DEFAULT"));
+        try!(ctx.set_CA_file(ca.as_ref()));
+        ctx.set_verify(SSL_VERIFY_NONE, None);
+        Ok(SslContext { inner: Arc::new(ctx) })
+    }
+
+    pub fn connect(&self, stream: TcpStream) -> Result<SslStream> {
+        match ssl::SslStream::connect(&*self.inner, stream) {
+            Ok(stream) => Ok(stream),
+            Err(err) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, err).into())
         }
     }
 }
 
 pub enum NetworkStream {
     Tcp(TcpStream),
-    Tls(TlsStream),
+    Tls(SslStream),
     None,
 }
 
@@ -44,7 +56,7 @@ impl NetworkStream {
     pub fn get_ref(&self) -> io::Result<&TcpStream> {
         match *self {
             NetworkStream::Tcp(ref s) => Ok(s),
-            NetworkStream::Tls(ref s) => Ok(&s.stream),
+            NetworkStream::Tls(ref s) => Ok(s.get_ref()),
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
@@ -52,7 +64,7 @@ impl NetworkStream {
     pub fn try_clone(&self) -> Result<Self> {
         match *self {
             NetworkStream::Tcp(ref s) => Ok(NetworkStream::Tcp(try!(s.try_clone()))),
-            NetworkStream::Tls(ref s) => Err(Error::Io(io::Error::new(io::ErrorKind::Other, "No Tls stream!"))),
+            NetworkStream::Tls(ref s) => Ok(NetworkStream::Tls(try!(s.try_clone()))),
             NetworkStream::None => Err(Error::Io(io::Error::new(io::ErrorKind::Other, "No Tls stream!"))),
         }
     }
@@ -60,7 +72,7 @@ impl NetworkStream {
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         match *self {
             NetworkStream::Tcp(ref s) => s.shutdown(how),
-            NetworkStream::Tls(ref s) => s.stream.shutdown(how),
+            NetworkStream::Tls(ref s) => s.get_ref().shutdown(how),
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
@@ -70,23 +82,7 @@ impl Read for NetworkStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
             NetworkStream::Tcp(ref mut s) => s.read(buf),
-            NetworkStream::Tls(ref mut s) => {
-                while s.tls_session.wants_read() {
-                    match s.tls_session.read_tls(&mut s.stream) {
-                        Ok(_) => {
-                            match s.tls_session.process_new_packets() {
-                                Ok(_) => (),
-                                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, format!("{:?}", e))),
-                            }
-                            while s.tls_session.wants_write() {
-                                try!(s.tls_session.write_tls(&mut s.stream));
-                            }
-                        }
-                        Err(e) => return Err(e),
-                    }
-                }
-                s.tls_session.read(buf)
-            }
+            NetworkStream::Tls(ref mut s) => s.read(buf),
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
@@ -96,13 +92,7 @@ impl Write for NetworkStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match *self {
             NetworkStream::Tcp(ref mut s) => s.write(buf),
-            NetworkStream::Tls(ref mut s) => {
-                let res = s.tls_session.write(buf);
-                while s.tls_session.wants_write() {
-                    try!(s.tls_session.write_tls(&mut s.stream));
-                }
-                res
-            }
+            NetworkStream::Tls(ref mut s) => s.write(buf),
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
@@ -110,7 +100,7 @@ impl Write for NetworkStream {
     fn flush(&mut self) -> io::Result<()> {
         match *self {
             NetworkStream::Tcp(ref mut s) => s.flush(),
-            NetworkStream::Tls(ref mut s) => s.tls_session.flush(),
+            NetworkStream::Tls(ref mut s) => s.flush(),
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
