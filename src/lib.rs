@@ -57,7 +57,7 @@ extern crate log;
 extern crate mio;
 extern crate mqtt;
 extern crate time;
-extern crate rustls;
+extern crate openssl;
 extern crate threadpool;
 
 mod error;

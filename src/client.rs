@@ -13,7 +13,7 @@ use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
 use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
-use tls::{NetworkStream, TlsStream};
+use tls::{NetworkStream, SslContext};
 use std::sync::mpsc;
 use threadpool::ThreadPool;
 
@@ -852,13 +852,15 @@ impl MqttClient {
                     thread::sleep(Duration::new(dur as u64, 0));
                 }
                 let stream = try!(TcpStream::connect(&self.addr));
-                let stream = match self.opts.tls {
-                    Some(ref tls) => {
-                        let config = try!(TlsStream::make_config(tls));
-                        let host = self.opts.addr.split(':');
-                        let host: Vec<&str> = host.collect();
-                        // println!("@@@@ {:?}", host);
-                        NetworkStream::Tls(TlsStream::new(stream, host[0], config))
+                let stream = match self.opts.ca {
+                    Some(ref ca) => {
+                        if let Some((ref crt, ref key)) = self.opts.client_cert {
+                            let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key))));
+                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                        } else {
+                            let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>));
+                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                        }
                     }
                     None => NetworkStream::Tcp(stream),
                 };

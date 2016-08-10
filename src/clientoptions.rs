@@ -17,7 +17,8 @@ pub struct MqttOptions {
     pub sub_q_len: u16,
     // wait time for ack beyond which packet(publish/subscribe) will be resent
     pub queue_timeout: u16,
-    pub tls: Option<PathBuf>,
+    pub ca: Option<PathBuf>,
+    pub client_cert: Option<(PathBuf, PathBuf)>
 }
 
 impl Default for MqttOptions {
@@ -36,7 +37,8 @@ impl Default for MqttOptions {
             pub_q_len: 50,
             sub_q_len: 5,
             queue_timeout: 60,
-            tls: None,
+            ca: None,
+            client_cert: None
         }
     }
 }
@@ -167,11 +169,21 @@ impl MqttOptions {
         self
     }
 
-    /// Set a TLS connection
-    pub fn set_tls<P>(mut self, cafile: P) -> Self
+    /// Set CA file for server authentication during TLS connection
+    pub fn set_ca<P>(mut self, cafile: P) -> Self
         where P: AsRef<Path>
     {
-        self.tls = Some(cafile.as_ref().to_path_buf());
+        self.ca = Some(cafile.as_ref().to_path_buf());
+        self
+    }
+
+    /// Set client cert and key for server to do client authentication
+    pub fn set_client_cert<P>(mut self, certfile: P, keyfile: P) -> Self
+    where P: AsRef<Path>
+    {
+        let c = certfile.as_ref().to_path_buf();
+        let k = keyfile.as_ref().to_path_buf();
+        self.client_cert = Some((c, k));
         self
     }
 
