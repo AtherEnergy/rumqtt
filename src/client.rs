@@ -852,10 +852,15 @@ impl MqttClient {
                     thread::sleep(Duration::new(dur as u64, 0));
                 }
                 let stream = try!(TcpStream::connect(&self.addr));
-                let stream = match self.opts.tls {
-                    Some(ref tls) => {
-                        let ssl_ctx = try!(SslContext::ca(tls));
-                        NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                let stream = match self.opts.ca {
+                    Some(ref ca) => {
+                        if let Some((ref crt, ref key)) = self.opts.client_cert {
+                            let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key))));
+                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                        } else {
+                            let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>));
+                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                        }
                     }
                     None => NetworkStream::Tcp(stream),
                 };

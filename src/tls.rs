@@ -17,32 +17,24 @@ pub struct SslContext {
 }
 
 impl SslContext {
-    pub fn ck<C,K>(cert: C, key: K) -> Result<Self>
-    where C: AsRef<Path>, K: AsRef<Path>
+    pub fn new<CA, C, K>(ca: CA, client_pair: Option<(C, K)>) -> Result<Self>
+    where CA: AsRef<Path>, C: AsRef<Path>, K: AsRef<Path>
     {
-        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
-        try!(ctx.set_cipher_list("DEFAULT"));
-        try!(ctx.set_certificate_file(cert.as_ref(), X509FileType::PEM));
-        try!(ctx.set_private_key_file(key.as_ref(), X509FileType::PEM));
-        ctx.set_verify(SSL_VERIFY_NONE, None);
-        Ok(SslContext { inner: Arc::new(ctx) })
-    }
-
-    pub fn ca<CA>(ca: CA) -> Result<Self>
-    where CA: AsRef<Path>
-    {
-        let mut ctx = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
+        let mut ctx: ssl::SslContext = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
         try!(ctx.set_cipher_list("DEFAULT"));
         try!(ctx.set_CA_file(ca.as_ref()));
+
+        if let Some((cert, key)) = client_pair {
+            try!(ctx.set_certificate_file(cert, X509FileType::PEM));
+            try!(ctx.set_private_key_file(key, X509FileType::PEM));
+        }
         ctx.set_verify(SSL_VERIFY_NONE, None);
         Ok(SslContext { inner: Arc::new(ctx) })
     }
 
     pub fn connect(&self, stream: TcpStream) -> Result<SslStream> {
-        match ssl::SslStream::connect(&*self.inner, stream) {
-            Ok(stream) => Ok(stream),
-            Err(err) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, err).into())
-        }
+        let ssl_stream = try!(ssl::SslStream::connect(&*self.inner, stream));
+        Ok(ssl_stream)
     }
 }
 
