@@ -26,9 +26,6 @@ script:
 - cargo build --release
 - cargo test --release -- --nocapture
 - cargo doc --no-deps
-after_script:
-- if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then cargo build --target=armv7-unknown-linux-gnueabihf
-  ; fi
 after_success:
   - test $TRAVIS_PULL_REQUEST == "false" && test $TRAVIS_BRANCH == "master" && bash docdeploy.sh
 notifications:
