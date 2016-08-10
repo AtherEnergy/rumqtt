@@ -8,9 +8,15 @@ rust:
 os:
 - linux
 - osx
+addons:
+  apt:
+    packages:
+    - gcc-arm-linux-gnueabihf
 matrix:
   allow_failures:
     - os: osx
+before_install:
+  scripts/travis_setup.sh
 install:
 - curl https://sh.rustup.rs -sSf | sh -s -- -y
 - export PATH="$HOME/.cargo/bin:$PATH"
