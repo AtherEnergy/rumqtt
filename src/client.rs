@@ -7,10 +7,9 @@ use std::io::Write;
 use std::str;
 use std::net::TcpStream;
 use mio::*;
-use mqtt::{Encodable, Decodable, QualityOfService, TopicFilter};
+use mqtt::{Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
-use mqtt::topic_name::TopicName;
 use std::sync::Arc;
 use std::thread;
 use tls::{NetworkStream, SslContext};
@@ -22,6 +21,7 @@ use message::Message;
 use clientoptions::MqttOptions;
 use publisher::Publisher;
 use subscriber::Subscriber;
+use genpack;
 
 const MIO_PING_TIMER: u64 = 123;
 const MIO_QUEUE_TIMER: u64 = 321;
@@ -409,13 +409,13 @@ impl MqttClient {
             pool: None,
         }
     }
-    
+
     // Note: Setting callback before subscriber & publisher
     // are created ensures that message callbacks are registered
     // before subscription & you don't need to pass callbacks through
     // channels (simplifies code)
 
-    /// Set the message callback.  This is called when a message is 
+    /// Set the message callback.  This is called when a message is
     /// received from the broker.
     pub fn message_callback<F>(mut self, callback: F) -> Self
         where F: Fn(Message) + Send + Sync + 'static
@@ -430,7 +430,7 @@ impl MqttClient {
     }
 
     /// Set the publish callback.  This is called when a published
-    /// message has been sent to the broker successfully. 
+    /// message has been sent to the broker successfully.
     pub fn publish_callback<F>(mut self, callback: F) -> Self
         where F: Fn(u16) + Send + Sync + 'static
     {
@@ -830,13 +830,20 @@ impl MqttClient {
     }
 
     fn _connect(&mut self) -> Result<()> {
-        let connect = try!(self._generate_connect_packet());
+        let connect = try!(genpack::generate_connect_packet(self.opts.client_id.clone(),
+                                                            self.opts.clean_session,
+                                                            self.opts.keep_alive,
+                                                            self.opts.will.clone(),
+                                                            self.opts.will_qos,
+                                                            self.opts.will_retain,
+                                                            self.opts.username.clone(),
+                                                            self.opts.password.clone()));
         try!(self._write_packet(connect));
         self._flush()
     }
 
     pub fn _disconnect(&mut self) -> Result<()> {
-        let disconnect = try!(self._generate_disconnect_packet());
+        let disconnect = try!(genpack::generate_disconnect_packet());
         try!(self._write_packet(disconnect));
         self._flush()
     }
@@ -937,7 +944,7 @@ impl MqttClient {
     }
 
     fn ping(&mut self) -> Result<()> {
-        let ping = try!(self._generate_pingreq_packet());
+        let ping = try!(genpack::generate_pingreq_packet());
         self.await_ping = true;
         try!(self._write_packet(ping));
         self._flush()
@@ -951,7 +958,7 @@ impl MqttClient {
     }
 
     fn _subscribe(&mut self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
-        let subscribe_packet = try!(self._generate_subscribe_packet(topics));
+        let subscribe_packet = try!(genpack::generate_subscribe_packet(topics));
         try!(self._write_packet(subscribe_packet));
         self._flush()
     }
@@ -964,7 +971,7 @@ impl MqttClient {
         let payload = &*message.payload;
         let retain = message.retain;
 
-        let publish_packet = try!(self._generate_publish_packet(topic, qos, retain, payload.clone()));
+        let publish_packet = try!(genpack::generate_publish_packet(topic, qos, retain, payload.clone()));
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
@@ -990,25 +997,25 @@ impl MqttClient {
     }
 
     fn _puback(&mut self, pkid: u16) -> Result<()> {
-        let puback_packet = try!(self._generate_puback_packet(pkid));
+        let puback_packet = try!(genpack::generate_puback_packet(pkid));
         try!(self._write_packet(puback_packet));
         self._flush()
     }
 
     fn _pubrec(&mut self, pkid: u16) -> Result<()> {
-        let pubrec_packet = try!(self._generate_pubrec_packet(pkid));
+        let pubrec_packet = try!(genpack::generate_pubrec_packet(pkid));
         try!(self._write_packet(pubrec_packet));
         self._flush()
     }
 
     fn _pubrel(&mut self, pkid: u16) -> Result<()> {
-        let pubrel_packet = try!(self._generate_pubrel_packet(pkid));
+        let pubrel_packet = try!(genpack::generate_pubrel_packet(pkid));
         try!(self._write_packet(pubrel_packet));
         self._flush()
     }
 
     fn _pubcomp(&mut self, pkid: u16) -> Result<()> {
-        let puback_packet = try!(self._generate_pubcomp_packet(pkid));
+        let puback_packet = try!(genpack::generate_pubcomp_packet(pkid));
         try!(self._write_packet(puback_packet));
         self._flush()
     }
@@ -1032,108 +1039,6 @@ impl MqttClient {
             }
         };
         Ok(())
-    }
-
-    fn _generate_connect_packet(&self) -> Result<Vec<u8>> {
-        let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), self.opts.client_id.clone().unwrap());
-
-        connect_packet.set_clean_session(self.opts.clean_session);
-
-        if let Some(keep_alive) = self.opts.keep_alive {
-            connect_packet.set_keep_alive(keep_alive);
-        }
-
-        // Converting (String, String) -> (TopicName, String)
-        let will = match self.opts.will {
-            Some(ref will) => Some((try!(TopicName::new(will.0.clone())), will.1.clone())),
-            None => None,
-        };
-
-        if will.is_some() {
-            connect_packet.set_will(will);
-            connect_packet.set_will_qos(self.opts.will_qos as u8);
-            connect_packet.set_will_retain(self.opts.will_retain);
-        }
-
-        // mqtt-protocol APIs are directly handling None cases.
-        connect_packet.set_user_name(self.opts.username.clone());
-        connect_packet.set_password(self.opts.password.clone());
-
-        let mut buf = Vec::new();
-
-        try!(connect_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_disconnect_packet(&self) -> Result<Vec<u8>> {
-        let disconnect_packet = DisconnectPacket::new();
-        let mut buf = Vec::new();
-
-        try!(disconnect_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_pingreq_packet(&self) -> Result<Vec<u8>> {
-        let pingreq_packet = PingreqPacket::new();
-        let mut buf = Vec::new();
-
-        try!(pingreq_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_subscribe_packet(&self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<Vec<u8>> {
-        let subscribe_packet = SubscribePacket::new(11, topics);
-        let mut buf = Vec::new();
-
-        try!(subscribe_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    // TODO: dup flag
-    fn _generate_publish_packet(&self,
-                                topic: TopicName,
-                                qos: QoSWithPacketIdentifier,
-                                retain: bool,
-                                payload: Vec<u8>)
-                                -> Result<Vec<u8>> {
-        let mut publish_packet = PublishPacket::new(topic, qos, payload);
-        let mut buf = Vec::new();
-        publish_packet.set_retain(retain);
-        // publish_packet.set_dup(dup);
-        try!(publish_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_puback_packet(&self, pkid: u16) -> Result<Vec<u8>> {
-        let puback_packet = PubackPacket::new(pkid);
-        let mut buf = Vec::new();
-
-        try!(puback_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_pubrec_packet(&self, pkid: u16) -> Result<Vec<u8>> {
-        let pubrec_packet = PubrecPacket::new(pkid);
-        let mut buf = Vec::new();
-
-        try!(pubrec_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_pubrel_packet(&self, pkid: u16) -> Result<Vec<u8>> {
-        let pubrel_packet = PubrelPacket::new(pkid);
-        let mut buf = Vec::new();
-
-        try!(pubrel_packet.encode(&mut buf));
-        Ok(buf)
-    }
-
-    fn _generate_pubcomp_packet(&self, pkid: u16) -> Result<Vec<u8>> {
-        let pubcomp_packet = PubcompPacket::new(pkid);
-        let mut buf = Vec::new();
-
-        try!(pubcomp_packet.encode(&mut buf));
-        Ok(buf)
     }
 
     // http://stackoverflow.

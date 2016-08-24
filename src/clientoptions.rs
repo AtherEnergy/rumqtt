@@ -18,7 +18,7 @@ pub struct MqttOptions {
     // wait time for ack beyond which packet(publish/subscribe) will be resent
     pub queue_timeout: u16,
     pub ca: Option<PathBuf>,
-    pub client_cert: Option<(PathBuf, PathBuf)>
+    pub client_cert: Option<(PathBuf, PathBuf)>,
 }
 
 impl Default for MqttOptions {
@@ -38,7 +38,7 @@ impl Default for MqttOptions {
             sub_q_len: 5,
             queue_timeout: 60,
             ca: None,
-            client_cert: None
+            client_cert: None,
         }
     }
 }
@@ -179,7 +179,7 @@ impl MqttOptions {
 
     /// Set client cert and key for server to do client authentication
     pub fn set_client_cert<P>(mut self, certfile: P, keyfile: P) -> Self
-    where P: AsRef<Path>
+        where P: AsRef<Path>
     {
         let c = certfile.as_ref().to_path_buf();
         let k = keyfile.as_ref().to_path_buf();

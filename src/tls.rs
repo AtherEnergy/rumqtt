@@ -18,7 +18,9 @@ pub struct SslContext {
 
 impl SslContext {
     pub fn new<CA, C, K>(ca: CA, client_pair: Option<(C, K)>) -> Result<Self>
-    where CA: AsRef<Path>, C: AsRef<Path>, K: AsRef<Path>
+        where CA: AsRef<Path>,
+              C: AsRef<Path>,
+              K: AsRef<Path>
     {
         let mut ctx: ssl::SslContext = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
         try!(ctx.set_cipher_list("DEFAULT"));
