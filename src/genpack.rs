@@ -4,15 +4,16 @@ use mqtt::topic_name::TopicName;
 
 use error::Result;
 
-pub fn generate_connect_packet(client_id: Option<String>, 
-                            clean_session: bool, 
-                            keep_alive: Option<u16>, 
-                            will: Option<(String, String)>,
-                            will_qos: QualityOfService,
-                            will_retain: bool,
-                            username: Option<String>,
-                            password: Option<String>) -> Result<Vec<u8>> {
-                              
+pub fn generate_connect_packet(client_id: Option<String>,
+                               clean_session: bool,
+                               keep_alive: Option<u16>,
+                               will: Option<(String, String)>,
+                               will_qos: QualityOfService,
+                               will_retain: bool,
+                               username: Option<String>,
+                               password: Option<String>)
+                               -> Result<Vec<u8>> {
+
     let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), client_id.unwrap());
 
     connect_packet.set_clean_session(clean_session);
@@ -68,7 +69,11 @@ pub fn generate_subscribe_packet(topics: Vec<(TopicFilter, QualityOfService)>) -
 }
 
 // TODO: dup flag
-pub fn generate_publish_packet(topic: TopicName, qos: QoSWithPacketIdentifier, retain: bool, payload: Vec<u8>) -> Result<Vec<u8>> {
+pub fn generate_publish_packet(topic: TopicName,
+                               qos: QoSWithPacketIdentifier,
+                               retain: bool,
+                               payload: Vec<u8>)
+                               -> Result<Vec<u8>> {
     let mut publish_packet = PublishPacket::new(topic, qos, payload);
     let mut buf = Vec::new();
     publish_packet.set_retain(retain);

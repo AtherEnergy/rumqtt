@@ -15,8 +15,8 @@ addons:
 matrix:
   allow_failures:
     - os: osx
-before_install:
-  scripts/travis_setup.sh
+#before_install:
+#  scripts/travis_setup.sh
 install:
 - curl https://sh.rustup.rs -sSf | sh -s -- -y
 - export PATH="$HOME/.cargo/bin:$PATH"
