@@ -14,22 +14,23 @@
 //! # Connecting to a broker
 //!
 //! ```
+//! use rumqtt::{MqttOptions, MqttClient, QoS};
 //! // Specify client connection opthons and which broker to connect to
 //! let client_options = MqttOptions::new()
 //!                                   .set_keep_alive(5)
 //!                                   .set_reconnect(3)
-//!                                   .set_client_id("qos0-stress-publish")
+//!                                   .set_client_id("rumqtt-docs")
 //!                                   .broker("broker.hivemq.com:1883");
 //!
 //! // Connects to a broker and returns a `Request` object for making mqtt
-//! requests
+//! // requests
 //! let mq_client = MqttClient::new(client_options);
 //!
 //! // `.message_callback` is optional if you don't want to subscribe
 //! // to any topic.
-//! mq_client.message_callback(move |message| {
+//! let mq_client = mq_client.message_callback(move |message| {
 //!     println!("message --> {:?}", message);
-//! })
+//! });
 //!
 //! let request = mq_client.start().expect("Coudn't start");
 //! ```
