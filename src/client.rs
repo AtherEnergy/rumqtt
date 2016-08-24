@@ -19,8 +19,7 @@ use threadpool::ThreadPool;
 use error::{Error, Result};
 use message::Message;
 use clientoptions::MqttOptions;
-use publisher::Publisher;
-use subscriber::Subscriber;
+use request::MqRequest;
 use genpack;
 
 const MIO_PING_TIMER: u64 = 123;
@@ -144,7 +143,6 @@ pub struct MqttClient {
     pub pool: Option<ThreadPool>,
 }
 
-// TODO: Use Mio::Handler, Unit test for state machine
 impl Handler for MqttClient {
     type Timeout = u64;
     type Message = MioNotification;
@@ -444,9 +442,9 @@ impl MqttClient {
     }
 
     /// Connects to the broker and starts an event loop in a new thread.
-    /// Returns `Subscriber` and `Publisher` and handles reqests from them.
+    /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(mut self) -> Result<(Publisher, Subscriber)> {
+    pub fn start(mut self) -> Result<MqRequest> {
         let mut event_loop = EventLoop::new().unwrap();
         let mionotify_tx = event_loop.channel();
         self.mionotify_tx = Some(mionotify_tx.clone());
@@ -468,24 +466,19 @@ impl MqttClient {
         // start() call should fail if there a problem creating initial tcp
         // connection & mqtt connection. Since connections are happening inside thread,
         // this method should be informed to return error instead of
-        // (publisher, subscriber) in case connection fails.
+        // Request in case connection fails.
         let (connsync_tx, connsync_rx) = mpsc::sync_channel::<MqttStatus>(1);
         self.connsync_tx = Some(connsync_tx);
 
         let (streamupdate_tx, streamupdate_rx) = mpsc::sync_channel::<NetworkStream>(1);
         self.streamupdate_tx = Some(streamupdate_tx.clone());
 
-        // @ Create 'publisher' and 'subscriber'
+        // @ Create Request through which user interacts
         // @ These are the handles using which user interacts with rumqtt.
-        let publisher = Publisher {
+        let mq_request = MqRequest {
             pub0_tx: pub0_tx,
             pub1_tx: pub1_tx,
             pub2_tx: pub2_tx,
-            mionotify_tx: mionotify_tx.clone(),
-            retain: false,
-        };
-
-        let subscriber = Subscriber {
             subscribe_tx: sub_tx,
             mionotify_tx: mionotify_tx.clone(),
         };
@@ -543,7 +536,7 @@ impl MqttClient {
 
         let conn = connsync_rx.recv().expect("Connection sync recv error");
         match conn {
-            MqttStatus::Success => Ok((publisher, subscriber)),
+            MqttStatus::Success => Ok(mq_request),
             MqttStatus::Failed => Err(Error::ConnectionAbort),
         }
     }
@@ -1048,6 +1041,26 @@ impl MqttClient {
         let PacketIdentifier(pkid) = self.last_pkid;
         self.last_pkid = PacketIdentifier(pkid + 1);
         self.last_pkid
+    }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#[cfg(test)]
+mod test {
+    use clientoptions::MqttOptions;
+    use super::MqttClient;
+
+    fn qos1_offline_buffer() {
+        let client_options = MqttOptions::new()
+            .set_keep_alive(5)
+            .set_reconnect(5)
+            .set_client_id("test-reconnect-client")
+            .broker("broker.hivemq.com:1883");
+
+        let mq_client = MqttClient::new(client_options);
+        // Connects to a broker and returns a `Publisher` and `Subscriber`
+        let request = mq_client.start().expect("Coudn't start");
     }
 }
 

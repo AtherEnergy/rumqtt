@@ -13,7 +13,7 @@
 //!
 //! # Connecting to a broker
 //!
-//! ```ignore
+//! ```
 //! // Specify client connection opthons and which broker to connect to
 //! let client_options = MqttOptions::new()
 //!                                   .set_keep_alive(5)
@@ -21,14 +21,17 @@
 //!                                   .set_client_id("qos0-stress-publish")
 //!                                   .broker("broker.hivemq.com:1883");
 //!
-//! // Connects to a broker and returns a `Publisher` and `Subscriber`.
+//! // Connects to a broker and returns a `Request` object for making mqtt
+//! requests
+//! let mq_client = MqttClient::new(client_options);
+//!
 //! // `.message_callback` is optional if you don't want to subscribe
 //! // to any topic.
-//! let (publisher, subscriber) = MqttClient::new(client_options)
-//! .message_callback(move |message| {
-//!        println!("message --> {:?}", message);
+//! mq_client.message_callback(move |message| {
+//!     println!("message --> {:?}", message);
 //! })
-//! .start().expect("Coudn't start");
+//!
+//! let request = mq_client.start().expect("Coudn't start");
 //! ```
 //!
 //!
@@ -36,7 +39,7 @@
 //!
 //! ```ignore
 //! let payload = format!("{}. hello rust", i);
-//! publisher.publish("hello/rust", QoS::Level1, payload.into_bytes())
+//! request.publish("hello/rust", false, QoS::Level1, payload.into_bytes())
 //!          .expect("Publish failure");
 //! ```
 //!
@@ -46,7 +49,7 @@
 //! let topics = vec![("hello/+/world", QoS::Level0),
 //!                   ("hello/rust", QoS::Level1)];
 //!
-//! subscriber.subscribe(topics).expect("Subcription failure");
+//! request.subscribe(topics).expect("Subcription failure");
 //! ```
 //!
 
@@ -65,13 +68,11 @@ mod genpack;
 mod tls;
 mod message;
 mod clientoptions;
-mod publisher;
-mod subscriber;
+mod request;
 mod client;
 
 pub use error::{Error, Result};
 pub use clientoptions::MqttOptions;
 pub use mqtt::QualityOfService as QoS;
 pub use client::MqttClient;
-pub use subscriber::Subscriber;
-pub use publisher::Publisher;
+pub use request::MqRequest;

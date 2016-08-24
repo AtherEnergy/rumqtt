@@ -21,7 +21,7 @@ fn send_ping_reqs_in_time() {
                                     .set_q_timeout(10)
                                     .broker("localhost:1883");
 
-    let (publisher, subscriber) = MqttClient::new(client_options)
+    let request = MqttClient::new(client_options)
                                             .start()
                                             .expect("Coudn't start");
 
@@ -31,7 +31,7 @@ fn send_ping_reqs_in_time() {
 /// This handles the case where messages in channel are being
 /// read but pubacks not being received. 
 /// If queue holds 10, recv() stops after queue is full. publish
-/// channel has space for 10 more. total publisher publishes = 20
+/// channel has space for 10 more. total request publishes = 20
 /// NOTE: broker will remember subscriptions for clean_session=false
 /// only for n/w disconnections but not for crashes
 #[ignore]
@@ -51,12 +51,12 @@ fn qos1_pub_block() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
-    subscriber.subscribe(vec![("test/qos1/block", QoS::Level1)]).expect("Subcription failure");
+    request.subscribe(vec![("test/qos1/block", QoS::Level1)]).expect("Subcription failure");
 
     println!("Take broker down in next 10 seconds !!!!!!");
     thread::sleep(Duration::new(10, 0));
@@ -64,7 +64,7 @@ fn qos1_pub_block() {
     for i in 0..10 {
         let payload = format!("{}. hello rust", i);
         println!("{}. Publishing ...", i);
-        publisher.publish("test/qos1/block", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos1/block", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
@@ -91,16 +91,16 @@ fn tls_connect() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
-    subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
+    request.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        publisher.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos1/stress", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 

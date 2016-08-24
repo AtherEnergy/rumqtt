@@ -23,8 +23,8 @@ fn inital_tcp_connect_failure(){
                                     .set_reconnect(5)
                                     .broker("localhost:9999");
 
-    // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (_, _) = MqttClient::new(client_options)
+    // Connects to a broker and returns a `request` 
+    let request = MqttClient::new(client_options)
                                 .start().expect("Couldn't start");
 }
 
@@ -39,8 +39,8 @@ fn inital_mqtt_connect_failure() {
                                     .broker("test.mosquitto.org:8883");
 
 
-    // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (_, _) = MqttClient::new(client_options)
+    // Connects to a broker and returns a `request` 
+    let request = MqttClient::new(client_options)
                                 .start().expect("Couldn't start");
 }
 
@@ -57,8 +57,8 @@ fn basic() {
     let final_count = count.clone();
     let count = count.clone();
 
-    // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (publisher, subscriber) = MqttClient::new(client_options).
+    // Connects to a broker and returns a `request` 
+    let request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
@@ -66,12 +66,12 @@ fn basic() {
 
     let topics = vec![("test/basic", QoS::Level0)];
 
-    subscriber.subscribe(topics).expect("Subcription failure");  
+    request.subscribe(topics).expect("Subcription failure");  
     
     let payload = format!("hello rust");
-    publisher.publish("test/basic", QoS::Level0, payload.clone().into_bytes()).unwrap();
-    publisher.publish("test/basic", QoS::Level1, payload.clone().into_bytes()).unwrap();
-    publisher.publish("test/basic", QoS::Level2, payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic", false, QoS::Level0, payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic", false, QoS::Level2, payload.clone().into_bytes()).unwrap();
 
     thread::sleep(Duration::new(1, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
@@ -91,8 +91,8 @@ fn reconnection() {
     let final_count = count.clone();
     let count = count.clone();
 
-    // Connects to a broker and returns a `Publisher` and `Subscriber`
-    let (publisher, subscriber) = MqttClient::new(client_options).
+    // Connects to a broker and returns a `request` 
+    let request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
@@ -100,9 +100,9 @@ fn reconnection() {
 
     // Register message callback and subscribe
     let topics = vec![("test/reconnect", QoS::Level2)];  
-    subscriber.subscribe(topics).expect("Subcription failure");
+    request.subscribe(topics).expect("Subcription failure");
 
-    publisher.disconnect().unwrap();
+    request.disconnect().unwrap();
     // Wait for reconnection and publish
     thread::sleep(Duration::new(10, 0));
     let payload = format!("hello rust");
@@ -110,7 +110,7 @@ fn reconnection() {
     //Ideally, this shouldn't fail but block
     //Add a testcase where broker/internet is down for some time and this should block
     //instead of failing
-    publisher.publish("test/reconnect", QoS::Level1, payload.clone().into_bytes()).unwrap();
+    request.publish("test/reconnect", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
 
     // Wait for count to be incremented by callback
     thread::sleep(Duration::new(5, 0));
@@ -138,24 +138,24 @@ fn will() {
     let final_count = count.clone();
     let count = count.clone();
 
-    // BUG NOTE: don't use _ for dummy subscriber, publisher. That implies
+    // BUG NOTE: don't use _ for dummy subscriber, request. That implies
     // channel ends in struct are invalid
-    let (publisher1, subscriber1) = MqttClient::new(client_options1).start().expect("Coudn't start");
-    let (publisher2, subscriber2) = MqttClient::new(client_options2).
+    let request1 = MqttClient::new(client_options1).start().expect("Coudn't start");
+    let request2 = MqttClient::new(client_options2).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
     })
     .start().expect("Coudn't start");
 
-    subscriber2.subscribe(vec![("test/will", QoS::Level0)]).unwrap();
+    request2.subscribe(vec![("test/will", QoS::Level0)]).unwrap();
 
     //TODO: Now we are waiting for cli-2 subscriber to finish before disconnecting
     // cli-1. Make an sync version of subscribe()
     thread::sleep(Duration::new(1, 0));
     // LWT doesn't work on graceful disconnects
-    // publisher1.disconnect();
-    publisher1.shutdown().unwrap();
+    // request1.disconnect();
+    request1.shutdown().unwrap();
 
     // Wait for last will publish
     thread::sleep(Duration::new(5, 0));
@@ -179,7 +179,7 @@ fn retained_messages() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let (mut publisher, subscriber) = MqttClient::new(client_options).
+    let mut request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("message --> {:?}", message);
@@ -187,18 +187,18 @@ fn retained_messages() {
 
     // publish first
     let payload = format!("hello rust");
-    publisher.set_retain(true).publish("test/0/retain", QoS::Level0, payload.clone().into_bytes()).unwrap();
-    publisher.set_retain(true).publish("test/1/retain", QoS::Level1, payload.clone().into_bytes()).unwrap();
-    publisher.set_retain(true).publish("test/2/retain", QoS::Level2, payload.clone().into_bytes()).unwrap();
+    request.publish("test/0/retain", true, QoS::Level0, payload.clone().into_bytes()).unwrap();
+    request.publish("test/1/retain", true, QoS::Level1, payload.clone().into_bytes()).unwrap();
+    request.publish("test/2/retain", true, QoS::Level2, payload.clone().into_bytes()).unwrap();
 
-    publisher.disconnect().unwrap();
+    request.disconnect().unwrap();
 
     // wait for client to reconnect
     thread::sleep(Duration::new(10, 0));
 
     // subscribe to the topic which broker has retained
     let topics = vec![("test/+/retain", QoS::Level0)];
-    subscriber.subscribe(topics).expect("Subcription failure");
+    request.subscribe(topics).expect("Subcription failure");
 
     // wait for messages
     thread::sleep(Duration::new(3, 0));
@@ -220,16 +220,16 @@ fn qos0_stress_publish() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
-    subscriber.subscribe(vec![("test/qos0/stress", QoS::Level2)]).expect("Subcription failure");
+    request.subscribe(vec![("test/qos0/stress", QoS::Level2)]).expect("Subcription failure");
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        publisher.publish("test/qos0/stress", QoS::Level0, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos0/stress", false, QoS::Level0, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
@@ -255,17 +255,16 @@ fn qos1_stress_publish() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        // println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
 
-    subscriber.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
+    request.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        publisher.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
-        thread::sleep(Duration::new(0, 10000));
+        request.publish("test/qos1/stress", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
     }
 
     thread::sleep(Duration::new(300, 0));
@@ -285,17 +284,16 @@ fn qos2_stress_publish() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let (publisher, subscriber) = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         //println!("message --> {:?}", message);
     }).start().expect("Coudn't start");
     
-    subscriber.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");
+    request.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");
 
     for i in 0..500 {
         let payload = format!("{}. hello rust", i);
-        publisher.publish("test/qos2/stress", QoS::Level2, payload.clone().into_bytes()).unwrap();
-        thread::sleep(Duration::new(0, 10000));
+        request.publish("test/qos2/stress", false, QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
     thread::sleep(Duration::new(500, 0));
