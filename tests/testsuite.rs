@@ -118,6 +118,26 @@ fn reconnection() {
 }
 
 #[test]
+fn acked_message() {
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_reconnect(5)
+                                    .set_client_id("test-reconnect-client")
+                                    .broker("broker.hivemq.com:1883");
+
+    // Connects to a broker and returns a `request` 
+    let mq_client = MqttClient::new(client_options);
+    let mq_client = mq_client.publish_callback(|m| {
+        let ref payload = *m.payload;
+        let payload = String::from_utf8(payload.clone()).unwrap();
+        assert_eq!("MYUNIQUEMESSAGE".to_string(), payload);
+    });
+    let request = mq_client.start().expect("Coudn't start");
+    request.publish("test/qos1/ack", false, QoS::Level1, "MYUNIQUEMESSAGE".to_string().into_bytes()).unwrap();
+    thread::sleep(Duration::new(1, 0));
+}
+
+#[test]
 fn will() {
     // env_logger::init().unwrap();
     let client_options1 = MqttOptions::new()
@@ -179,7 +199,7 @@ fn retained_messages() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let mut request = MqttClient::new(client_options).
+    let request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("message --> {:?}", message);

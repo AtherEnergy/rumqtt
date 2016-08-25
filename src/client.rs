@@ -69,7 +69,7 @@ pub enum MioNotification {
 enum HandlePacket {
     ConnAck,
     Publish(Box<Message>),
-    PubAck(u16),
+    PubAck(Option<Message>),
     PubRec(u16),
     // PubRel,
     PubComp,
@@ -81,7 +81,7 @@ enum HandlePacket {
 }
 
 pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
-pub type PublishSendableFn = Box<Fn(u16) + Send + Sync>;
+pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
@@ -430,7 +430,7 @@ impl MqttClient {
     /// Set the publish callback.  This is called when a published
     /// message has been sent to the broker successfully.
     pub fn publish_callback<F>(mut self, callback: F) -> Self
-        where F: Fn(u16) + Send + Sync + 'static
+        where F: Fn(Message) + Send + Sync + 'static
     {
         // Build a pool with 4 threads
         if self.pool.is_none() {
@@ -595,7 +595,7 @@ impl MqttClient {
                     }
                 }
                 // Sending a dummy notification saying tha queue size has reduced
-                HandlePacket::PubAck(pkid) => {
+                HandlePacket::PubAck(m) => {
                     // Don't notify everytime q len is < max. This will always be true initially
                     // leading to dup notify.
                     // Send only for notify() to recover if channel is blocked.
@@ -606,11 +606,15 @@ impl MqttClient {
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("MioNotify Tx Send Error");
                     }
 
+                    if m.is_none() {
+                        return ();
+                    }
+
                     if let Some(ref publish_callback) = self.publish_callback {
                         let publish_callback = publish_callback.clone();
 
                         let pool = self.pool.as_mut().unwrap();
-                        pool.execute(move || publish_callback(pkid));
+                        pool.execute(move || publish_callback(m.unwrap()));
                     }
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
@@ -621,12 +625,12 @@ impl MqttClient {
                         mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("MioNotify Tx Send Error");
                     }
 
-                    if let Some(ref publish_callback) = self.publish_callback {
-                        let publish_callback = publish_callback.clone();
+                    // if let Some(ref publish_callback) = self.publish_callback {
+                    //     let publish_callback = publish_callback.clone();
 
-                        let pool = self.pool.as_mut().unwrap();
-                        pool.execute(move || publish_callback(pkid));
-                    }
+                    //     let pool = self.pool.as_mut().unwrap();
+                    //     pool.execute(move || publish_callback(pkid));
+                    // }
                 }
                 _ => debug!("packet handler says that he doesn't care"),
             }
@@ -681,18 +685,23 @@ impl MqttClient {
                         //        puback,
                         //        self.outgoing_pub);
                         let pkid = puback.packet_identifier();
-                        match self.outgoing_pub
+                        let m = match self.outgoing_pub
                             .iter()
                             .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
-                                self.outgoing_pub.remove(i);
+                                if let Some(m) = self.outgoing_pub.remove(i) {
+                                    Some(*m.1)
+                                } else {
+                                    None
+                                }
                             }
                             None => {
                                 error!("Oopssss..unsolicited ack --> {:?}", puback);
+                                None
                             }
                         };
                         debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
-                        Ok(HandlePacket::PubAck(pkid))
+                        Ok(HandlePacket::PubAck(m))
                     }
 
                     // @ Receives publish packet
