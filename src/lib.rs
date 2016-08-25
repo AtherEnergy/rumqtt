@@ -41,7 +41,7 @@
 //!
 //! ```ignore
 //! let payload = format!("{}. hello rust", i);
-//! request.publish("hello/rust", false, QoS::Level1, payload.into_bytes())
+//! request.publish("hello/rust", QoS::Level1, payload.into_bytes())
 //!          .expect("Publish failure");
 //! ```
 //!

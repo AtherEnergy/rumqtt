@@ -69,9 +69,9 @@ fn basic() {
     request.subscribe(topics).expect("Subcription failure");  
     
     let payload = format!("hello rust");
-    request.publish("test/basic", false, QoS::Level0, payload.clone().into_bytes()).unwrap();
-    request.publish("test/basic", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
-    request.publish("test/basic", false, QoS::Level2, payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic",  QoS::Level0, payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic",  QoS::Level1, payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic",  QoS::Level2, payload.clone().into_bytes()).unwrap();
 
     thread::sleep(Duration::new(1, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
@@ -110,7 +110,7 @@ fn reconnection() {
     //Ideally, this shouldn't fail but block
     //Add a testcase where broker/internet is down for some time and this should block
     //instead of failing
-    request.publish("test/reconnect", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
+    request.publish("test/reconnect",  QoS::Level1, payload.clone().into_bytes()).unwrap();
 
     // Wait for count to be incremented by callback
     thread::sleep(Duration::new(5, 0));
@@ -130,10 +130,16 @@ fn acked_message() {
     let mq_client = mq_client.publish_callback(|m| {
         let ref payload = *m.payload;
         let payload = String::from_utf8(payload.clone()).unwrap();
+        let ref userdata = *m.userdata.unwrap();
+        let userdata = String::from_utf8(userdata.clone()).unwrap();
         assert_eq!("MYUNIQUEMESSAGE".to_string(), payload);
+        assert_eq!("MYUNIQUEUSERDATA".to_string(), userdata);
     });
     let request = mq_client.start().expect("Coudn't start");
-    request.publish("test/qos1/ack", false, QoS::Level1, "MYUNIQUEMESSAGE".to_string().into_bytes()).unwrap();
+    request.userdata_publish("test/qos1/ack",  
+                             QoS::Level1, 
+                             "MYUNIQUEMESSAGE".to_string().into_bytes(),
+                             "MYUNIQUEUSERDATA".to_string().into_bytes()).unwrap();
     thread::sleep(Duration::new(1, 0));
 }
 
@@ -207,9 +213,9 @@ fn retained_messages() {
 
     // publish first
     let payload = format!("hello rust");
-    request.publish("test/0/retain", true, QoS::Level0, payload.clone().into_bytes()).unwrap();
-    request.publish("test/1/retain", true, QoS::Level1, payload.clone().into_bytes()).unwrap();
-    request.publish("test/2/retain", true, QoS::Level2, payload.clone().into_bytes()).unwrap();
+    request.retained_publish("test/0/retain",  QoS::Level0, payload.clone().into_bytes()).unwrap();
+    request.retained_publish("test/1/retain",  QoS::Level1, payload.clone().into_bytes()).unwrap();
+    request.retained_publish("test/2/retain",  QoS::Level2, payload.clone().into_bytes()).unwrap();
 
     request.disconnect().unwrap();
 
@@ -249,7 +255,7 @@ fn qos0_stress_publish() {
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        request.publish("test/qos0/stress", false, QoS::Level0, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos0/stress",  QoS::Level0, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
@@ -284,7 +290,7 @@ fn qos1_stress_publish() {
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        request.publish("test/qos1/stress", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos1/stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     }
 
     thread::sleep(Duration::new(300, 0));
@@ -313,7 +319,7 @@ fn qos2_stress_publish() {
 
     for i in 0..500 {
         let payload = format!("{}. hello rust", i);
-        request.publish("test/qos2/stress", false, QoS::Level2, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
     thread::sleep(Duration::new(500, 0));

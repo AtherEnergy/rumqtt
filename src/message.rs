@@ -16,6 +16,7 @@ pub struct Message {
 
     // TODO: Why does payload need to be atomic
     pub payload: Arc<Vec<u8>>,
+    pub userdata: Option<Arc<Vec<u8>>>,
 }
 
 impl Message {
@@ -30,6 +31,7 @@ impl Message {
             qos: publish.qos(),
             retain: publish.retain(),
             payload: Arc::new(publish.payload().clone()),
+            userdata: None,
         }))
     }
 
@@ -78,6 +80,7 @@ impl Message {
             qos: qos,
             retain: self.retain,
             payload: self.payload.clone(),
+            userdata: self.userdata.clone(),
         })
     }
 }

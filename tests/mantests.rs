@@ -64,7 +64,7 @@ fn qos1_pub_block() {
     for i in 0..10 {
         let payload = format!("{}. hello rust", i);
         println!("{}. Publishing ...", i);
-        request.publish("test/qos1/block", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos1/block",  QoS::Level1, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
@@ -100,7 +100,7 @@ fn tls_connect() {
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        request.publish("test/qos1/stress", false, QoS::Level1, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos1/stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
         thread::sleep(Duration::new(0, 10000));
     }
 
