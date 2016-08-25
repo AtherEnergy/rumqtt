@@ -8,10 +8,7 @@ rust:
 os:
 - linux
 - osx
-addons:
-  apt:
-    packages:
-    - gcc-arm-linux-gnueabihf
+
 matrix:
   allow_failures:
     - os: osx

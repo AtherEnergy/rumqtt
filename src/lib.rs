@@ -10,28 +10,29 @@
 //!
 //! Below examples explain basic usage of this library
 //!
-//!
 //! # Connecting to a broker
 //!
 //! ```
 //! use rumqtt::{MqttOptions, MqttClient, QoS};
-//! // Specify client connection opthons and which broker to connect to
+//! // Specify client connection options
 //! let client_options = MqttOptions::new()
 //!                                   .set_keep_alive(5)
 //!                                   .set_reconnect(3)
 //!                                   .set_client_id("rumqtt-docs")
 //!                                   .broker("broker.hivemq.com:1883");
 //!
-//! // Connects to a broker and returns a `Request` object for making mqtt
-//! // requests
+//! // Create a new `MqttClient` object from `MqttOptions`
 //! let mq_client = MqttClient::new(client_options);
 //!
-//! // `.message_callback` is optional if you don't want to subscribe
+//! // Set callback for receiving incoming messages.
+//! // This is optional if you don't want to subscribe
 //! // to any topic.
 //! let mq_client = mq_client.message_callback(move |message| {
 //!     println!("message --> {:?}", message);
 //! });
 //!
+//! // Connects to the broker, starts event loop and returns a `Request`
+//! // object for making mqtt requests like `publish`, `subscribe` etc..
 //! let request = mq_client.start().expect("Coudn't start");
 //! ```
 //!
