@@ -1,5 +1,5 @@
 language: rust
-sudo: required
+sudo: false
 cache:
   directories:
   - $HOME/.cargo
@@ -9,7 +9,7 @@ os:
 - linux
 - osx
 before_script:
-  - pip install 'travis-cargo<0.2' --user && export PATH=$HOME/.local/bin:$PATH
+  - pip install git+https://github.com/euclio/travis-cargo@kcov --user && export PATH=$HOME/.local/bin:$PATH
 matrix:
   allow_failures:
     - os: osx
@@ -27,12 +27,12 @@ branches:
   only:
   - master
 script:
-- cargo build --release
-- cargo test --release -- --nocapture
+- cargo build
+- cargo test -- --nocapture
 - cargo doc --no-deps
 after_success:
   - test $TRAVIS_PULL_REQUEST == "false" && test $TRAVIS_BRANCH == "master" && bash docdeploy.sh
-  - travis-cargo coveralls
+  - travis-cargo coveralls --no-sudo
 notifications:
   email:
     on_success: never
