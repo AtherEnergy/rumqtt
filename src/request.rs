@@ -1,6 +1,6 @@
-use mio::*;
-use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
+
+use mio::channel::SyncSender;
 
 use error::Result;
 use message::Message;
@@ -8,14 +8,19 @@ use mqtt::{QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::topic_name::TopicName;
 
-use client::{MioNotification, PubNotify};
+use client::MioNotification;
 
 pub struct MqRequest {
+    // QoS 0 publish request to eventloop
     pub pub0_tx: SyncSender<Message>,
+    // QoS 1 publish request to eventloop
     pub pub1_tx: SyncSender<Message>,
+    // QoS 2 publish request to eventloop
     pub pub2_tx: SyncSender<Message>,
+    // Subscribe request to eventloop
     pub subscribe_tx: SyncSender<Vec<(TopicFilter, QualityOfService)>>,
-    pub mionotify_tx: Sender<MioNotification>,
+    // miscellaneous requests to eventloop
+    pub misc_tx: SyncSender<MioNotification>,
 }
 
 impl MqRequest {
@@ -75,16 +80,13 @@ impl MqRequest {
         match qos {
             QualityOfService::Level0 => {
                 try!(self.pub0_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS0)));
             }
             QualityOfService::Level1 => {
                 // Order important coz mioco is level triggered
                 try!(self.pub1_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1)));
             }
             QualityOfService::Level2 => {
                 try!(self.pub2_tx.send(message));
-                try!(self.mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2)));
             }
         };
 
@@ -99,17 +101,16 @@ impl MqRequest {
         }
 
         try!(self.subscribe_tx.send(sub_topics));
-        try!(self.mionotify_tx.send(MioNotification::Sub));
         Ok(())
     }
 
     pub fn disconnect(&self) -> Result<()> {
-        try!(self.mionotify_tx.send(MioNotification::Disconnect));
+        try!(self.misc_tx.send(MioNotification::Disconnect));
         Ok(())
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        try!(self.mionotify_tx.send(MioNotification::Shutdown));
+        try!(self.misc_tx.send(MioNotification::Shutdown));
         Ok(())
     }
 }

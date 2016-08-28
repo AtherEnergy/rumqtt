@@ -1,20 +1,22 @@
 use std::time::{Duration, Instant};
-use time;
-
 use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::str;
 use std::net::TcpStream;
+use std::sync::Arc;
+use std::thread;
+use std::sync::mpsc;
+
 use mio::*;
+use mio::timer::Timer;
+use mio::channel::{SyncSender, Receiver};
 use mqtt::{Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
-use std::sync::Arc;
-use std::thread;
 use tls::{NetworkStream, SslContext};
-use std::sync::mpsc;
 use threadpool::ThreadPool;
+use time;
 
 use error::{Error, Result};
 use message::Message;
@@ -22,8 +24,13 @@ use clientoptions::MqttOptions;
 use request::MqRequest;
 use genpack;
 
-const MIO_PING_TIMER: u64 = 123;
-const MIO_QUEUE_TIMER: u64 = 321;
+const PING_TIMER: Token = Token(0);
+const RETRANSMIT_TIMER: Token = Token(1);
+const PUB0_CHANNEL: Token = Token(2);
+const PUB1_CHANNEL: Token = Token(3);
+const PUB2_CHANNEL: Token = Token(4);
+const SUB_CHANNEL: Token = Token(5);
+const MISC_CHANNEL: Token = Token(6);
 
 // static mut N: i32 = 0;
 // unsafe {
@@ -45,21 +52,7 @@ pub enum MqttStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PubNotify {
-    QoS0,
-    QoS0Reconnect,
-    QoS1,
-    QoS1QueueDown,
-    QoS1Reconnect,
-    QoS2,
-    QoS2QueueDown,
-    QoS2Reconnect,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MioNotification {
-    Pub(PubNotify),
-    Sub,
     Disconnect,
     Shutdown,
     Incoming,
@@ -112,14 +105,18 @@ pub struct MqttClient {
     pub no_of_reconnections: u32,
 
     // Channels
-    pub pub0_rx: Option<mpsc::Receiver<Message>>,
-    pub pub1_rx: Option<mpsc::Receiver<Message>>,
-    pub pub2_rx: Option<mpsc::Receiver<Message>>,
-    pub sub_rx: Option<mpsc::Receiver<Vec<(TopicFilter, QualityOfService)>>>,
-    pub incoming_rx: Option<mpsc::Receiver<VariablePacket>>,
-    pub mionotify_tx: Option<Sender<MioNotification>>,
+    pub pub0_rx: Option<Receiver<Message>>,
+    pub pub1_rx: Option<Receiver<Message>>,
+    pub pub2_rx: Option<Receiver<Message>>,
+    pub sub_rx: Option<Receiver<Vec<(TopicFilter, QualityOfService)>>>,
+    pub incoming_rx: Option<Receiver<VariablePacket>>,
+    pub misc_rx: Option<Receiver<MioNotification>>,
     pub connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
     pub streamupdate_tx: Option<mpsc::SyncSender<NetworkStream>>,
+
+    // Timers
+    pub ping_timer: Option<Timer<String>>,
+    pub retransmit_timer: Option<Timer<String>>,
 
     /// Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
@@ -140,210 +137,7 @@ pub struct MqttClient {
     pub message_callback: Option<Arc<MessageSendableFn>>,
     /// On publish callback
     pub publish_callback: Option<Arc<PublishSendableFn>>,
-    pub pool: Option<ThreadPool>,
-}
-
-impl Handler for MqttClient {
-    type Timeout = u64;
-    type Message = MioNotification;
-
-    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timer: Self::Timeout) {
-        // TODO: Move timer handling logic to seperate methods
-        match timer {
-            MIO_PING_TIMER => {
-                debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
-
-                match self.state {
-                    MqttState::Connected => {
-                        if !self.await_ping {
-                            let _ = self.ping();
-                        } else {
-                            error!("awaiting for previous ping resp");
-                        }
-
-                        if let Some(keep_alive) = self.opts.keep_alive {
-                            event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
-                        }
-                    }
-
-                    MqttState::Disconnected | MqttState::Handshake => {
-                        error!("I won't ping. Client is in disconnected/handshake state")
-                    }
-                }
-            }
-
-            MIO_QUEUE_TIMER => {
-                match self.state {
-                    MqttState::Connected => {
-                        debug!("^^^ QUEUE RESEND");
-                        self._try_retransmit();
-                    }
-                    MqttState::Disconnected | MqttState::Handshake => {
-                        debug!("I won't republish. Client is in disconnected/handshake state")
-                    }
-                }
-                event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
-                    .unwrap();
-
-            }
-
-            _ => panic!("Invalid timer id"),
-
-        }
-    }
-
-    // TODO: Make smaller methods
-    fn notify(&mut self, event_loop: &mut EventLoop<Self>, notification_type: MioNotification) {
-        // No Mqtt state distiction here. Should receive messages from channel in all
-        // the states
-        match notification_type {
-            MioNotification::Pub(p) => {
-                match p {
-                    // FIX THIS: All the QoS0 publishes before listener thread notifies
-                    // event loop (this) that connection is lost (where disconnect_block is set)
-                    // are lost
-                    PubNotify::QoS0 |
-                    PubNotify::QoS0Reconnect => {
-                        // Increment only if notificication is from publisher
-                        if p == PubNotify::QoS0 {
-                            self.pub0_channel_pending += 1;
-                        }
-
-                        debug!("Channel pending @@@@@ {}", self.pub0_channel_pending);
-                        // Receive from publish qos0 channel only when connected.
-                        if !self.disconnect_block {
-                            loop {
-                                if self.pub0_channel_pending == 0 {
-                                    debug!("Finished everything in channel");
-                                    break;
-                                }
-                                let message = {
-                                    let pub0_rx = self.pub0_rx.as_ref().unwrap();
-                                    pub0_rx.recv().expect("Pub0 Rx Recv Error")
-                                };
-                                let _ = self._publish(message);
-                                self.pub0_channel_pending -= 1;
-                            }
-                        }
-                    }
-                    PubNotify::QoS1 |
-                    PubNotify::QoS1QueueDown |
-                    PubNotify::QoS1Reconnect => {
-                        // Increment only if notificication is from publisher
-                        if p == PubNotify::QoS1 {
-                            self.pub1_channel_pending += 1;
-                        }
-
-                        debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
-                        // Receive from publish qos1 channel only when outgoing pub queue
-                        // length is < max and in connected state
-                        if !self.should_qos1_block && !self.disconnect_block {
-                            loop {
-                                if self.pub1_channel_pending == 0 {
-                                    debug!("Finished everything in channel");
-                                    break;
-                                }
-                                let mut message = {
-                                    let pub1_rx = self.pub1_rx.as_ref().unwrap();
-                                    pub1_rx.recv().expect("Pub1 Rx Recv Error")
-                                };
-                                // Add next packet id to message and publish
-                                let PacketIdentifier(pkid) = self._next_pkid();
-                                message.set_pkid(pkid);
-                                let _ = self._publish(message);
-                                self.pub1_channel_pending -= 1;
-                            }
-                        }
-                    }
-
-                    PubNotify::QoS2 |
-                    PubNotify::QoS2QueueDown |
-                    PubNotify::QoS2Reconnect => {
-                        // Increment only if notificication is from publisher
-                        if p == PubNotify::QoS2 {
-                            self.pub2_channel_pending += 1;
-                        }
-
-                        debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
-                        // Receive from publish qos2 channel only when outgoing pub queue
-                        // length is < max and in connected state
-                        if !self.should_qos2_block && !self.disconnect_block {
-                            loop {
-                                // Before
-                                if self.pub2_channel_pending == 0 {
-                                    debug!("Finished everything in channel");
-                                    break;
-                                }
-                                let mut message = {
-                                    // Careful, this is a blocking call. Might
-                                    // be easier to find queue len bugs with this.
-                                    let pub2_rx = self.pub2_rx.as_ref().unwrap();
-                                    pub2_rx.recv().expect("Pub2 Rx Recv Error")
-                                };
-                                // Add next packet id to message and publish
-                                let PacketIdentifier(pkid) = self._next_pkid();
-                                message.set_pkid(pkid);
-                                let _ = self._publish(message);
-                                self.pub2_channel_pending -= 1;
-                            }
-                        }
-                    }
-                }
-            }
-            MioNotification::Sub => {
-                let topics = {
-                    let sub_rx = self.sub_rx.as_ref().unwrap();
-                    sub_rx.recv().expect("Sub Rx Recv Error")
-                };
-                self.subscriptions.push_back(topics.clone());
-                let _ = self._subscribe(topics);
-            }
-            MioNotification::Disconnect => {
-                debug!("{:?}", self.state);
-                match self.state {
-                    MqttState::Connected => {
-                        let _ = self._disconnect();
-                    }
-                    _ => debug!("Mqtt connection not established"),
-                }
-            }
-            MioNotification::Incoming => {
-                let packet = {
-                    let incoming_rx = self.incoming_rx.as_ref().unwrap();
-                    incoming_rx.recv().expect("Incoming Rx Recv Error")
-                };
-                self.STATE_handle_packet(&packet, event_loop);
-            }
-            MioNotification::Reconnect => {
-                debug!("{:?}", self.state);
-
-                self.state = MqttState::Disconnected;
-                self.disconnect_block = true;
-                loop {
-                    match self._try_reconnect() {
-                        Ok(_) => break,
-                        Err(_) => continue,
-                    }
-                }
-
-                // Handles the case where initial tcp connect is successful and mqtt connect
-                // packets are sent (_try_reconnect) but broker closed the connection without
-                // sending CONNACK. Broker might be expecting TLS or username & password
-                if self.initial_connect {
-                    let connsync_tx = self.connsync_tx.as_ref().unwrap();
-                    connsync_tx.send(MqttStatus::Failed).expect("ConnSync Tx Send Error");
-                    event_loop.shutdown();
-                } else {
-                    let streamupdate_tx = self.streamupdate_tx.as_ref().unwrap();
-                    let stream = self.stream.try_clone().expect("Stream Clone Error");
-                    streamupdate_tx.send(stream).expect("StreamUpdate Tx Send Error");
-                }
-            }
-            MioNotification::Shutdown => {
-                let _ = self.stream.shutdown(Shutdown::Both);
-            }
-        }
-    }
+    pub pool: ThreadPool,
 }
 
 impl MqttClient {
@@ -386,9 +180,13 @@ impl MqttClient {
             pub2_rx: None,
             sub_rx: None,
             incoming_rx: None,
-            mionotify_tx: None,
+            misc_rx: None,
             connsync_tx: None,
             streamupdate_tx: None,
+
+            // Timer
+            ping_timer: None,
+            retransmit_timer: None,
 
             // Queues
             incoming_rec: VecDeque::new(),
@@ -404,7 +202,7 @@ impl MqttClient {
             publish_callback: None,
 
             // Threadpool
-            pool: None,
+            pool: ThreadPool::new(2),
         }
     }
 
@@ -418,11 +216,6 @@ impl MqttClient {
     pub fn message_callback<F>(mut self, callback: F) -> Self
         where F: Fn(Message) + Send + Sync + 'static
     {
-        // Build a pool with 4 threads
-        if self.pool.is_none() {
-            let pool = ThreadPool::new(4);
-            self.pool = Some(pool);
-        }
         self.message_callback = Some(Arc::new(Box::new(callback)));
         self
     }
@@ -432,11 +225,6 @@ impl MqttClient {
     pub fn publish_callback<F>(mut self, callback: F) -> Self
         where F: Fn(Message) + Send + Sync + 'static
     {
-        // Build a pool with 4 threads
-        if self.pool.is_none() {
-            let pool = ThreadPool::new(4);
-            self.pool = Some(pool);
-        }
         self.publish_callback = Some(Arc::new(Box::new(callback)));
         self
     }
@@ -445,21 +233,20 @@ impl MqttClient {
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(mut self) -> Result<MqRequest> {
-        let mut event_loop = EventLoop::new().unwrap();
-        let mionotify_tx = event_loop.channel();
-        self.mionotify_tx = Some(mionotify_tx.clone());
+        let (misc_tx, misc_rx) = channel::sync_channel::<MioNotification>(1);
+        self.misc_rx = Some(misc_rx);
 
-        let (pub0_tx, pub0_rx) = mpsc::sync_channel::<Message>(self.opts.pub_q_len as usize);
+        let (pub0_tx, pub0_rx) = channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub0_rx = Some(pub0_rx);
-        let (pub1_tx, pub1_rx) = mpsc::sync_channel::<Message>(self.opts.pub_q_len as usize);
+        let (pub1_tx, pub1_rx) = channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub1_rx = Some(pub1_rx);
-        let (pub2_tx, pub2_rx) = mpsc::sync_channel::<Message>(self.opts.pub_q_len as usize);
+        let (pub2_tx, pub2_rx) = channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub2_rx = Some(pub2_rx);
 
-        let (sub_tx, sub_rx) = mpsc::sync_channel::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
+        let (sub_tx, sub_rx) = channel::sync_channel::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
         self.sub_rx = Some(sub_rx);
 
-        let (incoming_tx, incoming_rx) = mpsc::sync_channel::<VariablePacket>(1);
+        let (incoming_tx, incoming_rx) = channel::sync_channel::<VariablePacket>(1);
         self.incoming_rx = Some(incoming_rx);
 
         // synchronizes tcp connection. why ?
@@ -473,6 +260,11 @@ impl MqttClient {
         let (streamupdate_tx, streamupdate_rx) = mpsc::sync_channel::<NetworkStream>(1);
         self.streamupdate_tx = Some(streamupdate_tx.clone());
 
+        let ping_timer = Timer::default();
+        self.ping_timer = Some(ping_timer);
+        let retransmit_timer = Timer::default();
+        self.retransmit_timer = Some(retransmit_timer);
+
         // @ Create Request through which user interacts
         // @ These are the handles using which user interacts with rumqtt.
         let mq_request = MqRequest {
@@ -480,7 +272,7 @@ impl MqttClient {
             pub1_tx: pub1_tx,
             pub2_tx: pub2_tx,
             subscribe_tx: sub_tx,
-            mionotify_tx: mionotify_tx.clone(),
+            misc_tx: misc_tx.clone(),
         };
 
         // Initial Mqtt connection
@@ -494,9 +286,10 @@ impl MqttClient {
         // Tcp Streams are std blocking streams.This helps avoiding the state
         // machine hell.
         // All the network writes also happen in this thread
-        // TODO: Handle thread death
-        thread::spawn(move || {
-            event_loop.run(&mut self).expect("Couldn't Run EventLoop");
+        thread::spawn(move || -> Result<()> {
+            let poll = Poll::new().expect("Unable to create Poll");
+            try!(self.run(poll));
+            Ok(())
         });
 
         // This thread handles network reads (coz they are blocking) and
@@ -516,7 +309,7 @@ impl MqttClient {
                             // UPDATE: Lot of publishes are being written by the time this notified
                             // the eventloop thread. Setting disconnect_block = true during write failure
                             error!("Error in receiving packet {:?}", err);
-                            mionotify_tx.send(MioNotification::Reconnect).expect("Unable to Notify");
+                            misc_tx.send(MioNotification::Reconnect).expect("Unable to Notify");
                             continue 'update_stream;
                         }
                         // Err(err) => {
@@ -529,7 +322,7 @@ impl MqttClient {
                         // }
                     };
                     incoming_tx.send(packet).expect("Unable to send incoming message");
-                    mionotify_tx.send(MioNotification::Incoming).expect("Unable to Notify");
+                    misc_tx.send(MioNotification::Incoming).expect("Unable to Notify");
                 }
             }
         });
@@ -541,6 +334,229 @@ impl MqttClient {
         }
     }
 
+    fn run(mut self, poll: Poll) -> Result<()> {
+        let mut events = Events::new();
+        {
+            let ping_timer = self.ping_timer.as_ref().unwrap();
+            poll.register(ping_timer, PING_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let retransmit_timer = self.retransmit_timer.as_ref().unwrap();
+            poll.register(retransmit_timer , RETRANSMIT_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let pub0_rx = self.pub0_rx.as_ref().unwrap();
+            poll.register(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let pub1_rx = self.pub1_rx.as_ref().unwrap();
+            poll.register(pub1_rx, PUB1_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let pub2_rx = self.pub2_rx.as_ref().unwrap();
+            poll.register(pub2_rx, PUB2_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let sub_rx = self.sub_rx.as_ref().unwrap();
+            poll.register(sub_rx, SUB_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let misc_rx = self.misc_rx.as_ref().unwrap();
+            poll.register(misc_rx, MISC_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            
+        }
+        loop {
+            try!(poll.poll(&mut events, None));
+            for e in events.iter() {
+                try!(match e.token() {
+                    PUB0_CHANNEL => self.publish0(false),
+                    PUB1_CHANNEL => self.publish1(false),
+                    PUB2_CHANNEL => self.publish2(false),
+                    SUB_CHANNEL => self.subscribe(),
+                    PING_TIMER => self.ping(),
+                    RETRANSMIT_TIMER => self.retransmit(),
+                    MISC_CHANNEL => self.misc(),
+                    _ => panic!("Invalid Token"),
+                });
+            }
+        }
+    }
+
+    fn ping(&mut self) -> Result<()> {
+        debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
+        match self.state {
+            MqttState::Connected => {
+                if !self.await_ping {
+                    let _ = self._ping();
+                } else {
+                    error!("awaiting for previous ping resp");
+                }
+
+                if let Some(keep_alive) = self.opts.keep_alive {
+                    let ping_timer = self.ping_timer.as_mut().unwrap();
+                    try!(ping_timer.set_timeout(Duration::from_millis(keep_alive as u64 * 900), "PING TIMER".to_string()));
+                }
+            }
+
+            MqttState::Disconnected | MqttState::Handshake => error!("I won't ping. Client is in disconnected/handshake state"),
+        }
+        Ok(())
+    }
+
+    fn retransmit(&mut self) -> Result<()> {
+        match self.state {
+            MqttState::Connected => {
+                debug!("^^^ QUEUE RESEND");
+                self._try_retransmit();
+            }
+            MqttState::Disconnected | MqttState::Handshake => {
+                debug!("I won't republish. Client is in disconnected/handshake state")
+            }
+        }
+        let retransmit_timer = self.retransmit_timer.as_mut().unwrap();
+        try!(retransmit_timer.set_timeout(Duration::from_millis(self.opts.queue_timeout as u64 * 1000),
+                                                                            "PING TIMER".to_string()));
+        Ok(())
+    }
+
+    fn subscribe(&mut self) -> Result<()> {
+        let topics = {
+            let sub_rx = self.sub_rx.as_ref().unwrap();
+            sub_rx.try_recv().expect("Sub Rx Recv Error")
+        };
+        self.subscriptions.push_back(topics.clone());
+        let _ = self._subscribe(topics);
+        Ok(())
+    }
+
+    fn publish0(&mut self, clear_backlog: bool) -> Result<()> {
+        // Increment only if notificication is from publisher
+        if !clear_backlog {
+            self.pub0_channel_pending += 1;
+        }
+
+        debug!("Channel pending @@@@@ {}", self.pub0_channel_pending);
+        // Receive from publish qos0 channel only when connected.
+        if !self.disconnect_block {
+            loop {
+                if self.pub0_channel_pending == 0 {
+                    debug!("Finished everything in channel");
+                    break;
+                }
+                let message = {
+                    let pub0_rx = self.pub0_rx.as_ref().unwrap();
+                    pub0_rx.try_recv().expect("Pub0 Rx Recv Error")
+                };
+                let _ = self._publish(message);
+                self.pub0_channel_pending -= 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn publish1(&mut self, clear_backlog: bool) -> Result<()> {
+        // Increment only if notificication is from publisher
+        if !clear_backlog {
+            self.pub1_channel_pending += 1;
+        }
+
+        debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
+        // Receive from publish qos1 channel only when outgoing pub queue
+        // length is < max and in connected state
+        if !self.should_qos1_block && !self.disconnect_block {
+            loop {
+                if self.pub1_channel_pending == 0 {
+                    debug!("Finished everything in channel");
+                    break;
+                }
+                let mut message = {
+                    let pub1_rx = self.pub1_rx.as_ref().unwrap();
+                    pub1_rx.try_recv().expect("Pub1 Rx Recv Error")
+                };
+                // Add next packet id to message and publish
+                let PacketIdentifier(pkid) = self._next_pkid();
+                message.set_pkid(pkid);
+                let _ = self._publish(message);
+                self.pub1_channel_pending -= 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn publish2(&mut self, clear_backlog: bool) -> Result<()> {
+        // Increment only if notificication is from publisher
+        if !clear_backlog {
+            self.pub2_channel_pending += 1;
+        }
+
+        debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
+        // Receive from publish qos2 channel only when outgoing pub queue
+        // length is < max and in connected state
+        if !self.should_qos2_block && !self.disconnect_block {
+            loop {
+                // Before
+                if self.pub2_channel_pending == 0 {
+                    debug!("Finished everything in channel");
+                    break;
+                }
+                let mut message = {
+                    // Careful, this is a blocking call. Might
+                    // be easier to find queue len bugs with this.
+                    let pub2_rx = self.pub2_rx.as_ref().unwrap();
+                    pub2_rx.try_recv().expect("Pub2 Rx Recv Error")
+                };
+                // Add next packet id to message and publish
+                let PacketIdentifier(pkid) = self._next_pkid();
+                message.set_pkid(pkid);
+                let _ = self._publish(message);
+                self.pub2_channel_pending -= 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn misc(&mut self) -> Result<()> {
+        let notification = {
+            let misc_rx = self.misc_rx.as_ref().unwrap();
+            misc_rx.try_recv().expect("Pub2 Rx Recv Error")
+        };
+
+        match notification {
+            MioNotification::Disconnect => {
+                debug!("{:?}", self.state);
+                match self.state {
+                    MqttState::Connected => {
+                        let _ = self._disconnect();
+                    }
+                    _ => debug!("Mqtt connection not established"),
+                }
+            }
+            MioNotification::Incoming => {
+                let packet = {
+                    let incoming_rx = self.incoming_rx.as_ref().unwrap();
+                    incoming_rx.try_recv().expect("Incoming Rx Recv Error")
+                };
+                try!(self.STATE_handle_packet(&packet));
+            }
+            MioNotification::Reconnect => {
+                debug!("{:?}", self.state);
+
+                self.state = MqttState::Disconnected;
+                self.disconnect_block = true;
+                loop {
+                    match self._try_reconnect() {
+                        Ok(_) => break,
+                        Err(_) => continue,
+                    }
+                }
+
+                // Handles the case where initial tcp connect is successful and mqtt connect
+                // packets are sent (_try_reconnect) but broker closed the connection without
+                // sending CONNACK. Broker might be expecting TLS or username & password
+                if self.initial_connect {
+                    let connsync_tx = self.connsync_tx.as_ref().unwrap();
+                    connsync_tx.send(MqttStatus::Failed).expect("ConnSync Tx Send Error");
+                } else {
+                    let streamupdate_tx = self.streamupdate_tx.as_ref().unwrap();
+                    let stream = self.stream.try_clone().expect("Stream Clone Error");
+                    try!(streamupdate_tx.send(stream));
+                }
+            }
+            MioNotification::Shutdown => {
+                let _ = self.stream.shutdown(Shutdown::Both);
+            }
+        }
+        Ok(())
+    }
+
     /// Return a count of (successful) mqtt connections that happened from the
     /// start.
     /// Just to know how many times the client reconnected (coz of bad
@@ -548,7 +564,7 @@ impl MqttClient {
     pub fn get_reconnection_count(&self) -> u32 { self.no_of_reconnections }
 
     #[allow(non_snake_case)]
-    fn STATE_handle_packet(&mut self, packet: &VariablePacket, event_loop: &mut EventLoop<Self>) {
+    fn STATE_handle_packet(&mut self, packet: &VariablePacket) -> Result<()> {
         let handle = self.handle_packet(packet);
         if let Ok(p) = handle {
             match p {
@@ -571,27 +587,26 @@ impl MqttClient {
                         // Publisher won't stop even when disconnected until channel is full.
                         // This notifies notify() to publish channel pending messages after
                         // reconnect.
-                        let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
                         self.disconnect_block = false;
-                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS0Reconnect)).expect("MioNotify Tx Send Error");
-                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1Reconnect)).expect("MioNotify Tx Send Error");
-                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2Reconnect)).expect("MioNotify Tx Send Error");
+                        try!(self.publish0(true));
+                        try!(self.publish1(true));
+                        try!(self.publish2(true));
                     }
 
                     // TODO: Bug?? Multiple timers after restart? Doesn't seem so based on pings
-                    event_loop.timeout_ms(MIO_QUEUE_TIMER, self.opts.queue_timeout as u64 * 1000)
-                        .unwrap();
+                    let ping_timer = self.ping_timer.as_mut().unwrap();
+                    let retransmit_timer = self.retransmit_timer.as_mut().unwrap();
+                    try!(retransmit_timer.set_timeout(Duration::from_millis(self.opts.queue_timeout as u64 * 1000),
+                                                                            "PING TIMER".to_string()));
                     if let Some(keep_alive) = self.opts.keep_alive {
-                        event_loop.timeout_ms(MIO_PING_TIMER, keep_alive as u64 * 900).unwrap();
+                        try!(ping_timer.set_timeout(Duration::from_millis(keep_alive as u64 * 900), "PING TIMER".to_string()));
                     }
 
                 }
                 HandlePacket::Publish(m) => {
                     if let Some(ref message_callback) = self.message_callback {
                         let message_callback = message_callback.clone();
-
-                        let pool = self.pool.as_mut().unwrap();
-                        pool.execute(move || message_callback(*m));
+                        self.pool.execute(move || message_callback(*m));
                     }
                 }
                 // Sending a dummy notification saying tha queue size has reduced
@@ -601,28 +616,24 @@ impl MqttClient {
                     // Send only for notify() to recover if channel is blocked.
                     // Blocking = true is set during publish if pub q len is more than desired.
                     if self.outgoing_pub.len() < self.opts.pub_q_len as usize && self.should_qos1_block {
-                        let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
                         self.should_qos1_block = false;
-                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS1QueueDown)).expect("MioNotify Tx Send Error");
+                        try!(self.publish1(true));
                     }
 
                     if m.is_none() {
-                        return ();
+                        return Ok(());
                     }
 
                     if let Some(ref publish_callback) = self.publish_callback {
                         let publish_callback = publish_callback.clone();
-
-                        let pool = self.pool.as_mut().unwrap();
-                        pool.execute(move || publish_callback(m.unwrap()));
+                        self.pool.execute(move || publish_callback(m.unwrap()));
                     }
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
                 HandlePacket::PubRec(pkid) => {
                     if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block {
-                        let mionotify_tx = self.mionotify_tx.as_ref().unwrap();
                         self.should_qos2_block = false;
-                        mionotify_tx.send(MioNotification::Pub(PubNotify::QoS2QueueDown)).expect("MioNotify Tx Send Error");
+                        try!(self.publish2(true));
                     }
 
                     // if let Some(ref publish_callback) = self.publish_callback {
@@ -637,6 +648,7 @@ impl MqttClient {
         } else if let Err(err) = handle {
             error!("Error handling the packet {:?}", err);
         }
+        Ok(())
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
@@ -945,7 +957,7 @@ impl MqttClient {
         }
     }
 
-    fn ping(&mut self) -> Result<()> {
+    fn _ping(&mut self) -> Result<()> {
         let ping = try!(genpack::generate_pingreq_packet());
         self.await_ping = true;
         try!(self._write_packet(ping));

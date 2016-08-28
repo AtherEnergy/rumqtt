@@ -12,6 +12,7 @@ pub type SslError = ssl::error::SslError;
 
 use error::{Error, Result};
 
+#[derive(Debug)]
 pub struct SslContext {
     pub inner: Arc<ssl::SslContext>,
 }

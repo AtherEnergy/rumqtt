@@ -50,7 +50,7 @@ fn basic() {
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker("localhost:1883");
 
 
     let count = Arc::new(AtomicUsize::new(0));

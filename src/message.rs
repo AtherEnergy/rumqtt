@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 
 use mqtt::topic_name::TopicName;
