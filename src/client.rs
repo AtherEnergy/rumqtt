@@ -1150,19 +1150,45 @@ impl MqttClient {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use mqtt::packet::*;
+    use mqtt::topic_name::TopicName;
+    use time;
+
     use clientoptions::MqttOptions;
     use super::MqttClient;
+    use message::Message;
 
-    fn qos1_offline_buffer() {
+    fn fill_qos1_publish_buffers(client: &mut MqttClient) {
+        for i in 0..100 {
+            let message = Box::new(Message {
+                topic: TopicName::new("a/b/c".to_string()).unwrap(),
+                qos: QoSWithPacketIdentifier::Level1(i),
+                retain: false,
+                payload: Arc::new("dummy data".to_string().into_bytes()),
+                userdata: None,
+            });
+            client.outgoing_pub.push_back((time::get_time().sec, message));
+        }
+    }
+    #[test]
+    fn retransmission_after_timeout() {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
             .set_reconnect(5)
-            .set_client_id("test-reconnect-client")
+            .set_q_timeout(5)
+            .set_client_id("test-retransmission-client")
             .broker("broker.hivemq.com:1883");
 
-        let mq_client = MqttClient::new(client_options);
+        let mut mq_client = MqttClient::new(client_options);
+        fill_qos1_publish_buffers(&mut mq_client);
+        println!("Current Buf Len = {:?}", mq_client.outgoing_pub.len());
         // Connects to a broker and returns a `Publisher` and `Subscriber`
         let request = mq_client.start().expect("Coudn't start");
+        thread::sleep(Duration::new(7, 0));
     }
 }
 
