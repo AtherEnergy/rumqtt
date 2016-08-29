@@ -78,3 +78,4 @@ pub use clientoptions::MqttOptions;
 pub use mqtt::QualityOfService as QoS;
 pub use client::MqttClient;
 pub use request::MqRequest;
+pub use message::Message;

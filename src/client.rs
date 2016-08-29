@@ -10,7 +10,7 @@ use std::sync::mpsc;
 
 use mio::*;
 use mio::timer::Timer;
-use mio::channel::{SyncSender, Receiver};
+use mio::channel::Receiver;
 use mqtt::{Decodable, QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::control::variable_header::{ConnectReturnCode, PacketIdentifier};
@@ -138,6 +138,9 @@ pub struct MqttClient {
     /// On publish callback
     pub publish_callback: Option<Arc<PublishSendableFn>>,
     pub pool: ThreadPool,
+
+    /// Poll
+    pub poll: Poll,
 }
 
 impl MqttClient {
@@ -202,7 +205,10 @@ impl MqttClient {
             publish_callback: None,
 
             // Threadpool
-            pool: ThreadPool::new(2),
+            pool: ThreadPool::new(3),
+
+            // Poll
+            poll: Poll::new().expect("Unable to create a poller"),
         }
     }
 
@@ -287,8 +293,9 @@ impl MqttClient {
         // machine hell.
         // All the network writes also happen in this thread
         thread::spawn(move || -> Result<()> {
-            let poll = Poll::new().expect("Unable to create Poll");
-            try!(self.run(poll));
+            //let poll = Poll::new().expect("Unable to create Poll");
+            try!(self.run());
+            print!("((((((((( POLLING STOPPED )))))))))");
             Ok(())
         });
 
@@ -296,7 +303,14 @@ impl MqttClient {
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn(move || {
             'update_stream: loop {
-                let mut stream = streamupdate_rx.recv().expect("Stream update channel error");
+                let mut stream = match streamupdate_rx.recv() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Stream Update Error. error = {:?}", e);
+                        return;
+                    }
+                };
+
                 loop {
                     let packet = match VariablePacket::decode(&mut stream) {
                         // @ Decoded packet successfully.
@@ -327,45 +341,59 @@ impl MqttClient {
             }
         });
 
-        let conn = connsync_rx.recv().expect("Connection sync recv error");
+        let conn = try!(connsync_rx.recv());
         match conn {
             MqttStatus::Success => Ok(mq_request),
             MqttStatus::Failed => Err(Error::ConnectionAbort),
         }
     }
 
-    fn run(mut self, poll: Poll) -> Result<()> {
+    fn run(mut self) -> Result<()> {
         let mut events = Events::new();
         {
             let ping_timer = self.ping_timer.as_ref().unwrap();
-            poll.register(ping_timer, PING_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll.register(ping_timer, PING_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let retransmit_timer = self.retransmit_timer.as_ref().unwrap();
-            poll.register(retransmit_timer , RETRANSMIT_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll.register(retransmit_timer, RETRANSMIT_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let pub0_rx = self.pub0_rx.as_ref().unwrap();
-            poll.register(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll.register(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let pub1_rx = self.pub1_rx.as_ref().unwrap();
-            poll.register(pub1_rx, PUB1_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll.register(pub1_rx, PUB1_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let pub2_rx = self.pub2_rx.as_ref().unwrap();
-            poll.register(pub2_rx, PUB2_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll.register(pub2_rx, PUB2_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let sub_rx = self.sub_rx.as_ref().unwrap();
-            poll.register(sub_rx, SUB_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll.register(sub_rx, SUB_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let misc_rx = self.misc_rx.as_ref().unwrap();
-            poll.register(misc_rx, MISC_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
-            
+            self.poll.register(misc_rx, MISC_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
         }
+
         loop {
-            try!(poll.poll(&mut events, None));
+            try!(self.poll.poll(&mut events, None));
             for e in events.iter() {
-                try!(match e.token() {
-                    PUB0_CHANNEL => self.publish0(false),
-                    PUB1_CHANNEL => self.publish1(false),
-                    PUB2_CHANNEL => self.publish2(false),
-                    SUB_CHANNEL => self.subscribe(),
-                    PING_TIMER => self.ping(),
-                    RETRANSMIT_TIMER => self.retransmit(),
-                    MISC_CHANNEL => self.misc(),
+                match e.token() {
+                    PUB0_CHANNEL => {
+                        try!(self.publish0(false));
+                    }
+                    PUB1_CHANNEL => {
+                        try!(self.publish1(false));
+                    }
+                    PUB2_CHANNEL => {
+                        try!(self.publish2(false));
+                    }
+                    SUB_CHANNEL => {
+                        try!(self.subscribe());
+                    }
+                    PING_TIMER => {
+                        try!(self.ping());
+                    }
+                    RETRANSMIT_TIMER => {
+                        try!(self.retransmit());
+                    }
+                    MISC_CHANNEL => {
+                        try!(self.misc());
+                    }
                     _ => panic!("Invalid Token"),
-                });
+                };
             }
         }
     }
@@ -410,7 +438,7 @@ impl MqttClient {
     fn subscribe(&mut self) -> Result<()> {
         let topics = {
             let sub_rx = self.sub_rx.as_ref().unwrap();
-            sub_rx.try_recv().expect("Sub Rx Recv Error")
+            try!(sub_rx.try_recv())
         };
         self.subscriptions.push_back(topics.clone());
         let _ = self._subscribe(topics);
@@ -422,8 +450,7 @@ impl MqttClient {
         if !clear_backlog {
             self.pub0_channel_pending += 1;
         }
-
-        debug!("Channel pending @@@@@ {}", self.pub0_channel_pending);
+        debug!("Block Reading = {}. Channel pending @@@@@ {}", self.disconnect_block, self.pub0_channel_pending);
         // Receive from publish qos0 channel only when connected.
         if !self.disconnect_block {
             loop {
@@ -435,6 +462,14 @@ impl MqttClient {
                     let pub0_rx = self.pub0_rx.as_ref().unwrap();
                     pub0_rx.try_recv().expect("Pub0 Rx Recv Error")
                 };
+
+                // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
+                // Buffer limit isn't working.
+                {
+                    let pub0_rx = self.pub0_rx.as_ref().unwrap();            
+                    self.poll.reregister(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+                }
+
                 let _ = self._publish(message);
                 self.pub0_channel_pending -= 1;
             }
@@ -448,7 +483,12 @@ impl MqttClient {
             self.pub1_channel_pending += 1;
         }
 
-        debug!("Channel pending @@@@@ {}", self.pub1_channel_pending);
+        debug!("## Clear Backlog = {}, QoS1 block = {}, Disconnect block = {}, Channel pending = {}",
+                 clear_backlog,
+                 self.should_qos1_block,
+                 self.disconnect_block,
+                 self.pub1_channel_pending);
+
         // Receive from publish qos1 channel only when outgoing pub queue
         // length is < max and in connected state
         if !self.should_qos1_block && !self.disconnect_block {
@@ -461,11 +501,23 @@ impl MqttClient {
                     let pub1_rx = self.pub1_rx.as_ref().unwrap();
                     pub1_rx.try_recv().expect("Pub1 Rx Recv Error")
                 };
+
+                // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
+                // Buffer limit isn't working.
+                {
+                    let pub1_rx = self.pub1_rx.as_ref().unwrap();            
+                    self.poll.reregister(pub1_rx, PUB1_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+                }
                 // Add next packet id to message and publish
                 let PacketIdentifier(pkid) = self._next_pkid();
                 message.set_pkid(pkid);
                 let _ = self._publish(message);
                 self.pub1_channel_pending -= 1;
+                // println!("@@ Clear Backlog = {}, QoS1 block = {}, Disconnect block = {}, Channel pending = {}",
+                //             clear_backlog,
+                //             self.should_qos1_block,
+                //             self.disconnect_block,
+                //             self.pub1_channel_pending);
             }
         }
         Ok(())
@@ -488,11 +540,17 @@ impl MqttClient {
                     break;
                 }
                 let mut message = {
-                    // Careful, this is a blocking call. Might
-                    // be easier to find queue len bugs with this.
                     let pub2_rx = self.pub2_rx.as_ref().unwrap();
                     pub2_rx.try_recv().expect("Pub2 Rx Recv Error")
                 };
+
+                // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
+                // Buffer limit isn't working.
+                {
+                    let pub2_rx = self.pub2_rx.as_ref().unwrap();            
+                    self.poll.reregister(pub2_rx, PUB2_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+                }
+
                 // Add next packet id to message and publish
                 let PacketIdentifier(pkid) = self._next_pkid();
                 message.set_pkid(pkid);
@@ -506,7 +564,7 @@ impl MqttClient {
     fn misc(&mut self) -> Result<()> {
         let notification = {
             let misc_rx = self.misc_rx.as_ref().unwrap();
-            misc_rx.try_recv().expect("Pub2 Rx Recv Error")
+            misc_rx.try_recv().expect("Misc Rx Recv Error")
         };
 
         match notification {

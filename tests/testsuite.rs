@@ -50,7 +50,7 @@ fn basic() {
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .broker("localhost:1883");
+                                    .broker("broker.hivemq.com:1883");
 
 
     let count = Arc::new(AtomicUsize::new(0));
@@ -61,7 +61,7 @@ fn basic() {
     let request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        // println!("message --> {:?}", message);
     }).start().expect("Couldn't start");
 
     let topics = vec![("test/basic", QoS::Level0)];
@@ -248,7 +248,7 @@ fn qos0_stress_publish() {
 
     let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        //println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
 
     request.subscribe(vec![("test/qos0/stress", QoS::Level2)]).expect("Subcription failure");
@@ -283,7 +283,7 @@ fn qos1_stress_publish() {
 
     let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        // println!("message --> {:?}", message);
+        println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
 
     request.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
@@ -293,7 +293,7 @@ fn qos1_stress_publish() {
         request.publish("test/qos1/stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(300, 0));
+    thread::sleep(Duration::new(250, 0));
     println!("QoS1 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 <= final_count.load(Ordering::SeqCst));
 }
@@ -312,7 +312,7 @@ fn qos2_stress_publish() {
 
     let request = MqttClient::new(client_options).message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
-        //println!("message --> {:?}", message);
+        //println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
     
     request.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");

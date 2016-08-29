@@ -1,6 +1,6 @@
 use std::result;
 use std::io;
-use std::sync::mpsc::{self, RecvError};
+use std::sync::mpsc::{self, RecvError, TryRecvError};
 
 use mio::timer::TimerError;
 use mio::channel::SendError;
@@ -31,6 +31,7 @@ pub enum Error {
     InvalidCert(String),
     SendError,
     Recv(RecvError),
+    TryRecv(TryRecvError),
     Timer(TimerError),
     NoStream,
     TopicName,
@@ -64,6 +65,10 @@ impl<T> From<mpsc::SendError<T>> for Error {
 
 impl From<RecvError> for Error {
     fn from(err: RecvError) -> Error { Error::Recv(err) }
+}
+
+impl From<TryRecvError> for Error {
+    fn from(err: TryRecvError) -> Error { Error::TryRecv(err) }
 }
 
 impl<'a, P: Packet<'a>> From<PacketError<'a, P>> for Error {
