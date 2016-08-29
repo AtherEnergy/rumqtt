@@ -1,5 +1,5 @@
 use std::sync::Arc;
-
+use std::sync::mpsc;
 use mio::channel::SyncSender;
 
 use error::Result;
@@ -9,6 +9,16 @@ use mqtt::packet::*;
 use mqtt::topic_name::TopicName;
 
 use client::MioNotification;
+
+pub enum StatsReq {
+    QoS1QLen,
+    QoS2QLen,
+}
+
+pub enum StatsResp {
+    QoS1QLen(usize),
+    QoS2QLen(usize),
+}
 
 pub struct MqRequest {
     // QoS 0 publish request to eventloop
@@ -21,6 +31,8 @@ pub struct MqRequest {
     pub subscribe_tx: SyncSender<Vec<(TopicFilter, QualityOfService)>>,
     // miscellaneous requests to eventloop
     pub misc_tx: SyncSender<MioNotification>,
+    pub stats_req_tx: SyncSender<StatsReq>,
+    pub stats_resp_rx: mpsc::Receiver<StatsResp>,
 }
 
 impl MqRequest {
@@ -112,5 +124,25 @@ impl MqRequest {
     pub fn shutdown(&self) -> Result<()> {
         try!(self.misc_tx.send(MioNotification::Shutdown));
         Ok(())
+    }
+
+    pub fn qos1_q_len(&self) -> Result<usize> {
+        try!(self.stats_req_tx.send(StatsReq::QoS1QLen));
+        let o = try!(self.stats_resp_rx.recv());
+        if let StatsResp::QoS1QLen(r) = o {
+            return Ok(r);
+        } else {
+            panic!("Invalid Stats Response");
+        }
+    }
+
+    pub fn qos2_q_len(&self) -> Result<usize> {
+        try!(self.stats_req_tx.send(StatsReq::QoS2QLen));
+        let o = try!(self.stats_resp_rx.recv());
+        if let StatsResp::QoS2QLen(r) = o {
+            return Ok(r);
+        } else {
+            panic!("Invalid Stats Response");
+        }
     }
 }

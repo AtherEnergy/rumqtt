@@ -21,7 +21,7 @@ use time;
 use error::{Error, Result};
 use message::Message;
 use clientoptions::MqttOptions;
-use request::MqRequest;
+use request::{StatsReq, StatsResp, MqRequest};
 use genpack;
 
 const PING_TIMER: Token = Token(0);
@@ -32,7 +32,7 @@ const PUB2_CHANNEL: Token = Token(4);
 const SUB_CHANNEL: Token = Token(5);
 const INCOMING_CHANNEL: Token = Token(6);
 const MISC_CHANNEL: Token = Token(7);
-
+const STATS_CHANNEL: Token = Token(8);
 // static mut N: i32 = 0;
 // unsafe {
 //     N += 1;
@@ -111,6 +111,8 @@ pub struct MqttClient {
     pub sub_rx: Option<Receiver<Vec<(TopicFilter, QualityOfService)>>>,
     pub incoming_rx: Option<Receiver<VariablePacket>>,
     pub misc_rx: Option<Receiver<MioNotification>>,
+    pub stats_req_rx: Option<Receiver<StatsReq>>,
+    pub stats_resp_tx: Option<mpsc::SyncSender<StatsResp>>,
     pub connsync_tx: Option<mpsc::SyncSender<MqttStatus>>,
     pub streamupdate_tx: Option<mpsc::SyncSender<NetworkStream>>,
 
@@ -184,6 +186,8 @@ impl MqttClient {
             sub_rx: None,
             incoming_rx: None,
             misc_rx: None,
+            stats_req_rx: None,
+            stats_resp_tx: None,
             connsync_tx: None,
             streamupdate_tx: None,
 
@@ -242,6 +246,12 @@ impl MqttClient {
         let (misc_tx, misc_rx) = channel::sync_channel::<MioNotification>(1);
         self.misc_rx = Some(misc_rx);
 
+        let (stats_req_tx, stats_req_rx) = channel::sync_channel::<StatsReq>(1);
+        self.stats_req_rx = Some(stats_req_rx);
+
+        let (stats_resp_tx, stats_resp_rx) = mpsc::sync_channel::<StatsResp>(1);
+        self.stats_resp_tx = Some(stats_resp_tx);
+
         let (pub0_tx, pub0_rx) = channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub0_rx = Some(pub0_rx);
         let (pub1_tx, pub1_rx) = channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
@@ -279,6 +289,8 @@ impl MqttClient {
             pub2_tx: pub2_tx,
             subscribe_tx: sub_tx,
             misc_tx: misc_tx.clone(),
+            stats_req_tx: stats_req_tx,
+            stats_resp_rx: stats_resp_rx,
         };
 
         // Initial Mqtt connection
@@ -377,6 +389,8 @@ impl MqttClient {
             self.poll.register(incoming_rx, INCOMING_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let misc_rx = self.misc_rx.as_ref().unwrap();
             self.poll.register(misc_rx, MISC_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let stats_req_rx = self.stats_req_rx.as_ref().unwrap();
+            self.poll.register(stats_req_rx, STATS_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
         }
 
         loop {
@@ -407,6 +421,7 @@ impl MqttClient {
                     MISC_CHANNEL => {
                         try!(self.misc());
                     }
+                    STATS_CHANNEL => try!(self.stats()),
                     _ => panic!("Invalid Token"),
                 };
             }
@@ -596,8 +611,15 @@ impl MqttClient {
     fn misc(&mut self) -> Result<()> {
         let notification = {
             let misc_rx = self.misc_rx.as_ref().unwrap();
-            misc_rx.try_recv().expect("Misc Rx Recv Error")
+            try!(misc_rx.try_recv())
         };
+
+        // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
+        // Buffer limit isn't working.
+        {
+            let misc_rx = self.misc_rx.as_ref().unwrap();
+            self.poll.reregister(misc_rx, MISC_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+        }
 
         match notification {
             MioNotification::Disconnect => {
@@ -636,6 +658,26 @@ impl MqttClient {
             MioNotification::Shutdown => {
                 let _ = self.stream.shutdown(Shutdown::Both);
             }
+        }
+        Ok(())
+    }
+
+    fn stats(&self) -> Result<()> {
+        let request = {
+            let stats_req_rx = self.stats_req_rx.as_ref().unwrap();
+            try!(stats_req_rx.try_recv())
+        };
+
+        // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
+        // Buffer limit isn't working.
+        {
+            let stats_req_rx = self.stats_req_rx.as_ref().unwrap();
+            self.poll.reregister(stats_req_rx, STATS_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+        }
+        let stats_resp_tx = self.stats_resp_tx.as_ref().unwrap();
+        match request {
+            StatsReq::QoS1QLen => try!(stats_resp_tx.send(StatsResp::QoS1QLen(self.outgoing_pub.len()))),
+            StatsReq::QoS2QLen => try!(stats_resp_tx.send(StatsResp::QoS2QLen(self.outgoing_rec.len()))),
         }
         Ok(())
     }
@@ -985,6 +1027,7 @@ impl MqttClient {
                 while let Some(index) = self.outgoing_pub
                     .iter()
                     .position(|ref x| time::get_time().sec - x.0 > timeout) {
+                    // println!("########## {:?}", self.outgoing_pub);
                     let message = self.outgoing_pub.remove(index).expect("No such entry");
                     let _ = self._publish(*message.1);
                 }
@@ -1155,6 +1198,7 @@ mod test {
     use std::time::Duration;
 
     use mqtt::packet::*;
+    use mqtt::QualityOfService as QoS;
     use mqtt::topic_name::TopicName;
     use time;
 
@@ -1162,8 +1206,8 @@ mod test {
     use super::MqttClient;
     use message::Message;
 
-    fn fill_qos1_publish_buffers(client: &mut MqttClient) {
-        for i in 0..100 {
+    fn fill_qos1_publish_buffer(client: &mut MqttClient) {
+        for i in 1001..1101 {
             let message = Box::new(Message {
                 topic: TopicName::new("a/b/c".to_string()).unwrap(),
                 qos: QoSWithPacketIdentifier::Level1(i),
@@ -1174,21 +1218,69 @@ mod test {
             client.outgoing_pub.push_back((time::get_time().sec, message));
         }
     }
+
+    fn fill_qos2_publish_buffer(client: &mut MqttClient) {
+        for i in 1..101 {
+            let message = Box::new(Message {
+                topic: TopicName::new("a/b/c".to_string()).unwrap(),
+                qos: QoSWithPacketIdentifier::Level2(i),
+                retain: false,
+                payload: Arc::new("dummy data".to_string().into_bytes()),
+                userdata: None,
+            });
+            client.outgoing_rec.push_back((time::get_time().sec, message));
+        }
+    }
+
     #[test]
     fn retransmission_after_timeout() {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
-            .set_reconnect(5)
             .set_q_timeout(5)
             .set_client_id("test-retransmission-client")
             .broker("broker.hivemq.com:1883");
 
         let mut mq_client = MqttClient::new(client_options);
-        fill_qos1_publish_buffers(&mut mq_client);
-        println!("Current Buf Len = {:?}", mq_client.outgoing_pub.len());
+        fill_qos1_publish_buffer(&mut mq_client);
+        fill_qos2_publish_buffer(&mut mq_client);
+
         // Connects to a broker and returns a `Publisher` and `Subscriber`
         let request = mq_client.start().expect("Coudn't start");
-        thread::sleep(Duration::new(7, 0));
+        thread::sleep(Duration::new(20, 0));
+        let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+        let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+        assert_eq!(0, final_qos1_length);
+        assert_eq!(0, final_qos2_length);
+    }
+
+    #[test]
+    fn channel_block_and_unblock_after_retransmit_timeout() {
+        let client_options = MqttOptions::new()
+            .set_keep_alive(5)
+            .set_q_timeout(5)
+            .set_client_id("test-block-retransmission-client")
+            .broker("broker.hivemq.com:1883");
+
+        let mut mq_client = MqttClient::new(client_options);
+        fill_qos1_publish_buffer(&mut mq_client);
+        fill_qos2_publish_buffer(&mut mq_client);
+
+        // Connects to a broker and returns a `Publisher` and `Subscriber`
+        let request = mq_client.start().expect("Coudn't start");
+        for i in 0..100 {
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos1/blockretransmit", QoS::Level1, payload.into_bytes()).unwrap();
+        }
+
+        for i in 0..100 {
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos2/blockretransmit", QoS::Level2, payload.into_bytes()).unwrap();
+        }
+        thread::sleep(Duration::new(20, 0));
+        let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+        let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+        assert_eq!(0, final_qos1_length);
+        assert_eq!(0, final_qos2_length);
     }
 }
 
