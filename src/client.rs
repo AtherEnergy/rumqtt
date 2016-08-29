@@ -30,7 +30,8 @@ const PUB0_CHANNEL: Token = Token(2);
 const PUB1_CHANNEL: Token = Token(3);
 const PUB2_CHANNEL: Token = Token(4);
 const SUB_CHANNEL: Token = Token(5);
-const MISC_CHANNEL: Token = Token(6);
+const INCOMING_CHANNEL: Token = Token(6);
+const MISC_CHANNEL: Token = Token(7);
 
 // static mut N: i32 = 0;
 // unsafe {
@@ -55,7 +56,6 @@ pub enum MqttStatus {
 pub enum MioNotification {
     Disconnect,
     Shutdown,
-    Incoming,
     Reconnect,
 }
 
@@ -252,7 +252,7 @@ impl MqttClient {
         let (sub_tx, sub_rx) = channel::sync_channel::<Vec<(TopicFilter, QualityOfService)>>(self.opts.sub_q_len as usize);
         self.sub_rx = Some(sub_rx);
 
-        let (incoming_tx, incoming_rx) = channel::sync_channel::<VariablePacket>(1);
+        let (incoming_tx, incoming_rx) = channel::sync_channel::<VariablePacket>(5);
         self.incoming_rx = Some(incoming_rx);
 
         // synchronizes tcp connection. why ?
@@ -293,21 +293,26 @@ impl MqttClient {
         // machine hell.
         // All the network writes also happen in this thread
         thread::spawn(move || -> Result<()> {
-            //let poll = Poll::new().expect("Unable to create Poll");
-            try!(self.run());
-            print!("((((((((( POLLING STOPPED )))))))))");
+            // let poll = Poll::new().expect("Unable to create Poll");
+            match self.run() {
+                Ok(()) => println!("Event Loop returned with OK ???????"),
+                Err(e) => {
+                    error!("Stopping event loop. Error = {:?}", e);
+                    return Err(e.into());
+                }
+            }
             Ok(())
         });
 
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
-        thread::spawn(move || {
+        thread::spawn(move || -> Result<()> {
             'update_stream: loop {
                 let mut stream = match streamupdate_rx.recv() {
                     Ok(s) => s,
                     Err(e) => {
                         error!("Stream Update Error. error = {:?}", e);
-                        return;
+                        return Err(e.into());
                     }
                 };
 
@@ -323,20 +328,23 @@ impl MqttClient {
                             // UPDATE: Lot of publishes are being written by the time this notified
                             // the eventloop thread. Setting disconnect_block = true during write failure
                             error!("Error in receiving packet {:?}", err);
-                            misc_tx.send(MioNotification::Reconnect).expect("Unable to Notify");
+                            match misc_tx.send(MioNotification::Reconnect) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    error!("Unable to send reconnect notification to eventloop thread. Error = {:?}", e);
+                                    return Err(e.into());
+                                }
+                            }
                             continue 'update_stream;
                         }
-                        // Err(err) => {
-                        //     // maybe size=0 while reading indicating socket
-                        //     // close at broker end
-                        //     panic!("Error in receiving packet {:?}", err);
-                        //     // self._unbind();
-                        //     // TODO: Return actual error
-                        //     //Err(Error::Read)
-                        // }
                     };
-                    incoming_tx.send(packet).expect("Unable to send incoming message");
-                    misc_tx.send(MioNotification::Incoming).expect("Unable to Notify");
+                    match incoming_tx.send(packet) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            error!("Unable to send incoming packets to eventloop thread. Error = {:?}", e);
+                            return Err(e.into());
+                        }
+                    }
                 }
             }
         });
@@ -354,7 +362,9 @@ impl MqttClient {
             let ping_timer = self.ping_timer.as_ref().unwrap();
             self.poll.register(ping_timer, PING_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let retransmit_timer = self.retransmit_timer.as_ref().unwrap();
-            self.poll.register(retransmit_timer, RETRANSMIT_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            self.poll
+                .register(retransmit_timer, RETRANSMIT_TIMER, Ready::readable(), PollOpt::edge())
+                .expect("Poll Register Error");
             let pub0_rx = self.pub0_rx.as_ref().unwrap();
             self.poll.register(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let pub1_rx = self.pub1_rx.as_ref().unwrap();
@@ -363,6 +373,8 @@ impl MqttClient {
             self.poll.register(pub2_rx, PUB2_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let sub_rx = self.sub_rx.as_ref().unwrap();
             self.poll.register(sub_rx, SUB_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+            let incoming_rx = self.incoming_rx.as_ref().unwrap();
+            self.poll.register(incoming_rx, INCOMING_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
             let misc_rx = self.misc_rx.as_ref().unwrap();
             self.poll.register(misc_rx, MISC_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
         }
@@ -382,6 +394,9 @@ impl MqttClient {
                     }
                     SUB_CHANNEL => {
                         try!(self.subscribe());
+                    }
+                    INCOMING_CHANNEL => {
+                        try!(self.incoming());
                     }
                     PING_TIMER => {
                         try!(self.ping());
@@ -466,7 +481,7 @@ impl MqttClient {
                 // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
                 // Buffer limit isn't working.
                 {
-                    let pub0_rx = self.pub0_rx.as_ref().unwrap();            
+                    let pub0_rx = self.pub0_rx.as_ref().unwrap();
                     self.poll.reregister(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
                 }
 
@@ -484,10 +499,10 @@ impl MqttClient {
         }
 
         debug!("## Clear Backlog = {}, QoS1 block = {}, Disconnect block = {}, Channel pending = {}",
-                 clear_backlog,
-                 self.should_qos1_block,
-                 self.disconnect_block,
-                 self.pub1_channel_pending);
+               clear_backlog,
+               self.should_qos1_block,
+               self.disconnect_block,
+               self.pub1_channel_pending);
 
         // Receive from publish qos1 channel only when outgoing pub queue
         // length is < max and in connected state
@@ -505,7 +520,7 @@ impl MqttClient {
                 // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
                 // Buffer limit isn't working.
                 {
-                    let pub1_rx = self.pub1_rx.as_ref().unwrap();            
+                    let pub1_rx = self.pub1_rx.as_ref().unwrap();
                     self.poll.reregister(pub1_rx, PUB1_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
                 }
                 // Add next packet id to message and publish
@@ -513,7 +528,8 @@ impl MqttClient {
                 message.set_pkid(pkid);
                 let _ = self._publish(message);
                 self.pub1_channel_pending -= 1;
-                // println!("@@ Clear Backlog = {}, QoS1 block = {}, Disconnect block = {}, Channel pending = {}",
+                // println!("@@ Clear Backlog = {}, QoS1 block = {}, Disconnect block = {},
+                // Channel pending = {}",
                 //             clear_backlog,
                 //             self.should_qos1_block,
                 //             self.disconnect_block,
@@ -547,7 +563,7 @@ impl MqttClient {
                 // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
                 // Buffer limit isn't working.
                 {
-                    let pub2_rx = self.pub2_rx.as_ref().unwrap();            
+                    let pub2_rx = self.pub2_rx.as_ref().unwrap();
                     self.poll.reregister(pub2_rx, PUB2_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
                 }
 
@@ -558,6 +574,22 @@ impl MqttClient {
                 self.pub2_channel_pending -= 1;
             }
         }
+        Ok(())
+    }
+
+    fn incoming(&mut self) -> Result<()> {
+        let packet = {
+            let incoming_rx = self.incoming_rx.as_ref().unwrap();
+            incoming_rx.try_recv().expect("Incoming Rx Recv Error")
+        };
+
+        // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
+        // Buffer limit isn't working.
+        {
+            let incoming_rx = self.incoming_rx.as_ref().unwrap();
+            self.poll.reregister(incoming_rx, INCOMING_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
+        }
+        try!(self.STATE_handle_packet(&packet));
         Ok(())
     }
 
@@ -576,13 +608,6 @@ impl MqttClient {
                     }
                     _ => debug!("Mqtt connection not established"),
                 }
-            }
-            MioNotification::Incoming => {
-                let packet = {
-                    let incoming_rx = self.incoming_rx.as_ref().unwrap();
-                    incoming_rx.try_recv().expect("Incoming Rx Recv Error")
-                };
-                try!(self.STATE_handle_packet(&packet));
             }
             MioNotification::Reconnect => {
                 debug!("{:?}", self.state);
@@ -667,7 +692,6 @@ impl MqttClient {
                         self.pool.execute(move || message_callback(*m));
                     }
                 }
-                // Sending a dummy notification saying tha queue size has reduced
                 HandlePacket::PubAck(m) => {
                     // Don't notify everytime q len is < max. This will always be true initially
                     // leading to dup notify.
@@ -1100,11 +1124,10 @@ impl MqttClient {
 
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
-        // debug!("@@@ WRITING PACKET\n{:?}", packet);
         match self.stream.write_all(&packet) {
             Ok(v) => v,
             Err(e) => {
-                error!("{:?}", e);
+                error!("Error writing packet. Error = {:?}", e);
                 // disconnect block in case of socket errors. verify
                 // self.disconnect_block = true
                 return Err(e.into());
