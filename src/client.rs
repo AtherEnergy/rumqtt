@@ -1316,7 +1316,6 @@ mod test {
         fill_qos1_publish_buffer(&mut mq_client);
         fill_qos2_publish_buffer(&mut mq_client);
 
-        // Connects to a broker and returns a `Publisher` and `Subscriber`
         let request = mq_client.start().expect("Coudn't start");
         for i in 0..100 {
             let payload = format!("{}. hello rust", i);
@@ -1335,6 +1334,36 @@ mod test {
         let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
         assert_eq!(0, final_qos1_length);
         assert_eq!(0, final_qos2_length);
+    }
+
+    #[test]
+    /// Queue length should never cross than that of
+    /// set using set_pub_q_len()
+    fn queue_length_threshold() {
+        let client_options = MqttOptions::new()
+            .set_keep_alive(5)
+            .set_q_timeout(5)
+            .set_client_id("test-qlen-threshold-client")
+            .broker("broker.hivemq.com:1883");
+
+        let q_len = client_options.pub_q_len as usize;
+        let mq_client = MqttClient::new(client_options);
+        let request = mq_client.start().expect("Coudn't start");
+        for i in 0..1000 {
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos1/qlenthreshold", QoS::Level1, payload.into_bytes()).unwrap();
+            let qos1_q_len = request.qos1_q_len().expect("Stats Request Error");
+            // println!("{}. {:?}", i, qos1_q_len);
+            assert!( qos1_q_len <= q_len);
+        }
+
+        for i in 0..1000 {
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos2/qlenthreshold", QoS::Level2, payload.into_bytes()).unwrap();
+            let qos2_q_len = request.qos2_q_len().expect("Stats Request Error");
+            // println!("{}. {:?}", i, qos1_q_len);
+            assert!( qos2_q_len <= q_len);
+        }
     }
 }
 
