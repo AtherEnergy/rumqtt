@@ -1264,7 +1264,7 @@ mod test {
     fn force_retransmission_after_reconnect() {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
-            .set_client_id("test-retransmission-client")
+            .set_client_id("test-forceretransmission-client")
             .broker("broker.hivemq.com:1883");
 
         let mut mq_client = MqttClient::new(client_options);
@@ -1287,7 +1287,7 @@ mod test {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
             .set_q_timeout(5)
-            .set_client_id("test-block-retransmission-client")
+            .set_client_id("test-blockunblock-retransmission-client")
             .broker("broker.hivemq.com:1883");
 
         let mut mq_client = MqttClient::new(client_options);
@@ -1313,11 +1313,11 @@ mod test {
     }
 
     #[test]
-    fn channel_block_and_unblock_after_retransmit_timeout_with_reconnection() {
+    fn channel_block_and_unblock_after_reconnection() {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
             .set_q_timeout(5)
-            .set_client_id("test-block-retransmission-client")
+            .set_client_id("test-blockunblock-reconnect-client")
             .broker("broker.hivemq.com:1883");
 
         let mut mq_client = MqttClient::new(client_options);
