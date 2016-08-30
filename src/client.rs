@@ -209,7 +209,7 @@ impl MqttClient {
             publish_callback: None,
 
             // Threadpool
-            pool: ThreadPool::new(3),
+            pool: ThreadPool::new(4),
 
             // Poll
             poll: Poll::new().expect("Unable to create a poller"),
@@ -1065,13 +1065,18 @@ impl MqttClient {
             self.should_qos2_block = false;
             match self.state {
                 MqttState::Connected => {
-                    for index in 0..self.outgoing_pub.len() {
-                        let message = self.outgoing_pub.remove(index).expect("No such entry");
+                    // Cloning because iterating and removing isn't possible.
+                    // Iterating over indexes and and removing elements messes
+                    // up the remove sequence
+                    let mut outgoing_pub = self.outgoing_pub.clone();
+                    self.outgoing_pub.clear();
+                    while let Some(message) = outgoing_pub.pop_front() {
                         let _ = self._publish(*message.1);
                     }
 
-                    for index in 0..self.outgoing_rec.len() {
-                        let message = self.outgoing_rec.remove(index).expect("No such entry");
+                    let mut outgoing_rec = self.outgoing_rec.clone();
+                    self.outgoing_rec.clear();
+                    while let Some(message) = outgoing_rec.pop_front() {
                         let _ = self._publish(*message.1);
                     }
                 }
@@ -1220,7 +1225,7 @@ mod test {
     }
 
     fn fill_qos2_publish_buffer(client: &mut MqttClient) {
-        for i in 1..101 {
+        for i in 2001..2101 {
             let message = Box::new(Message {
                 topic: TopicName::new("a/b/c".to_string()).unwrap(),
                 qos: QoSWithPacketIdentifier::Level2(i),
@@ -1253,10 +1258,12 @@ mod test {
     }
 
     #[test]
-    fn after_reconnect_retransmission_after_timeout() {
+    /// Publish Queues should be immediately retransmitted
+    /// after reconnection.
+    /// `publish_q_timeout` > thread sleep time ensures this.
+    fn force_retransmission_after_reconnect() {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
-            .set_q_timeout(5)
             .set_client_id("test-retransmission-client")
             .broker("broker.hivemq.com:1883");
 
@@ -1267,9 +1274,10 @@ mod test {
         let request = mq_client.start().expect("Coudn't start");
         thread::sleep(Duration::new(1, 0));
         request.disconnect();
-        thread::sleep(Duration::new(20, 0));
+        thread::sleep(Duration::new(10, 0));
         let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
         let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+        // println!("{}, {}", final_qos1_length, final_qos2_length);
         assert_eq!(0, final_qos1_length);
         assert_eq!(0, final_qos2_length);
     }
