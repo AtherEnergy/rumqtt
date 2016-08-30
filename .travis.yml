@@ -23,6 +23,7 @@ install:
 branches:
   only:
   - master
+  - mioupdate
 script:
 - cargo build
 - cargo test -- --nocapture

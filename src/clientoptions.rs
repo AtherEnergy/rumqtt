@@ -30,7 +30,7 @@ impl Default for MqttOptions {
             client_id: None,
             username: None,
             password: None,
-            reconnect: None,
+            reconnect: Some(5),
             will: None,
             will_qos: QualityOfService::Level0,
             will_retain: false,

@@ -1,12 +1,15 @@
 use std::result;
 use std::io;
+use std::sync::mpsc::{self, RecvError, TryRecvError};
+
+use mio::timer::TimerError;
+use mio::channel::SendError;
+use openssl::ssl;
 use mqtt::topic_name::TopicNameError;
 use mqtt::topic_filter::TopicFilterError;
 use mqtt::packet::*;
 use mqtt::control::variable_header::ConnectReturnCode;
-use std::sync::mpsc::{RecvError, SendError};
-use mio;
-use openssl::ssl;
+
 
 pub type SslError = ssl::error::SslError;
 pub type Result<T> = result::Result<T, Error>;
@@ -26,6 +29,10 @@ pub enum Error {
     ConnectionRefused(ConnectReturnCode),
     Io(io::Error),
     InvalidCert(String),
+    SendError,
+    Recv(RecvError),
+    TryRecv(TryRecvError),
+    Timer(TimerError),
     NoStream,
     TopicName,
     TopicFilter,
@@ -33,7 +40,6 @@ pub enum Error {
     MqttPacket,
     Ssl(SslError),
     EventLoop,
-    MioNotify,
     Read,
 }
 
@@ -50,21 +56,29 @@ impl From<TopicFilterError> for Error {
 }
 
 impl<T> From<SendError<T>> for Error {
-    fn from(_: SendError<T>) -> Error { Error::MioNotify }
+    fn from(_: SendError<T>) -> Error { Error::SendError }
+}
+
+impl<T> From<mpsc::SendError<T>> for Error {
+    fn from(_: mpsc::SendError<T>) -> Error { Error::SendError }
 }
 
 impl From<RecvError> for Error {
-    fn from(_: RecvError) -> Error { Error::MioNotify }
+    fn from(err: RecvError) -> Error { Error::Recv(err) }
 }
 
-impl<'a, T: Packet<'a>> From<PacketError<'a, T>> for Error {
-    fn from(_: PacketError<'a, T>) -> Error { Error::MqttPacket }
+impl From<TryRecvError> for Error {
+    fn from(err: TryRecvError) -> Error { Error::TryRecv(err) }
 }
 
-impl<T> From<mio::NotifyError<T>> for Error {
-    fn from(_: mio::NotifyError<T>) -> Error { Error::MioNotify }
+impl<'a, P: Packet<'a>> From<PacketError<'a, P>> for Error {
+    fn from(_: PacketError<'a, P>) -> Error { Error::MqttPacket }
 }
 
 impl From<SslError> for Error {
     fn from(e: SslError) -> Error { Error::Ssl(e) }
+}
+
+impl From<TimerError> for Error {
+    fn from(e: TimerError) -> Error { Error::Timer(e) }
 }
