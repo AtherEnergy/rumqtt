@@ -1244,8 +1244,29 @@ mod test {
         fill_qos1_publish_buffer(&mut mq_client);
         fill_qos2_publish_buffer(&mut mq_client);
 
-        // Connects to a broker and returns a `Publisher` and `Subscriber`
         let request = mq_client.start().expect("Coudn't start");
+        thread::sleep(Duration::new(20, 0));
+        let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+        let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+        assert_eq!(0, final_qos1_length);
+        assert_eq!(0, final_qos2_length);
+    }
+
+    #[test]
+    fn after_reconnect_retransmission_after_timeout() {
+        let client_options = MqttOptions::new()
+            .set_keep_alive(5)
+            .set_q_timeout(5)
+            .set_client_id("test-retransmission-client")
+            .broker("broker.hivemq.com:1883");
+
+        let mut mq_client = MqttClient::new(client_options);
+        fill_qos1_publish_buffer(&mut mq_client);
+        fill_qos2_publish_buffer(&mut mq_client);
+
+        let request = mq_client.start().expect("Coudn't start");
+        thread::sleep(Duration::new(1, 0));
+        request.disconnect();
         thread::sleep(Duration::new(20, 0));
         let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
         let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
@@ -1269,6 +1290,39 @@ mod test {
         let request = mq_client.start().expect("Coudn't start");
         for i in 0..100 {
             let payload = format!("{}. hello rust", i);
+            request.publish("test/qos1/blockretransmit", QoS::Level1, payload.into_bytes()).unwrap();
+        }
+
+        for i in 0..100 {
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos2/blockretransmit", QoS::Level2, payload.into_bytes()).unwrap();
+        }
+        thread::sleep(Duration::new(20, 0));
+        let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+        let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+        assert_eq!(0, final_qos1_length);
+        assert_eq!(0, final_qos2_length);
+    }
+
+    #[test]
+    fn channel_block_and_unblock_after_retransmit_timeout_with_reconnection() {
+        let client_options = MqttOptions::new()
+            .set_keep_alive(5)
+            .set_q_timeout(5)
+            .set_client_id("test-block-retransmission-client")
+            .broker("broker.hivemq.com:1883");
+
+        let mut mq_client = MqttClient::new(client_options);
+        fill_qos1_publish_buffer(&mut mq_client);
+        fill_qos2_publish_buffer(&mut mq_client);
+
+        // Connects to a broker and returns a `Publisher` and `Subscriber`
+        let request = mq_client.start().expect("Coudn't start");
+        for i in 0..100 {
+            let payload = format!("{}. hello rust", i);
+            if i == 10 {
+                request.disconnect();
+            }
             request.publish("test/qos1/blockretransmit", QoS::Level1, payload.into_bytes()).unwrap();
         }
 
