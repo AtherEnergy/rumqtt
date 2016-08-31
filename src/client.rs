@@ -63,13 +63,13 @@ enum HandlePacket {
     ConnAck,
     Publish(Box<Message>),
     PubAck(Option<Message>),
-    PubRec(u16),
-    // PubRel,
+    PubRec(Option<Message>),
     PubComp,
     SubAck,
     UnSubAck,
     PingResp,
     Disconnect,
+    None,
     Invalid,
 }
 
@@ -529,7 +529,7 @@ impl MqttClient {
                 }
                 let mut message = {
                     let pub1_rx = self.pub1_rx.as_ref().unwrap();
-                    pub1_rx.try_recv().expect("Pub1 Rx Recv Error")
+                    try!(pub1_rx.try_recv())
                 };
 
                 // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
@@ -572,7 +572,7 @@ impl MqttClient {
                 }
                 let mut message = {
                     let pub2_rx = self.pub2_rx.as_ref().unwrap();
-                    pub2_rx.try_recv().expect("Pub2 Rx Recv Error")
+                    try!(pub2_rx.try_recv())
                 };
 
                 // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
@@ -754,18 +754,20 @@ impl MqttClient {
                     }
                 }
                 // TODO: Better read from channel again after PubComp instead of PubRec
-                HandlePacket::PubRec(pkid) => {
+                HandlePacket::PubRec(m) => {
                     if self.outgoing_rec.len() < self.opts.pub_q_len as usize && self.should_qos2_block {
                         self.should_qos2_block = false;
                         try!(self.publish2(true));
                     }
 
-                    // if let Some(ref publish_callback) = self.publish_callback {
-                    //     let publish_callback = publish_callback.clone();
+                    if m.is_none() {
+                        return Ok(());
+                    }
 
-                    //     let pool = self.pool.as_mut().unwrap();
-                    //     pool.execute(move || publish_callback(pkid));
-                    // }
+                    if let Some(ref publish_callback) = self.publish_callback {
+                        let publish_callback = publish_callback.clone();
+                        self.pool.execute(move || publish_callback(m.unwrap()));
+                    }
                 }
                 _ => debug!("packet handler says that he doesn't care"),
             }
@@ -855,20 +857,27 @@ impl MqttClient {
                     // @ Send 'pubrel' to broker
                     VariablePacket::PubrecPacket(ref pubrec) => {
                         let pkid = pubrec.packet_identifier();
-                        match self.outgoing_rec
+                        let m = match self.outgoing_rec
                             .iter()
                             .position(|ref x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
-                                self.outgoing_rec.remove(i);
+                                if let Some(m) = self.outgoing_rec.remove(i) {
+                                    Some(*m.1)
+                                } else {
+                                    None
+                                }
                             }
                             None => {
                                 error!("Oopssss..unsolicited record --> {:?}", pubrec);
+                                None
                             }
                         };
 
+                        // After receiving PUBREC packet and remoing corrosponding
+                        // message from outgoing_rec queue, send PUBREL and add it queue.
                         try!(self._pubrel(pkid));
                         self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
-                        Ok(HandlePacket::PubRec(pkid))
+                        Ok(HandlePacket::PubRec(m))
                     }
 
                     // @ Broker knows that client has the message
@@ -962,7 +971,7 @@ impl MqttClient {
                 };
 
                 try!(self._pubrec(pkid));
-                Ok(HandlePacket::PubRec(pkid))
+                Ok(HandlePacket::None)
             }
         }
     }
@@ -1308,6 +1317,7 @@ mod test {
         thread::sleep(Duration::new(20, 0));
         let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
         let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+        println!("qos1_length = {}, qos2_length = {}", final_qos1_length, final_qos2_length);
         assert_eq!(0, final_qos1_length);
         assert_eq!(0, final_qos2_length);
     }
@@ -1362,7 +1372,7 @@ mod test {
             request.publish("test/qos1/qlenthreshold", QoS::Level1, payload.into_bytes()).unwrap();
             let qos1_q_len = request.qos1_q_len().expect("Stats Request Error");
             // println!("{}. {:?}", i, qos1_q_len);
-            assert!( qos1_q_len <= q_len);
+            assert!(qos1_q_len <= q_len);
         }
 
         for i in 0..1000 {
@@ -1370,7 +1380,7 @@ mod test {
             request.publish("test/qos2/qlenthreshold", QoS::Level2, payload.into_bytes()).unwrap();
             let qos2_q_len = request.qos2_q_len().expect("Stats Request Error");
             // println!("{}. {:?}", i, qos1_q_len);
-            assert!( qos2_q_len <= q_len);
+            assert!(qos2_q_len <= q_len);
         }
     }
 }

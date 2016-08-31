@@ -281,19 +281,54 @@ fn qos1_stress_publish() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let request = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).publish_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
-
-    request.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
 
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         request.publish("test/qos1/stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(230, 0));
+    thread::sleep(Duration::new(10, 0));
+    println!("QoS1 Final Count = {:?}", final_count.load(Ordering::SeqCst));
+    assert!(1000 <= final_count.load(Ordering::SeqCst));
+}
+
+#[test]
+/// This test tests if all packets are being published after reconnections
+/// NOTE: Previous tests used subscribes to same topic to decide if all the
+/// publishes are successful. When reconnections are involved, some publishes
+/// might happen before subscription is successful. You can verify this by 
+/// keeping prints at CONNACK, SUBACK & _PUBLISH(). After connection is successful
+/// you'll see some publishes before SUBACK.
+fn qos1_stress_publish_with_reconnections() {
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_reconnect(3)
+                                    .set_client_id("qos1-stress-reconnect-publish")
+                                    .set_pub_q_len(50)
+                                    .broker("broker.hivemq.com:1883");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let request = MqttClient::new(client_options).publish_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+    }).start().expect("Coudn't start");
+
+    for i in 0..1000 {
+        let payload = format!("{}. hello rust", i);
+        if i == 100 || i == 500 || i == 900 {
+            request.disconnect();
+        }
+        request.publish("test/qos1/stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
+    }
+
+    thread::sleep(Duration::new(30, 0));
     println!("QoS1 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 <= final_count.load(Ordering::SeqCst));
 }
@@ -310,19 +345,47 @@ fn qos2_stress_publish() {
     let final_count = count.clone();
     let count = count.clone();
 
-    let request = MqttClient::new(client_options).message_callback(move |message| {
+    let request = MqttClient::new(client_options).publish_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
     
-    request.subscribe(vec![("test/qos2/stress", QoS::Level2)]).expect("Subcription failure");
-
     for i in 0..500 {
         let payload = format!("{}. hello rust", i);
         request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(250, 0));
+    thread::sleep(Duration::new(10, 0));
+    println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
+    assert!(500 == final_count.load(Ordering::SeqCst));
+}
+
+#[test]
+fn qos2_stress_publish_with_reconnections() {
+    let client_options = MqttOptions::new()
+                                    .set_keep_alive(5)
+                                    .set_reconnect(3)
+                                    .set_client_id("qos2-stress-reconnect-publish")
+                                    .broker("broker.hivemq.com:1883");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let request = MqttClient::new(client_options).publish_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+        // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+    }).start().expect("Coudn't start");
+    
+    for i in 0..500 {
+        let payload = format!("{}. hello rust", i);
+        if i == 100 || i == 500 || i == 900 {
+            request.disconnect();
+        }
+        request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
+    }
+
+    thread::sleep(Duration::new(30, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(500 == final_count.load(Ordering::SeqCst));
 }
