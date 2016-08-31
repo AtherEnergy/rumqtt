@@ -369,7 +369,7 @@ impl MqttClient {
     }
 
     fn run(mut self) -> Result<()> {
-        let mut events = Events::new();
+        let mut events = Events::with_capacity(1024);
         {
             let ping_timer = self.ping_timer.as_ref().unwrap();
             self.poll.register(ping_timer, PING_TIMER, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
