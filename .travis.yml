@@ -13,6 +13,8 @@ matrix:
 #before_install:
 #  scripts/travis_setup.sh
 install:
+- sudo apt install mosquitto
+- mosquitto --version
 - curl https://sh.rustup.rs -sSf | sh -s -- -y
 - export PATH="$HOME/.cargo/bin:$PATH"
 - rustup toolchain install stable
@@ -24,6 +26,8 @@ branches:
   only:
   - master
   - mioupdate
+before_script:
+  mosquitto -c scripts/mosquitto.conf &
 script:
 - cargo build
 - cargo test -- --nocapture

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
+const BROKER_ADDRESS: &'static str = "localhost:1883";
 
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial tcp connect.
@@ -50,7 +51,7 @@ fn basic() {
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
 
     let count = Arc::new(AtomicUsize::new(0));
@@ -84,7 +85,7 @@ fn reconnection() {
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-reconnect-client")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     // Message count
     let count = Arc::new(AtomicUsize::new(0));
@@ -123,7 +124,7 @@ fn acked_message() {
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-reconnect-client")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     // Connects to a broker and returns a `request` 
     let mq_client = MqttClient::new(client_options);
@@ -152,13 +153,13 @@ fn will() {
                                     .set_client_id("test-will-c1")
                                     .set_clean_session(false)
                                     .set_will("test/will", "I'm dead")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     let client_options2 = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-will-c2")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
@@ -198,7 +199,7 @@ fn retained_messages() {
                                     .set_reconnect(3)
                                     .set_client_id("test-retain-client")
                                     .set_clean_session(true)
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
     //NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org" broker
 
     let count = Arc::new(AtomicUsize::new(0));
@@ -240,7 +241,7 @@ fn qos0_stress_publish() {
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos0-stress-publish")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
@@ -272,7 +273,7 @@ fn qos1_stress_publish() {
                                     .set_reconnect(3)
                                     .set_client_id("qos1-stress-publish")
                                     .set_pub_q_len(50)
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     //TODO: Alert!!! Mosquitto seems to be unable to publish fast (loosing messsages
     // with mosquitto broker. local and remote)
@@ -309,7 +310,7 @@ fn qos1_stress_publish_with_reconnections() {
                                     .set_reconnect(3)
                                     .set_client_id("qos1-stress-reconnect-publish")
                                     .set_pub_q_len(50)
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
@@ -339,7 +340,7 @@ fn qos2_stress_publish() {
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos2-stress-publish")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();
@@ -366,7 +367,7 @@ fn qos2_stress_publish_with_reconnections() {
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos2-stress-reconnect-publish")
-                                    .broker("broker.hivemq.com:1883");
+                                    .broker(BROKER_ADDRESS);
 
     let count = Arc::new(AtomicUsize::new(0));
     let final_count = count.clone();

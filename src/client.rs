@@ -1220,6 +1220,8 @@ mod test {
     use super::MqttClient;
     use message::Message;
 
+    const BROKER_ADDRESS: &'static str = "localhost:1883";
+
     fn fill_qos1_publish_buffer(client: &mut MqttClient) {
         for i in 1001..1101 {
             let message = Box::new(Message {
@@ -1252,7 +1254,7 @@ mod test {
             .set_keep_alive(5)
             .set_q_timeout(5)
             .set_client_id("test-retransmission-client")
-            .broker("broker.hivemq.com:1883");
+            .broker(BROKER_ADDRESS);
 
         let mut mq_client = MqttClient::new(client_options);
         fill_qos1_publish_buffer(&mut mq_client);
@@ -1274,7 +1276,7 @@ mod test {
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
             .set_client_id("test-forceretransmission-client")
-            .broker("broker.hivemq.com:1883");
+            .broker(BROKER_ADDRESS);
 
         let mut mq_client = MqttClient::new(client_options);
         fill_qos1_publish_buffer(&mut mq_client);
@@ -1286,7 +1288,6 @@ mod test {
         thread::sleep(Duration::new(10, 0));
         let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
         let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
-        // println!("{}, {}", final_qos1_length, final_qos2_length);
         assert_eq!(0, final_qos1_length);
         assert_eq!(0, final_qos2_length);
     }
@@ -1297,7 +1298,7 @@ mod test {
             .set_keep_alive(5)
             .set_q_timeout(5)
             .set_client_id("test-blockunblock-retransmission-client")
-            .broker("broker.hivemq.com:1883");
+            .broker(BROKER_ADDRESS);
 
         let mut mq_client = MqttClient::new(client_options);
         fill_qos1_publish_buffer(&mut mq_client);
@@ -1328,7 +1329,7 @@ mod test {
             .set_keep_alive(5)
             .set_q_timeout(5)
             .set_client_id("test-blockunblock-reconnect-client")
-            .broker("broker.hivemq.com:1883");
+            .broker(BROKER_ADDRESS);
 
         let mut mq_client = MqttClient::new(client_options);
         fill_qos1_publish_buffer(&mut mq_client);
@@ -1362,7 +1363,7 @@ mod test {
             .set_keep_alive(5)
             .set_q_timeout(5)
             .set_client_id("test-qlen-threshold-client")
-            .broker("broker.hivemq.com:1883");
+            .broker(BROKER_ADDRESS);
 
         let q_len = client_options.pub_q_len as usize;
         let mq_client = MqttClient::new(client_options);
