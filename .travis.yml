@@ -30,7 +30,7 @@ before_script:
   mosquitto -c scripts/mosquitto.conf &
 script:
 - cargo build
-- cargo test -- --nocapture
+- cargo test
 - cargo doc --no-deps
 after_success:
   - test $TRAVIS_PULL_REQUEST == "false" && test $TRAVIS_BRANCH == "master" && bash docdeploy.sh
