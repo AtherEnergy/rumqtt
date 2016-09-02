@@ -16,31 +16,18 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    MqttEncode,
-    Tls(i32),
-    Subscribe(i32),
-    Publish(i32),
-    AlreadyConnected,
-    UnrecognizedPacket,
     ConnectionAbort,
-    HandshakeFailed,
-    Disconnected,
-    Timeout,
     ConnectionRefused(ConnectReturnCode),
     Io(io::Error),
-    InvalidCert(String),
     SendError,
     Recv(RecvError),
     TryRecv(TryRecvError),
     Timer(TimerError),
-    NoStream,
     TopicName,
     TopicFilter,
     NoReconnectTry,
     MqttPacket,
     Ssl(SslError),
-    EventLoop,
-    Read,
 }
 
 impl From<io::Error> for Error {
