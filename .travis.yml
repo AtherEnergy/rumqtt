@@ -16,7 +16,6 @@ install:
 - sudo apt-add-repository ppa:mosquitto-dev/mosquitto-ppa -y
 - sudo apt-get -qq update
 - sudo apt-get install -y mosquitto
-- mosquitto --version
 - curl https://sh.rustup.rs -sSf | sh -s -- -y
 - export PATH="$HOME/.cargo/bin:$PATH"
 - rustup toolchain install stable
