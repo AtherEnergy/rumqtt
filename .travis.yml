@@ -13,9 +13,9 @@ matrix:
 #before_install:
 #  scripts/travis_setup.sh
 install:
-- sudo apt-add-repository ppa:mosquitto-dev/mosquitto-ppa
-- sudo apt-get update
-- sudo apt-get install mosquitto
+- sudo apt-add-repository ppa:mosquitto-dev/mosquitto-ppa -y
+- sudo apt-get -qq update
+- sudo apt-get install -y mosquitto
 - mosquitto --version
 - curl https://sh.rustup.rs -sSf | sh -s -- -y
 - export PATH="$HOME/.cargo/bin:$PATH"
@@ -27,7 +27,6 @@ install:
 branches:
   only:
   - master
-  - mioupdate
 before_script:
   mosquitto -c scripts/mosquitto.conf &
 script:
