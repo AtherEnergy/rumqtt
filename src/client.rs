@@ -323,7 +323,7 @@ impl MqttClient {
                 let mut stream = match streamupdate_rx.recv() {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("Stream Update Error. error = {:?}", e);
+                        error!("Read Thread Return. Stream Update Error. error = {:?}", e);
                         return Err(e.into());
                     }
                 };
@@ -343,7 +343,7 @@ impl MqttClient {
                             match misc_tx.send(MioNotification::Reconnect) {
                                 Ok(_) => (),
                                 Err(e) => {
-                                    error!("Unable to send reconnect notification to eventloop thread. Error = {:?}", e);
+                                    error!("Read Thread Return. Unable to send reconnect notification to eventloop thread. Error = {:?}", e);
                                     return Err(e.into());
                                 }
                             }
@@ -353,7 +353,7 @@ impl MqttClient {
                     match incoming_tx.send(packet) {
                         Ok(_) => (),
                         Err(e) => {
-                            error!("Unable to send incoming packets to eventloop thread. Error = {:?}", e);
+                            error!("Read Thread Return. Unable to send incoming packets to eventloop thread. Error = {:?}", e);
                             return Err(e.into());
                         }
                     }
