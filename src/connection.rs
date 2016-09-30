@@ -3,6 +3,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::io::{Write, ErrorKind};
+use std::sync::{Arc, RwLock};
 
 use mqtt::packet::*;
 use mqtt::Decodable;
@@ -34,7 +35,7 @@ pub struct Connection {
     pub stream: NetworkStream,
     pub incoming_tx: SyncSender<VariablePacket>,
     pub outgoing_rx: Receiver<NetworkRequest>,
-    pub state: MqttState,
+    pub state: Arc<RwLock<MqttState>>,
     pub initial_connect: bool,
     pub last_flush: Instant,
 }
@@ -42,23 +43,26 @@ pub struct Connection {
 impl Connection {
     pub fn start(addr: SocketAddr,
                  opts: MqttOptions,
+                 state: Arc<RwLock<MqttState>>,
                  incoming_tx: SyncSender<VariablePacket>,
                  outgoing_rx: Receiver<NetworkRequest>)
                  -> Result<Self> {
+        
         let mut connection = Connection {
             addr: addr,
             opts: opts,
             stream: NetworkStream::None,
             incoming_tx: incoming_tx,
             outgoing_rx: outgoing_rx,
-            state: MqttState::Disconnected,
+            state: state,
             initial_connect: true,
             last_flush: Instant::now(),
         };
         try!(connection._try_reconnect());
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
         try!(connection._await_connack());
-        connection.state = MqttState::Connected;
+        let mut state = *connection.state.write().unwrap();
+        state = MqttState::Connected;
         Ok(connection)
     }
 
@@ -71,10 +75,13 @@ impl Connection {
                 } else {
                     match self._try_reconnect() {
                         Ok(_) => {
-                            try!(self.stream.set_read_timeout(Some(Duration::new(5, 0))));
+                            try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
                             let packet = try!(self._await_connack());
                             try!(self.send_incoming(packet));
-                            self.state = MqttState::Connected;
+                            {
+                                let mut state = self.state.write().unwrap();
+                                *state = MqttState::Connected;
+                            }
                             break;
                         }
                         Err(_) => {
@@ -145,7 +152,8 @@ impl Connection {
     fn ping(&mut self) -> Result<()> {
         // debug!("client state --> {:?}, await_ping --> {}", self.state,
         // self.await_ping);
-        match self.state {
+        let state = *self.state.read().unwrap();
+        match state {
             MqttState::Connected => {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
@@ -175,10 +183,17 @@ impl Connection {
 
     fn write(&mut self) -> Result<()> {
         for _ in 0..1000 {
-            println!("@@@@@@@@@@@@@@@@");
             match try!(self.outgoing_rx.try_recv()) {
                 NetworkRequest::Shutdown => try!(self.stream.shutdown(Shutdown::Both)),
-                NetworkRequest::Write(packet) => try!(self._write_packet(packet)),
+                NetworkRequest::Write(packet) => {
+                    match self._write_packet(packet) {
+                        Ok(..) => (),
+                        Err(e) => {
+                            error!("Error Writing Packet to Network");
+                            return Err(e.into());
+                        }
+                    }
+                }
             };
         }
         Ok(())
@@ -198,8 +213,11 @@ impl Connection {
 
                 self.stream = stream;
                 try!(self._connect());
-                // TODO: Change states properly in one location
-                self.state = MqttState::Handshake;
+                {
+                    // TODO: Change states properly in one location
+                    let mut state = self.state.write().unwrap();
+                    *state = MqttState::Connected;
+                }
                 Ok(())
             }
         }
@@ -214,27 +232,28 @@ impl Connection {
             }
         };
 
-        match self.state {
+        let state = self.state.read().unwrap();
+        match *state {
             MqttState::Handshake => {
                 match packet {
                     VariablePacket::ConnackPacket(ref connack) => {
                         let conn_ret_code = connack.connect_return_code();
                         if conn_ret_code != ConnectReturnCode::ConnectionAccepted {
                             error!("Failed to connect, err {:?}", conn_ret_code);
-                            return Err(Error::ConnectionRefused(conn_ret_code))
-                        } 
+                            return Err(Error::ConnectionRefused(conn_ret_code));
+                        }
                     }
                     _ => {
                         error!("received invalid packet in handshake state --> {:?}", packet);
-                        return Err(Error::InvalidPacket)
+                        return Err(Error::InvalidPacket);
                     }
                 }
-                return Ok(packet)
+                return Ok(packet);
             }
 
             MqttState::Disconnected | MqttState::Connected => {
                 error!("Invalid State during CONNACK packet");
-                return Err(Error::InvalidState)
+                return Err(Error::InvalidState);
             }
         }
     }
@@ -262,7 +281,10 @@ impl Connection {
     fn _unbind(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
         // self.await_ping = false;
-        self.state = MqttState::Disconnected;
+        {
+            let mut state = self.state.write().unwrap();
+            *state = MqttState::Disconnected;
+        }
         info!("  Disconnected {:?}", self.opts.client_id);
     }
 

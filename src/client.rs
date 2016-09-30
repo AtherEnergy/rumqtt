@@ -2,7 +2,7 @@ use std::time::Duration;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::collections::VecDeque;
 use std::str;
-use std::sync::Arc;
+use std::sync::{RwLock, Arc};
 use std::thread;
 use std::sync::mpsc;
 
@@ -20,7 +20,7 @@ use message::Message;
 use clientoptions::MqttOptions;
 use request::{StatsReq, StatsResp, MqRequest};
 use genpack;
-use connection::{Connection, NetworkRequest};
+use connection::{Connection, NetworkRequest, MqttState};
 
 const PING_TIMER: Token = Token(0);
 const RETRANSMIT_TIMER: Token = Token(1);
@@ -36,13 +36,6 @@ const STATS_CHANNEL: Token = Token(8);
 //     N += 1;
 //     println!("N: {}", N);
 // }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MqttState {
-    Handshake,
-    Connected,
-    Disconnected,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MioNotification {
@@ -72,7 +65,7 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct MqttClient {
     // state
     pub opts: MqttOptions,
-    pub state: MqttState,
+    pub state: Arc<RwLock<MqttState>>,
     pub last_pkid: PacketIdentifier,
     pub initial_connect: bool,
     // no. of pending messages in qos0 pub channel
@@ -147,7 +140,7 @@ impl MqttClient {
             // State
             last_pkid: PacketIdentifier(0),
             // await_ping: false,
-            state: MqttState::Disconnected,
+            state: Arc::new(RwLock::new(MqttState::Disconnected)),
             initial_connect: true,
             opts: opts,
             pub0_channel_pending: 0,
@@ -269,7 +262,7 @@ impl MqttClient {
         // and sends them to event loop thread to handle mqtt state.
         let addr = opts.addr.clone();
         let addr = Self::lookup_ipv4(addr.as_str());
-        let mut connection = try!(Connection::start(addr, opts, incoming_tx, outgoing_rx));
+        let mut connection = try!(Connection::start(addr, opts, self.state.clone(), incoming_tx, outgoing_rx));
         thread::spawn(move || -> Result<()> {
             connection.run();
             error!("Network Thread Stopped !!");
@@ -344,7 +337,7 @@ impl MqttClient {
                         // try!(self.ping());
                     }
                     RETRANSMIT_TIMER => {
-                        try!(self.retransmit());
+                        // try!(self.retransmit());
                     }
                     MISC_CHANNEL => {
                         try!(self.misc());
@@ -641,9 +634,7 @@ impl MqttClient {
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
         match *packet {
-            VariablePacket::ConnackPacket(..) => {
-                Ok(HandlePacket::ConnAck)
-            }
+            VariablePacket::ConnackPacket(..) => Ok(HandlePacket::ConnAck),
 
             VariablePacket::SubackPacket(..) => {
                 // if ack.packet_identifier() != 10
@@ -652,9 +643,7 @@ impl MqttClient {
                 Ok(HandlePacket::SubAck)
             }
 
-            VariablePacket::PingrespPacket(..) => {
-                Ok(HandlePacket::PingResp)
-            }
+            VariablePacket::PingrespPacket(..) => Ok(HandlePacket::PingResp),
 
             // @ Receives disconnect packet
             VariablePacket::DisconnectPacket(..) => {
@@ -664,9 +653,8 @@ impl MqttClient {
 
             // @ Receives puback packet and verifies it with sub packet id
             VariablePacket::PubackPacket(ref puback) => {
-                // debug!("*** puback --> {:?}\n @@@ queue --> {:#?}",
-                //        puback,
-                //        self.outgoing_pub);
+                error!("!!!!!!!! PubAck --> {:?}", puback);
+                debug!("*** puback --> {:?}\n @@@ queue --> {:?}\n\n", puback, self.outgoing_pub);
                 let pkid = puback.packet_identifier();
                 let m = match self.outgoing_pub
                     .iter()
@@ -679,7 +667,7 @@ impl MqttClient {
                         }
                     }
                     None => {
-                        error!("Oopssss..unsolicited ack --> {:?}", puback);
+                        error!("Oopssss..unsolicited ack --> {:?}\n", puback);
                         None
                     }
                 };
@@ -881,7 +869,7 @@ impl MqttClient {
     }
 
     fn _publish(&mut self, message: Message) -> Result<()> {
-
+        error!("Publishing --> {:?}", message.qos);
         let qos = message.qos;
         let message_box = message.transform(Some(qos));
         let topic = message.topic;
@@ -889,7 +877,6 @@ impl MqttClient {
         let retain = message.retain;
 
         let publish_packet = try!(genpack::generate_publish_packet(topic, qos, retain, payload.clone()));
-
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
@@ -905,6 +892,7 @@ impl MqttClient {
                 }
             }
         }
+        error!("Queue --> {:?}\n\n", self.outgoing_pub);
         // debug!("       Publish {:?} {:?} > {} bytes", message.qos,
         // topic.clone().to_string(), message.payload.len());
 
@@ -947,6 +935,7 @@ impl MqttClient {
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
         let outgoing_tx = self.outgoing_tx.as_ref().unwrap();
+        println!("---------> {:?}", self.state);
         try!(outgoing_tx.send(NetworkRequest::Write(packet)));
         Ok(())
     }
@@ -965,6 +954,8 @@ impl MqttClient {
 
 #[cfg(test)]
 mod test {
+    extern crate env_logger;
+
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -1047,7 +1038,33 @@ mod test {
         let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
         let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
         assert_eq!(0, final_qos1_length);
-        //assert_eq!(0, final_qos2_length);
+        assert_eq!(0, final_qos2_length);
+    }
+
+    #[test]
+    fn publish_during_disconnection() {
+        env_logger::init().unwrap();
+        let client_options = MqttOptions::new()
+            .set_keep_alive(5)
+            .set_pub_q_len(3)
+            .set_client_id("test-forceretransmission-client")
+            .broker(BROKER_ADDRESS);
+
+        let mut mq_client = MqttClient::new(client_options);
+        let request = mq_client.start().expect("Coudn't start");
+        thread::sleep(Duration::new(1, 0));
+        for i in 0..5{
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos1/disconnect_publish", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        }
+        let _ = request.disconnect();
+        for i in 0..5 {
+            let payload = format!("{}. hello rust", i);
+            request.publish("test/qos1/disconnect_publish", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        }
+        thread::sleep(Duration::new(10, 0));
+        let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+        assert_eq!(0, final_qos1_length);
     }
 
     #[test]
