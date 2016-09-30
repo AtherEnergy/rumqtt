@@ -28,6 +28,9 @@ pub enum Error {
     NoReconnectTry,
     MqttPacket,
     Ssl(SslError),
+    Timeout,
+    InvalidPacket,
+    InvalidState,
 }
 
 impl From<io::Error> for Error {

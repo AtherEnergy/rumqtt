@@ -1,0 +1,2 @@
+* Make MqttState Read from one thread and Writable from other
+* ConnAck Sync Directly

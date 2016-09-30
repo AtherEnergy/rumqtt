@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::net::Shutdown;
 use std::path::Path;
+use std::time::Duration;
 
 use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE};
 use openssl::x509::X509FileType;
@@ -48,26 +49,27 @@ pub enum NetworkStream {
 }
 
 impl NetworkStream {
-    pub fn get_ref(&self) -> io::Result<&TcpStream> {
-        match *self {
-            NetworkStream::Tcp(ref s) => Ok(s),
-            NetworkStream::Tls(ref s) => Ok(s.get_ref()),
-            NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
-        }
-    }
-
-    pub fn try_clone(&self) -> Result<Self> {
-        match *self {
-            NetworkStream::Tcp(ref s) => Ok(NetworkStream::Tcp(try!(s.try_clone()))),
-            NetworkStream::Tls(ref s) => Ok(NetworkStream::Tls(try!(s.try_clone()))),
-            NetworkStream::None => Err(Error::Io(io::Error::new(io::ErrorKind::Other, "No Tls stream!"))),
-        }
-    }
+    // fn get_ref(&self) -> io::Result<&TcpStream> {
+    //     match *self {
+    //         NetworkStream::Tcp(ref s) => Ok(s),
+    //         NetworkStream::Tls(ref s) => Ok(s.get_ref()),
+    // NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No
+    // stream!")),
+    //     }
+    // }
 
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         match *self {
             NetworkStream::Tcp(ref s) => s.shutdown(how),
             NetworkStream::Tls(ref s) => s.get_ref().shutdown(how),
+            NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
+        }
+    }
+
+    pub fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
+        match *self {
+            NetworkStream::Tcp(ref s) => s.set_read_timeout(dur),
+            NetworkStream::Tls(ref s) => s.get_ref().set_read_timeout(dur),
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }

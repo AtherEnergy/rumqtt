@@ -17,7 +17,7 @@ const BROKER_ADDRESS: &'static str = "localhost:1883";
 #[test]
 #[should_panic]
 fn inital_tcp_connect_failure(){
-    //env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
@@ -47,7 +47,7 @@ fn inital_mqtt_connect_failure() {
 
 #[test]
 fn basic() {
-    //env_logger::init().unwrap();
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
@@ -74,13 +74,13 @@ fn basic() {
     request.publish("test/basic",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     request.publish("test/basic",  QoS::Level2, payload.clone().into_bytes()).unwrap();
 
-    thread::sleep(Duration::new(1, 0));
+    thread::sleep(Duration::new(20, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
 }
 
 #[test]
-fn reconnection() {
-    // env_logger::init().unwrap();
+fn simple_reconnection() {
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
@@ -100,7 +100,7 @@ fn reconnection() {
     }).start().expect("Coudn't start");
 
     // Register message callback and subscribe
-    let topics = vec![("test/reconnect", QoS::Level2)];  
+    let topics = vec![("test/reconnect", QoS::Level1)];  
     request.subscribe(topics).expect("Subcription failure");
 
     request.disconnect().unwrap();
@@ -123,7 +123,7 @@ fn acked_message() {
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .set_client_id("test-reconnect-client")
+                                    .set_client_id("test-acked-client")
                                     .broker(BROKER_ADDRESS);
 
     // Connects to a broker and returns a `request` 
@@ -141,7 +141,7 @@ fn acked_message() {
                              QoS::Level1, 
                              "MYUNIQUEMESSAGE".to_string().into_bytes(),
                              "MYUNIQUEUSERDATA".to_string().into_bytes()).unwrap();
-    thread::sleep(Duration::new(1, 0));
+    thread::sleep(Duration::new(2, 0));
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn retained_messages() {
     request.subscribe(topics).expect("Subcription failure");
 
     // wait for messages
-    thread::sleep(Duration::new(3, 0));
+    thread::sleep(Duration::new(5, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
     //TODO: Clear retained messages
 }
@@ -305,6 +305,7 @@ fn qos1_stress_publish() {
 /// keeping prints at CONNACK, SUBACK & _PUBLISH(). After connection is successful
 /// you'll see some publishes before SUBACK.
 fn qos1_stress_publish_with_reconnections() {
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
@@ -324,9 +325,9 @@ fn qos1_stress_publish_with_reconnections() {
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         if i == 100 || i == 500 || i == 900 {
-            request.disconnect();
+            let _ = request.disconnect();
         }
-        request.publish("test/qos1/stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos1/reconnection_stress",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     }
 
     thread::sleep(Duration::new(30, 0));
@@ -381,9 +382,9 @@ fn qos2_stress_publish_with_reconnections() {
     for i in 0..500 {
         let payload = format!("{}. hello rust", i);
         if i == 100 || i == 500 || i == 900 {
-            request.disconnect();
+            let _ = request.disconnect();
         }
-        request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
+        request.publish("test/qos2/reconnection_stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
     thread::sleep(Duration::new(30, 0));

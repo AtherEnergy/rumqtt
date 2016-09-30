@@ -70,6 +70,7 @@ mod genpack;
 mod tls;
 mod message;
 mod clientoptions;
+mod connection;
 mod request;
 mod client;
 
