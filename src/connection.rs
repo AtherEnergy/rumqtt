@@ -47,7 +47,7 @@ impl Connection {
                  incoming_tx: SyncSender<VariablePacket>,
                  outgoing_rx: Receiver<NetworkRequest>)
                  -> Result<Self> {
-        
+
         let mut connection = Connection {
             addr: addr,
             opts: opts,
@@ -60,9 +60,13 @@ impl Connection {
         };
         try!(connection._try_reconnect());
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
+        println!("{:?}", connection.state);
         try!(connection._await_connack());
-        let mut state = *connection.state.write().unwrap();
-        state = MqttState::Connected;
+        println!("{:?}", connection.state);
+        {
+            let mut state = connection.state.write().unwrap();
+            *state = MqttState::Connected;
+        }
         Ok(connection)
     }
 
@@ -144,7 +148,9 @@ impl Connection {
                         }
                     }
                 };
-                try!(self.send_incoming(packet))
+                //println!("!!!!!!!!!!!!!!!!!!");
+                try!(self.send_incoming(packet));
+                //println!("******************");
             }
         }
     }
@@ -216,7 +222,7 @@ impl Connection {
                 {
                     // TODO: Change states properly in one location
                     let mut state = self.state.write().unwrap();
-                    *state = MqttState::Connected;
+                    *state = MqttState::Handshake;
                 }
                 Ok(())
             }

@@ -47,7 +47,6 @@ fn inital_mqtt_connect_failure() {
 
 #[test]
 fn basic() {
-    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
@@ -265,8 +264,8 @@ fn qos0_stress_publish() {
 }
 
 #[test]
-fn qos1_stress_publish() {
-    // env_logger::init().unwrap();
+fn simple_qos1_stress_publish() {
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)

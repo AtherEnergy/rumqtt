@@ -108,3 +108,25 @@ fn tls_connect() {
     println!("QoS1 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 <= final_count.load(Ordering::SeqCst));
 }
+
+
+
+// #[test]
+    // fn retransmission_after_timeout() {
+    //     let client_options = MqttOptions::new()
+    //         .set_keep_alive(5)
+    //         .set_q_timeout(5)
+    //         .set_client_id("test-retransmission-client")
+    //         .broker(BROKER_ADDRESS);
+
+    //     let mut mq_client = MqttClient::new(client_options);
+    //     fill_qos1_publish_buffer(&mut mq_client);
+    //     fill_qos2_publish_buffer(&mut mq_client);
+
+    //     let request = mq_client.start().expect("Coudn't start");
+    //     thread::sleep(Duration::new(20, 0));
+    //     let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+    //     let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
+    //     assert_eq!(0, final_qos1_length);
+    //     assert_eq!(0, final_qos2_length);
+    // }

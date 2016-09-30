@@ -484,11 +484,12 @@ impl MqttClient {
     }
 
     fn incoming(&mut self) -> Result<()> {
+        // println!("-------------------");
         let packet = {
             let incoming_rx = self.incoming_rx.as_ref().unwrap();
-            incoming_rx.try_recv().expect("Incoming Rx Recv Error")
+            try!(incoming_rx.try_recv())
         };
-
+        // println!("+++++++++++++++++++++");
         // NOTE: Reregister only after 'try_recv' is successful. Or else sync_channel
         // Buffer limit isn't working.
         {
@@ -653,7 +654,6 @@ impl MqttClient {
 
             // @ Receives puback packet and verifies it with sub packet id
             VariablePacket::PubackPacket(ref puback) => {
-                error!("!!!!!!!! PubAck --> {:?}", puback);
                 debug!("*** puback --> {:?}\n @@@ queue --> {:?}\n\n", puback, self.outgoing_pub);
                 let pkid = puback.packet_identifier();
                 let m = match self.outgoing_pub
@@ -869,7 +869,6 @@ impl MqttClient {
     }
 
     fn _publish(&mut self, message: Message) -> Result<()> {
-        error!("Publishing --> {:?}", message.qos);
         let qos = message.qos;
         let message_box = message.transform(Some(qos));
         let topic = message.topic;
@@ -892,12 +891,19 @@ impl MqttClient {
                 }
             }
         }
-        error!("Queue --> {:?}\n\n", self.outgoing_pub);
+        // error!("Queue --> {:?}\n\n", self.outgoing_pub);
         // debug!("       Publish {:?} {:?} > {} bytes", message.qos,
         // topic.clone().to_string(), message.payload.len());
 
-        // TODO: print error for failure here
-        try!(self._write_packet(publish_packet));
+
+        match message.qos {
+            QoSWithPacketIdentifier::Level0 => try!(self._write_packet(publish_packet)),
+            _ => {
+                if *self.state.read().expect("XXXXXXXXX") == MqttState::Connected {
+                    try!(self._write_packet(publish_packet));
+                }
+            }
+        };
         Ok(())
     }
 
@@ -935,7 +941,6 @@ impl MqttClient {
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
         let outgoing_tx = self.outgoing_tx.as_ref().unwrap();
-        println!("---------> {:?}", self.state);
         try!(outgoing_tx.send(NetworkRequest::Write(packet)));
         Ok(())
     }
@@ -998,26 +1003,6 @@ mod test {
     }
 
     #[test]
-    fn retransmission_after_timeout() {
-        let client_options = MqttOptions::new()
-            .set_keep_alive(5)
-            .set_q_timeout(5)
-            .set_client_id("test-retransmission-client")
-            .broker(BROKER_ADDRESS);
-
-        let mut mq_client = MqttClient::new(client_options);
-        fill_qos1_publish_buffer(&mut mq_client);
-        fill_qos2_publish_buffer(&mut mq_client);
-
-        let request = mq_client.start().expect("Coudn't start");
-        thread::sleep(Duration::new(20, 0));
-        let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
-        let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
-        assert_eq!(0, final_qos1_length);
-        assert_eq!(0, final_qos2_length);
-    }
-
-    #[test]
     /// Publish Queues should be immediately retransmitted
     /// after reconnection.
     /// `publish_q_timeout` > thread sleep time ensures this.
@@ -1042,29 +1027,36 @@ mod test {
     }
 
     #[test]
+    /// Test for cases when Mqtt State thread is writing
+    /// Publish packets into `outgoing tx` channel during disconnection
+    /// This resulted in duplication due to `force retransmit` and hence
+    /// unsolicited acks.
     fn publish_during_disconnection() {
-        env_logger::init().unwrap();
         let client_options = MqttOptions::new()
             .set_keep_alive(5)
             .set_pub_q_len(3)
-            .set_client_id("test-forceretransmission-client")
+            .set_client_id("test-disconnectretransmission-client")
             .broker(BROKER_ADDRESS);
 
         let mut mq_client = MqttClient::new(client_options);
         let request = mq_client.start().expect("Coudn't start");
         thread::sleep(Duration::new(1, 0));
-        for i in 0..5{
+        for i in 0..5 {
             let payload = format!("{}. hello rust", i);
             request.publish("test/qos1/disconnect_publish", QoS::Level1, payload.clone().into_bytes()).unwrap();
+            request.publish("test/qos2/disconnect_publish", QoS::Level2, payload.clone().into_bytes()).unwrap();
         }
         let _ = request.disconnect();
         for i in 0..5 {
             let payload = format!("{}. hello rust", i);
             request.publish("test/qos1/disconnect_publish", QoS::Level1, payload.clone().into_bytes()).unwrap();
+            request.publish("test/qos2/disconnect_publish", QoS::Level2, payload.clone().into_bytes()).unwrap();
         }
         thread::sleep(Duration::new(10, 0));
         let final_qos1_length = request.qos1_q_len().expect("Stats Request Error");
+        let final_qos2_length = request.qos2_q_len().expect("Stats Request Error");
         assert_eq!(0, final_qos1_length);
+        assert_eq!(0, final_qos2_length);
     }
 
     #[test]

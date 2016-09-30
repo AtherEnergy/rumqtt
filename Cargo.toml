@@ -12,7 +12,7 @@ keywords = ["mqtt", "iot"]
 
 [dependencies]
 log = "0.3"
-mio = "0.6"
+mio = {git = "https://github.com/carllerche/mio.git"}
 rand = "0.3"
 time = "0.1"
 threadpool = "1.3"
