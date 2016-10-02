@@ -3,18 +3,40 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::io::{Write, ErrorKind};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::collections::VecDeque;
 
 use mqtt::packet::*;
 use mqtt::Decodable;
 use mqtt::control::variable_header::ConnectReturnCode;
 use mqtt::control::fixed_header::FixedHeaderError;
+use mqtt::control::variable_header::PacketIdentifier;
+use mqtt::{QualityOfService, TopicFilter};
 use mio::channel::SyncSender;
+use threadpool::ThreadPool;
+use time;
 
 use error::{Result, Error};
 use clientoptions::MqttOptions;
 use tls::{NetworkStream, SslContext};
 use genpack;
+use message::Message;
+
+static mut N: i32 = 0;
+
+enum HandlePacket {
+    ConnAck,
+    Publish(Box<Message>),
+    PubAck(Option<Message>),
+    PubRec(Option<Message>),
+    PubComp,
+    SubAck,
+    UnSubAck,
+    PingResp,
+    Disconnect,
+    None,
+    Invalid,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttState {
@@ -25,48 +47,99 @@ pub enum MqttState {
 
 #[derive(Debug)]
 pub enum NetworkRequest {
+    Subscribe(Vec<(TopicFilter, QualityOfService)>),
+    Publish(Message),
+    Retransmit,
     Shutdown,
-    Write(Vec<u8>),
+    Disconnect,
 }
+
+#[derive(Debug)]
+pub enum NetworkNotification {
+    Disconnected,
+    Connected,
+}
+
+pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
+pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 pub struct Connection {
     pub addr: SocketAddr,
     pub opts: MqttOptions,
     pub stream: NetworkStream,
-    pub incoming_tx: SyncSender<VariablePacket>,
-    pub outgoing_rx: Receiver<NetworkRequest>,
-    pub state: Arc<RwLock<MqttState>>,
+    pub nw_request_rx: Receiver<NetworkRequest>,
+    pub nw_notification_tx: SyncSender<NetworkNotification>,
+    pub state: MqttState,
     pub initial_connect: bool,
     pub last_flush: Instant,
+
+    /// On message callback
+    pub message_callback: Option<Arc<MessageSendableFn>>,
+    /// On publish callback
+    pub publish_callback: Option<Arc<PublishSendableFn>>,
+
+    // Queues. Note: 'record' is qos2 term for 'publish'
+    /// For QoS 1. Stores outgoing publishes
+    pub outgoing_pub: VecDeque<(i64, Box<Message>)>,
+    /// For QoS 2. Store for incoming publishes to record.
+    pub incoming_rec: VecDeque<Box<Message>>, //
+    /// For QoS 2. Store for outgoing publishes.
+    pub outgoing_rec: VecDeque<(i64, Box<Message>)>,
+    /// For Qos2. Store for outgoing `pubrel` packets.
+    pub outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
+
+    // clean_session=false will remember subscriptions only till lives.
+    // If broker crashes, all its state will be lost (most brokers).
+    // client wouldn't want to loose messages after it comes back up again
+    pub subscriptions: VecDeque<Vec<(TopicFilter, QualityOfService)>>,
+
+    pub no_of_reconnections: u32,
+
+    pub pool: ThreadPool,
 }
 
 impl Connection {
     pub fn start(addr: SocketAddr,
                  opts: MqttOptions,
-                 state: Arc<RwLock<MqttState>>,
-                 incoming_tx: SyncSender<VariablePacket>,
-                 outgoing_rx: Receiver<NetworkRequest>)
+                 nw_request_rx: Receiver<NetworkRequest>,
+                 nw_notification_tx: SyncSender<NetworkNotification>,
+                 publish_callback: Option<Arc<PublishSendableFn>>,
+                 message_callback: Option<Arc<MessageSendableFn>>)
                  -> Result<Self> {
 
         let mut connection = Connection {
             addr: addr,
             opts: opts,
             stream: NetworkStream::None,
-            incoming_tx: incoming_tx,
-            outgoing_rx: outgoing_rx,
-            state: state,
+            nw_request_rx: nw_request_rx,
+            nw_notification_tx: nw_notification_tx,
+            state: MqttState::Disconnected,
             initial_connect: true,
             last_flush: Instant::now(),
+
+            publish_callback: publish_callback,
+            message_callback: message_callback,
+
+            // Queues
+            incoming_rec: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+
+            // Subscriptions
+            subscriptions: VecDeque::new(),
+
+            no_of_reconnections: 0,
+
+            // Threadpool
+            pool: ThreadPool::new(4),
         };
+
         try!(connection._try_reconnect());
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
-        println!("{:?}", connection.state);
         try!(connection._await_connack());
-        println!("{:?}", connection.state);
-        {
-            let mut state = connection.state.write().unwrap();
-            *state = MqttState::Connected;
-        }
+        connection.state = MqttState::Connected;
+        try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
         Ok(connection)
     }
 
@@ -77,15 +150,15 @@ impl Connection {
                     self.initial_connect = false;
                     break;
                 } else {
+                    self.state = MqttState::Disconnected;
+                    try!(self.nw_notification_tx.send(NetworkNotification::Disconnected));
                     match self._try_reconnect() {
                         Ok(_) => {
                             try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
                             let packet = try!(self._await_connack());
-                            try!(self.send_incoming(packet));
-                            {
-                                let mut state = self.state.write().unwrap();
-                                *state = MqttState::Connected;
-                            }
+                            self.state = MqttState::Connected;
+                            try!(self.post_handle_packet(&packet));
+                            try!(self.nw_notification_tx.send(NetworkNotification::Connected));
                             break;
                         }
                         Err(_) => {
@@ -148,9 +221,9 @@ impl Connection {
                         }
                     }
                 };
-                //println!("!!!!!!!!!!!!!!!!!!");
-                try!(self.send_incoming(packet));
-                //println!("******************");
+                if let Err(e) = self.post_handle_packet(&packet) {
+                    continue 'reconnect;
+                }
             }
         }
     }
@@ -158,8 +231,7 @@ impl Connection {
     fn ping(&mut self) -> Result<()> {
         // debug!("client state --> {:?}, await_ping --> {}", self.state,
         // self.await_ping);
-        let state = *self.state.read().unwrap();
-        match state {
+        match self.state {
             MqttState::Connected => {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
@@ -176,31 +248,24 @@ impl Connection {
         Ok(())
     }
 
-    fn send_incoming(&mut self, packet: VariablePacket) -> Result<()> {
-        match self.incoming_tx.send(packet) {
-            Ok(_) => (),
-            Err(e) => {
-                error!("Read Return. Unable to send incoming packets to eventloop. Error = {:?}", e);
-                return Err(e.into());
-            }
-        };
-        Ok(())
-    }
-
     fn write(&mut self) -> Result<()> {
-        for _ in 0..1000 {
-            match try!(self.outgoing_rx.try_recv()) {
-                NetworkRequest::Shutdown => try!(self.stream.shutdown(Shutdown::Both)),
-                NetworkRequest::Write(packet) => {
-                    match self._write_packet(packet) {
-                        Ok(..) => (),
-                        Err(e) => {
-                            error!("Error Writing Packet to Network");
-                            return Err(e.into());
-                        }
+        // @ Only read from `Network Request` channel when connected. Or else Empty
+        // return.
+        // @ Helps in case where Tcp connection happened but in MqttState::Handshake
+        // state.
+        if self.state == MqttState::Connected {
+            for _ in 0..1000 {
+                match try!(self.nw_request_rx.try_recv()) {
+                    NetworkRequest::Shutdown => try!(self.stream.shutdown(Shutdown::Both)),
+                    NetworkRequest::Disconnect => try!(self._disconnect()),
+                    NetworkRequest::Retransmit => try!(self._try_retransmit()),
+                    NetworkRequest::Publish(m) => try!(self._publish(m)),
+                    NetworkRequest::Subscribe(s) => {
+                        self.subscriptions.push_back(s.clone());
+                        try!(self._subscribe(s));
                     }
-                }
-            };
+                };
+            }
         }
         Ok(())
     }
@@ -215,15 +280,22 @@ impl Connection {
                     thread::sleep(Duration::new(dur as u64, 0));
                 }
                 let stream = try!(TcpStream::connect(&self.addr));
-                let stream = NetworkStream::Tcp(stream);
+                let stream = match self.opts.ca {
+                    Some(ref ca) => {
+                        if let Some((ref crt, ref key)) = self.opts.client_cert {
+                            let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key))));
+                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                        } else {
+                            let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>));
+                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                        }
+                    }
+                    None => NetworkStream::Tcp(stream),
+                };
 
                 self.stream = stream;
                 try!(self._connect());
-                {
-                    // TODO: Change states properly in one location
-                    let mut state = self.state.write().unwrap();
-                    *state = MqttState::Handshake;
-                }
+                self.state = MqttState::Handshake;
                 Ok(())
             }
         }
@@ -238,8 +310,7 @@ impl Connection {
             }
         };
 
-        let state = self.state.read().unwrap();
-        match *state {
+        match self.state {
             MqttState::Handshake => {
                 match packet {
                     VariablePacket::ConnackPacket(ref connack) => {
@@ -264,6 +335,278 @@ impl Connection {
         }
     }
 
+    fn post_handle_packet(&mut self, packet: &VariablePacket) -> Result<()> {
+        let handle = try!(self.handle_packet(packet));
+        match handle {
+            // Mqtt connection established, release (publisher, subscriber) & start the timers
+            HandlePacket::ConnAck => {
+                self.no_of_reconnections += 1;
+                // Resubscribe after a reconnection.
+                for s in self.subscriptions.clone() {
+                    let _ = self._subscribe(s);
+                }
+                // Retransmit QoS1,2 queues after reconnection. Clears the queue by the time
+                // QoS*Reconnect notifications are sent to read pending messages in the channel
+                self._force_retransmit();
+            }
+            HandlePacket::Publish(m) => {
+                if let Some(ref message_callback) = self.message_callback {
+                    let message_callback = message_callback.clone();
+                    self.pool.execute(move || message_callback(*m));
+                }
+            }
+            HandlePacket::PubAck(m) => {
+                // Don't notify everytime q len is < max. This will always be true initially
+                // leading to dup notify.
+                // Send only for notify() to recover if channel is blocked.
+                // Blocking = true is set during publish if pub q len is more than desired.
+                if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
+                    error!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
+                }
+
+                if m.is_none() {
+                    return Ok(());
+                }
+
+                if let Some(ref publish_callback) = self.publish_callback {
+                    let publish_callback = publish_callback.clone();
+                    self.pool.execute(move || publish_callback(m.unwrap()));
+                }
+            }
+            // TODO: Better read from channel again after PubComp instead of PubRec
+            HandlePacket::PubRec(m) => {
+                if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
+                    error!(":( :( Outgoing Publish Queue Length growing bad");
+                }
+
+                if m.is_none() {
+                    return Ok(());
+                }
+
+                if let Some(ref publish_callback) = self.publish_callback {
+                    let publish_callback = publish_callback.clone();
+                    self.pool.execute(move || publish_callback(m.unwrap()));
+                }
+            }
+            _ => debug!("packet handler says that he doesn't care"),
+        }
+        Ok(())
+    }
+
+    fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
+        match *packet {
+            VariablePacket::ConnackPacket(..) => Ok(HandlePacket::ConnAck),
+
+            VariablePacket::SubackPacket(..) => {
+                // if ack.packet_identifier() != 10
+                // TODO: Maintain a subscribe queue and retry if
+                // subscribes are not successful
+                Ok(HandlePacket::SubAck)
+            }
+
+            VariablePacket::PingrespPacket(..) => Ok(HandlePacket::PingResp),
+
+            // @ Receives disconnect packet
+            VariablePacket::DisconnectPacket(..) => Ok(HandlePacket::Disconnect),
+
+            // @ Receives puback packet and verifies it with sub packet id
+            VariablePacket::PubackPacket(ref puback) => {
+                debug!("*** puback --> {:?}\n @@@ queue --> {:?}\n\n", puback, self.outgoing_pub);
+                let pkid = puback.packet_identifier();
+                let m = match self.outgoing_pub
+                    .iter()
+                    .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                    Some(i) => {
+                        if let Some(m) = self.outgoing_pub.remove(i) {
+                            Some(*m.1)
+                        } else {
+                            None
+                        }
+                    }
+                    None => {
+                        error!("Oopssss..unsolicited ack --> {:?}\n", puback);
+                        None
+                    }
+                };
+                debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
+                Ok(HandlePacket::PubAck(m))
+            }
+
+            // @ Receives publish packet
+            VariablePacket::PublishPacket(ref publ) => {
+                let message = try!(Message::from_pub(publ));
+                self._handle_message(message)
+            }
+
+            // @ Qos2 message published by client is recorded by broker
+            // @ Remove message from 'outgoing_rec' queue and add pkid to 'outgoing_rel'
+            // @ Send 'pubrel' to broker
+            VariablePacket::PubrecPacket(ref pubrec) => {
+                let pkid = pubrec.packet_identifier();
+                let m = match self.outgoing_rec
+                    .iter()
+                    .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                    Some(i) => {
+                        if let Some(m) = self.outgoing_rec.remove(i) {
+                            Some(*m.1)
+                        } else {
+                            None
+                        }
+                    }
+                    None => {
+                        error!("Oopssss..unsolicited record --> {:?}", pubrec);
+                        None
+                    }
+                };
+
+                // After receiving PUBREC packet and removing corrosponding
+                // message from outgoing_rec queue, send PUBREL and add it queue.
+                try!(self._pubrel(pkid));
+                self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                Ok(HandlePacket::PubRec(m))
+            }
+
+            // @ Broker knows that client has the message
+            // @ release the message stored in 'recorded' queue
+            // @ send 'pubcomp' to sender indicating that message is released
+            // @ if 'pubcomp' packet is lost, broker will send pubrel again
+            // @ for the released message, for which we send dummy 'pubcomp' again
+            VariablePacket::PubrelPacket(ref pubrel) => {
+                let pkid = pubrel.packet_identifier();
+                let message = match self.incoming_rec
+                    .iter()
+                    .position(|ref x| x.get_pkid() == Some(pkid)) {
+                    Some(i) => {
+                        if let Some(message) = self.incoming_rec.remove(i) {
+                            Some(message)
+                        } else {
+                            None
+                        }
+                    }
+                    None => {
+                        error!("Oopssss..unsolicited release. Message might have already been released --> {:?}", pubrel);
+                        None
+                    }
+                };
+                try!(self._pubcomp(pkid));
+
+                if let Some(message) = message {
+                    Ok(HandlePacket::Publish(message))
+                } else {
+                    Ok(HandlePacket::Invalid)
+                }
+            }
+
+            // @ Remove this pkid from 'outgoing_rel' queue
+            VariablePacket::PubcompPacket(ref pubcomp) => {
+                let pkid = pubcomp.packet_identifier();
+                match self.outgoing_rel
+                    .iter()
+                    .position(|ref x| x.1 == PacketIdentifier(pkid)) {
+                    Some(pos) => self.outgoing_rel.remove(pos),
+                    None => {
+                        error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
+                        None
+                    }
+                };
+                Ok(HandlePacket::PubComp)
+            }
+
+            VariablePacket::UnsubackPacket(..) => Ok(HandlePacket::UnSubAck),
+
+            _ => Ok(HandlePacket::Invalid), //TODO: Replace this with panic later
+        }
+    }
+
+    // TODO: Rename to handle incoming publish
+    fn _handle_message(&mut self, message: Box<Message>) -> Result<HandlePacket> {
+        debug!("       Publish {:?} {:?} < {:?} bytes",
+               message.qos,
+               message.topic.to_string(),
+               message.payload.len());
+        match message.qos {
+            QoSWithPacketIdentifier::Level0 => Ok(HandlePacket::Publish(message)),
+            QoSWithPacketIdentifier::Level1(pkid) => {
+                try!(self._puback(pkid));
+                Ok(HandlePacket::Publish(message))
+            }
+
+            // @ store the message in 'recorded' queue and send 'pubrec' to broker
+            // @ if 'pubrec' is lost, broker will resend the message.
+            // @ so only pushback is pkid is new. and resend pubcomp.
+            // @ TODO: Analyze broker crash cases for all queues.
+            QoSWithPacketIdentifier::Level2(pkid) => {
+                match self.incoming_rec
+                    .iter()
+                    .position(|ref x| x.get_pkid() == Some(pkid)) {
+                    Some(i) => {
+                        self.incoming_rec[i] = message.clone();
+                    }
+                    None => {
+                        self.incoming_rec.push_back(message.clone());
+                    }
+                };
+
+                try!(self._pubrec(pkid));
+                Ok(HandlePacket::None)
+            }
+        }
+    }
+
+    fn _try_retransmit(&mut self) -> Result<()> {
+        let timeout = self.opts.queue_timeout as i64;
+
+        // Republish QoS 1 outgoing publishes
+        while let Some(index) = self.outgoing_pub
+            .iter()
+            .position(|ref x| time::get_time().sec - x.0 > timeout) {
+            // println!("########## {:?}", self.outgoing_pub);
+            let message = self.outgoing_pub.remove(index).expect("No such entry");
+            let _ = self._publish(*message.1);
+        }
+
+        // Republish QoS 2 outgoing records
+        while let Some(index) = self.outgoing_rec
+            .iter()
+            .position(|ref x| time::get_time().sec - x.0 > timeout) {
+            let message = self.outgoing_rec.remove(index).expect("No such entry");
+            let _ = self._publish(*message.1);
+        }
+
+        let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
+                // Resend QoS 2 outgoing release
+        for e in outgoing_rel.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
+            let PacketIdentifier(pkid) = e.1;
+            let _ = self._pubrel(pkid);
+        }
+
+        Ok(())
+    }
+
+    // Spec says that client (for QoS > 0, clean session) should retransmit all the
+    // unacked messages after reconnection. Instead of waiting for retransmit
+    // timeout
+    // to kickin, this methods retransmits everthing in the queue immediately
+    // NOTE: outgoing_rels are handled in _try_retransmit. Sending duplicate pubrels
+    // isn't a problem (I guess ?). Broker will just resend pubcomps
+    fn _force_retransmit(&mut self) {
+        if self.opts.clean_session {
+            // Cloning because iterating and removing isn't possible.
+            // Iterating over indexes and and removing elements messes
+            // up the remove sequence
+            let mut outgoing_pub = self.outgoing_pub.clone();
+            self.outgoing_pub.clear();
+            while let Some(message) = outgoing_pub.pop_front() {
+                let _ = self._publish(*message.1);
+            }
+            let mut outgoing_rec = self.outgoing_rec.clone();
+            self.outgoing_rec.clear();
+            while let Some(message) = outgoing_rec.pop_front() {
+                let _ = self._publish(*message.1);
+            }
+        }
+    }
+
     fn _connect(&mut self) -> Result<()> {
         let connect = try!(genpack::generate_connect_packet(self.opts.client_id.clone(),
                                                             self.opts.clean_session,
@@ -274,7 +617,54 @@ impl Connection {
                                                             self.opts.username.clone(),
                                                             self.opts.password.clone()));
         try!(self._write_packet(connect));
-        self._flush()
+        Ok(())
+    }
+
+    pub fn _disconnect(&mut self) -> Result<()> {
+        let disconnect = try!(genpack::generate_disconnect_packet());
+        try!(self._write_packet(disconnect));
+        Ok(())
+    }
+
+    fn _subscribe(&mut self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
+        let subscribe_packet = try!(genpack::generate_subscribe_packet(topics));
+        try!(self._write_packet(subscribe_packet));
+        Ok(())
+    }
+
+    fn _publish(&mut self, message: Message) -> Result<()> {
+        let qos = message.qos;
+        let message_box = message.transform(Some(qos));
+        let topic = message.topic;
+        let payload = &*message.payload;
+        let retain = message.retain;
+        let publish_packet = try!(genpack::generate_publish_packet(topic, qos, retain, payload.clone()));
+        match message.qos {
+            QoSWithPacketIdentifier::Level0 => (),
+            QoSWithPacketIdentifier::Level1(_) => {
+                self.outgoing_pub.push_back((time::get_time().sec, message_box.clone()));
+            }
+            QoSWithPacketIdentifier::Level2(_) => {
+                self.outgoing_rec.push_back((time::get_time().sec, message_box.clone()));
+            }
+        }
+        // error!("Queue --> {:?}\n\n", self.outgoing_pub);
+        // debug!("       Publish {:?} {:?} > {} bytes", message.qos,
+        // topic.clone().to_string(), message.payload.len());
+
+
+        match message.qos {
+            QoSWithPacketIdentifier::Level0 => try!(self._write_packet(publish_packet)),
+            QoSWithPacketIdentifier::Level1(_) |
+            QoSWithPacketIdentifier::Level2(_) => {
+                if self.state == MqttState::Connected {
+                    try!(self._write_packet(publish_packet));
+                } else {
+                    error!("State = {:?}. Skip network write", self.state);
+                }
+            }
+        };
+        Ok(())
     }
 
     fn _ping(&mut self) -> Result<()> {
@@ -284,13 +674,33 @@ impl Connection {
         self._flush()
     }
 
+    fn _puback(&mut self, pkid: u16) -> Result<()> {
+        let puback_packet = try!(genpack::generate_puback_packet(pkid));
+        try!(self._write_packet(puback_packet));
+        Ok(())
+    }
+
+    fn _pubrec(&mut self, pkid: u16) -> Result<()> {
+        let pubrec_packet = try!(genpack::generate_pubrec_packet(pkid));
+        try!(self._write_packet(pubrec_packet));
+        Ok(())
+    }
+
+    fn _pubrel(&mut self, pkid: u16) -> Result<()> {
+        let pubrel_packet = try!(genpack::generate_pubrel_packet(pkid));
+        try!(self._write_packet(pubrel_packet));
+        Ok(())
+    }
+
+    fn _pubcomp(&mut self, pkid: u16) -> Result<()> {
+        let puback_packet = try!(genpack::generate_pubcomp_packet(pkid));
+        try!(self._write_packet(puback_packet));
+        Ok(())
+    }
+
     fn _unbind(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
-        // self.await_ping = false;
-        {
-            let mut state = self.state.write().unwrap();
-            *state = MqttState::Disconnected;
-        }
+        self.state = MqttState::Disconnected;
         info!("  Disconnected {:?}", self.opts.client_id);
     }
 

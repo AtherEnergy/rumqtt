@@ -17,7 +17,7 @@ const BROKER_ADDRESS: &'static str = "localhost:1883";
 #[test]
 #[should_panic]
 fn inital_tcp_connect_failure(){
-    // env_logger::init().unwrap();
+    //env_logger::init().unwrap();
     // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
@@ -46,7 +46,8 @@ fn inital_mqtt_connect_failure() {
 }
 
 #[test]
-fn basic() {
+fn basic_publishes_and_subscribes() {
+    //env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
@@ -73,12 +74,13 @@ fn basic() {
     request.publish("test/basic",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     request.publish("test/basic",  QoS::Level2, payload.clone().into_bytes()).unwrap();
 
-    thread::sleep(Duration::new(20, 0));
+    thread::sleep(Duration::new(3, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
 }
 
 #[test]
-fn simple_reconnection() {
+fn reconnection() {
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
@@ -98,17 +100,14 @@ fn simple_reconnection() {
     }).start().expect("Coudn't start");
 
     // Register message callback and subscribe
-    let topics = vec![("test/reconnect", QoS::Level1)];  
+    let topics = vec![("test/reconnect", QoS::Level2)];  
     request.subscribe(topics).expect("Subcription failure");
 
     request.disconnect().unwrap();
     // Wait for reconnection and publish
     thread::sleep(Duration::new(10, 0));
+
     let payload = format!("hello rust");
-    //TODO: This is failing if client is not able to reconnect.
-    //Ideally, this shouldn't fail but block
-    //Add a testcase where broker/internet is down for some time and this should block
-    //instead of failing
     request.publish("test/reconnect",  QoS::Level1, payload.clone().into_bytes()).unwrap();
 
     // Wait for count to be incremented by callback
@@ -121,7 +120,7 @@ fn acked_message() {
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(5)
-                                    .set_client_id("test-acked-client")
+                                    .set_client_id("test-reconnect-client")
                                     .broker(BROKER_ADDRESS);
 
     // Connects to a broker and returns a `request` 
@@ -139,7 +138,7 @@ fn acked_message() {
                              QoS::Level1, 
                              "MYUNIQUEMESSAGE".to_string().into_bytes(),
                              "MYUNIQUEUSERDATA".to_string().into_bytes()).unwrap();
-    thread::sleep(Duration::new(2, 0));
+    thread::sleep(Duration::new(1, 0));
 }
 
 #[test]
@@ -215,7 +214,11 @@ fn retained_messages() {
     request.retained_publish("test/0/retain",  QoS::Level0, payload.clone().into_bytes()).unwrap();
     request.retained_publish("test/1/retain",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     request.retained_publish("test/2/retain",  QoS::Level2, payload.clone().into_bytes()).unwrap();
-
+    
+    // NOTE: Request notifications are on different mio channels. We don't know
+    // about priority. Wait till all the publishes are recived by connection thread
+    // before disconnection
+    thread::sleep(Duration::new(1, 0));
     request.disconnect().unwrap();
 
     // wait for client to reconnect
@@ -226,7 +229,7 @@ fn retained_messages() {
     request.subscribe(topics).expect("Subcription failure");
 
     // wait for messages
-    thread::sleep(Duration::new(5, 0));
+    thread::sleep(Duration::new(3, 0));
     assert!(3 == final_count.load(Ordering::SeqCst));
     //TODO: Clear retained messages
 }
@@ -265,7 +268,7 @@ fn qos0_stress_publish() {
 
 #[test]
 fn simple_qos1_stress_publish() {
-    env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
@@ -303,7 +306,7 @@ fn simple_qos1_stress_publish() {
 /// keeping prints at CONNACK, SUBACK & _PUBLISH(). After connection is successful
 /// you'll see some publishes before SUBACK.
 fn qos1_stress_publish_with_reconnections() {
-    env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
@@ -335,6 +338,7 @@ fn qos1_stress_publish_with_reconnections() {
 
 #[test]
 fn simple_qos2_stress_publish() {
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
@@ -350,19 +354,19 @@ fn simple_qos2_stress_publish() {
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
     
-    for i in 0..500 {
+    for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(10, 0));
+    thread::sleep(Duration::new(20, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
-    assert!(500 == final_count.load(Ordering::SeqCst));
+    assert!(1000 == final_count.load(Ordering::SeqCst));
 }
 
 #[test]
 fn qos2_stress_publish_with_reconnections() {
-    env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
@@ -378,7 +382,7 @@ fn qos2_stress_publish_with_reconnections() {
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
     
-    for i in 0..500 {
+    for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         if i == 100 || i == 500 || i == 900 {
             let _ = request.disconnect();
@@ -388,11 +392,5 @@ fn qos2_stress_publish_with_reconnections() {
 
     thread::sleep(Duration::new(30, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
-    assert!(500 == final_count.load(Ordering::SeqCst));
+    assert!(1000 == final_count.load(Ordering::SeqCst));
 }
-
-//TODO 1: Publish 100000 Qos0, 1, 2 messages and check received count (subscribing to same topic)
-//TODO 2: Perform 1 with big messages
-//TODO 3: Perform 1 with internet constantly going down
-//TODO 4: Perform 2 + 3
-//TODO 5: Multiple clients connecting with same client id

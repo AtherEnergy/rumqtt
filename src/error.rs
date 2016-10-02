@@ -1,17 +1,19 @@
 use std::result;
 use std::io;
 use std::sync::mpsc::{self, RecvError, TryRecvError};
+use std::net::TcpStream;
 
 use mio::timer::TimerError;
 use mio::channel::SendError;
-use openssl::ssl;
+use openssl;
 use mqtt::topic_name::TopicNameError;
 use mqtt::topic_filter::TopicFilterError;
 use mqtt::packet::*;
 use mqtt::control::variable_header::ConnectReturnCode;
 
 
-pub type SslError = ssl::error::SslError;
+pub type SslError = openssl::error::ErrorStack;
+pub type HandShakeError = openssl::ssl::HandshakeError<TcpStream>;
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -31,6 +33,7 @@ pub enum Error {
     Timeout,
     InvalidPacket,
     InvalidState,
+    Handshake(HandShakeError),
 }
 
 impl From<io::Error> for Error {
@@ -67,6 +70,10 @@ impl<'a, P: Packet<'a>> From<PacketError<'a, P>> for Error {
 
 impl From<SslError> for Error {
     fn from(e: SslError) -> Error { Error::Ssl(e) }
+}
+
+impl From<HandShakeError> for Error {
+    fn from(e: HandShakeError) -> Error { Error::Handshake(e) }
 }
 
 impl From<TimerError> for Error {

@@ -1,2 +1,9 @@
-* Make MqttState Read from one thread and Writable from other
-* ConnAck Sync Directly
+*
+
+// Publisher won't stop even when disconnected until channel is full.
+// This notifies notify() to publish channel pending messages after
+// reconnect.
+self.disconnect_block = false;
+try!(self.publish0(true));
+try!(self.publish1(true));
+try!(self.publish2(true));

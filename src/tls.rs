@@ -9,9 +9,8 @@ use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE};
 use openssl::x509::X509FileType;
 
 pub type SslStream = ssl::SslStream<TcpStream>;
-pub type SslError = ssl::error::SslError;
 
-use error::{Error, Result};
+use error::Result;
 
 #[derive(Debug)]
 pub struct SslContext {
@@ -32,7 +31,7 @@ impl SslContext {
             try!(ctx.set_certificate_file(cert, X509FileType::PEM));
             try!(ctx.set_private_key_file(key, X509FileType::PEM));
         }
-        ctx.set_verify(SSL_VERIFY_NONE, None);
+        ctx.set_verify(SSL_VERIFY_NONE);
         Ok(SslContext { inner: Arc::new(ctx) })
     }
 
