@@ -79,7 +79,7 @@ fn basic_publishes_and_subscribes() {
 }
 
 #[test]
-fn reconnection() {
+fn simple_reconnection() {
     // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
@@ -382,15 +382,15 @@ fn qos2_stress_publish_with_reconnections() {
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
     
-    for i in 0..1000 {
+    for i in 0..10{
         let payload = format!("{}. hello rust", i);
-        if i == 100 || i == 500 || i == 900 {
+        if i == 5 {
             let _ = request.disconnect();
         }
         request.publish("test/qos2/reconnection_stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(30, 0));
+    thread::sleep(Duration::new(10, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
-    assert!(1000 == final_count.load(Ordering::SeqCst));
+    assert!(10 == final_count.load(Ordering::SeqCst));
 }

@@ -25,7 +25,7 @@ use message::Message;
 static mut N: i32 = 0;
 
 enum HandlePacket {
-    ConnAck,
+
     Publish(Box<Message>),
     PubAck(Option<Message>),
     PubRec(Option<Message>),
@@ -135,8 +135,10 @@ impl Connection {
             pool: ThreadPool::new(4),
         };
 
+        connection.state = MqttState::Disconnected;
         try!(connection._try_reconnect());
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
+        connection.state = MqttState::Handshake;
         try!(connection._await_connack());
         connection.state = MqttState::Connected;
         try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
@@ -155,9 +157,10 @@ impl Connection {
                     match self._try_reconnect() {
                         Ok(_) => {
                             try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
+                            self.state = MqttState::Handshake;
                             let packet = try!(self._await_connack());
                             self.state = MqttState::Connected;
-                            try!(self.post_handle_packet(&packet));
+                            try!(self.post_connack_handle(&packet));
                             try!(self.nw_notification_tx.send(NetworkNotification::Connected));
                             break;
                         }
@@ -222,7 +225,8 @@ impl Connection {
                     }
                 };
                 if let Err(e) = self.post_handle_packet(&packet) {
-                    continue 'reconnect;
+                    self.state = MqttState::Disconnected;
+                    continue 'receive;
                 }
             }
         }
@@ -295,7 +299,6 @@ impl Connection {
 
                 self.stream = stream;
                 try!(self._connect());
-                self.state = MqttState::Handshake;
                 Ok(())
             }
         }
@@ -335,20 +338,37 @@ impl Connection {
         }
     }
 
+    fn post_connack_handle(&mut self, packet: &VariablePacket) -> Result<()> {
+        match self.state {
+            MqttState::Connected => {
+                match *packet {
+                    VariablePacket::ConnackPacket(..) => {
+                        self.no_of_reconnections += 1;
+                        // Resubscribe after a reconnection.
+                        for s in self.subscriptions.clone() {
+                            let _ = self._subscribe(s);
+                        }
+                        // Retransmit QoS1,2 queues after reconnection. Clears the queue by the time
+                        // QoS*Reconnect notifications are sent to read pending messages in the channel
+                        self._force_retransmit();
+                        Ok(())
+                    }
+                    _ => {
+                        error!("Invalid Packet in HandShake State During Connack Handling");
+                        Err(Error::HandshakeFailed)
+                    }
+                }
+            }
+            _ => {
+                error!("Invaild State While Handling Connack Packet");
+                Err(Error::ConnectionAbort)
+            }
+        }
+    }
+
     fn post_handle_packet(&mut self, packet: &VariablePacket) -> Result<()> {
         let handle = try!(self.handle_packet(packet));
         match handle {
-            // Mqtt connection established, release (publisher, subscriber) & start the timers
-            HandlePacket::ConnAck => {
-                self.no_of_reconnections += 1;
-                // Resubscribe after a reconnection.
-                for s in self.subscriptions.clone() {
-                    let _ = self._subscribe(s);
-                }
-                // Retransmit QoS1,2 queues after reconnection. Clears the queue by the time
-                // QoS*Reconnect notifications are sent to read pending messages in the channel
-                self._force_retransmit();
-            }
             HandlePacket::Publish(m) => {
                 if let Some(ref message_callback) = self.message_callback {
                     let message_callback = message_callback.clone();
@@ -394,127 +414,128 @@ impl Connection {
     }
 
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
-        match *packet {
-            VariablePacket::ConnackPacket(..) => Ok(HandlePacket::ConnAck),
+        match self.state {
+            MqttState::Connected => {
+                match *packet {
+                    VariablePacket::SubackPacket(..) => Ok(HandlePacket::SubAck),
 
-            VariablePacket::SubackPacket(..) => {
-                // if ack.packet_identifier() != 10
-                // TODO: Maintain a subscribe queue and retry if
-                // subscribes are not successful
-                Ok(HandlePacket::SubAck)
-            }
+                    VariablePacket::PingrespPacket(..) => Ok(HandlePacket::PingResp),
 
-            VariablePacket::PingrespPacket(..) => Ok(HandlePacket::PingResp),
+                    VariablePacket::DisconnectPacket(..) => Ok(HandlePacket::Disconnect),
 
-            // @ Receives disconnect packet
-            VariablePacket::DisconnectPacket(..) => Ok(HandlePacket::Disconnect),
+                    VariablePacket::PubackPacket(ref puback) => {
+                        debug!("*** puback --> {:?}\n @@@ queue --> {:?}\n\n", puback, self.outgoing_pub);
+                        let pkid = puback.packet_identifier();
+                        let m = match self.outgoing_pub
+                            .iter()
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            Some(i) => {
+                                if let Some(m) = self.outgoing_pub.remove(i) {
+                                    Some(*m.1)
+                                } else {
+                                    None
+                                }
+                            }
+                            None => {
+                                error!("Oopssss..unsolicited ack --> {:?}\n", puback);
+                                None
+                            }
+                        };
+                        debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
+                        Ok(HandlePacket::PubAck(m))
+                    }
 
-            // @ Receives puback packet and verifies it with sub packet id
-            VariablePacket::PubackPacket(ref puback) => {
-                debug!("*** puback --> {:?}\n @@@ queue --> {:?}\n\n", puback, self.outgoing_pub);
-                let pkid = puback.packet_identifier();
-                let m = match self.outgoing_pub
-                    .iter()
-                    .position(|ref x| x.1.get_pkid() == Some(pkid)) {
-                    Some(i) => {
-                        if let Some(m) = self.outgoing_pub.remove(i) {
-                            Some(*m.1)
+                    VariablePacket::PublishPacket(ref publ) => {
+                        let message = try!(Message::from_pub(publ));
+                        self._handle_message(message)
+                    }
+
+                    // @ Qos2 message published by client is recorded by broker
+                    // @ Remove message from 'outgoing_rec' queue and add pkid to 'outgoing_rel'
+                    // @ Send 'pubrel' to broker
+                    VariablePacket::PubrecPacket(ref pubrec) => {
+                        let pkid = pubrec.packet_identifier();
+                        let m = match self.outgoing_rec
+                            .iter()
+                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            Some(i) => {
+                                if let Some(m) = self.outgoing_rec.remove(i) {
+                                    Some(*m.1)
+                                } else {
+                                    None
+                                }
+                            }
+                            None => {
+                                error!("Oopssss..unsolicited record --> {:?}", pubrec);
+                                None
+                            }
+                        };
+
+                        // After receiving PUBREC packet and removing corrosponding
+                        // message from outgoing_rec queue, send PUBREL and add it queue.
+                        try!(self._pubrel(pkid));
+                        self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                        Ok(HandlePacket::PubRec(m))
+                    }
+
+                    // @ Broker knows that client has the message
+                    // @ release the message stored in 'recorded' queue
+                    // @ send 'pubcomp' to sender indicating that message is released
+                    // @ if 'pubcomp' packet is lost, broker will send pubrel again
+                    // @ for the released message, for which we send dummy 'pubcomp' again
+                    VariablePacket::PubrelPacket(ref pubrel) => {
+                        let pkid = pubrel.packet_identifier();
+                        let message = match self.incoming_rec
+                            .iter()
+                            .position(|ref x| x.get_pkid() == Some(pkid)) {
+                            Some(i) => {
+                                if let Some(message) = self.incoming_rec.remove(i) {
+                                    Some(message)
+                                } else {
+                                    None
+                                }
+                            }
+                            None => {
+                                error!("Oopssss..unsolicited release. Message might have already been released --> {:?}", pubrel);
+                                None
+                            }
+                        };
+                        try!(self._pubcomp(pkid));
+
+                        if let Some(message) = message {
+                            Ok(HandlePacket::Publish(message))
                         } else {
-                            None
+                            Ok(HandlePacket::Invalid)
                         }
                     }
-                    None => {
-                        error!("Oopssss..unsolicited ack --> {:?}\n", puback);
-                        None
-                    }
-                };
-                debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
-                Ok(HandlePacket::PubAck(m))
-            }
 
-            // @ Receives publish packet
-            VariablePacket::PublishPacket(ref publ) => {
-                let message = try!(Message::from_pub(publ));
-                self._handle_message(message)
-            }
-
-            // @ Qos2 message published by client is recorded by broker
-            // @ Remove message from 'outgoing_rec' queue and add pkid to 'outgoing_rel'
-            // @ Send 'pubrel' to broker
-            VariablePacket::PubrecPacket(ref pubrec) => {
-                let pkid = pubrec.packet_identifier();
-                let m = match self.outgoing_rec
-                    .iter()
-                    .position(|ref x| x.1.get_pkid() == Some(pkid)) {
-                    Some(i) => {
-                        if let Some(m) = self.outgoing_rec.remove(i) {
-                            Some(*m.1)
-                        } else {
-                            None
-                        }
+                    // @ Remove this pkid from 'outgoing_rel' queue
+                    VariablePacket::PubcompPacket(ref pubcomp) => {
+                        let pkid = pubcomp.packet_identifier();
+                        match self.outgoing_rel
+                            .iter()
+                            .position(|ref x| x.1 == PacketIdentifier(pkid)) {
+                            Some(pos) => self.outgoing_rel.remove(pos),
+                            None => {
+                                error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
+                                None
+                            }
+                        };
+                        Ok(HandlePacket::PubComp)
                     }
-                    None => {
-                        error!("Oopssss..unsolicited record --> {:?}", pubrec);
-                        None
-                    }
-                };
 
-                // After receiving PUBREC packet and removing corrosponding
-                // message from outgoing_rec queue, send PUBREL and add it queue.
-                try!(self._pubrel(pkid));
-                self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
-                Ok(HandlePacket::PubRec(m))
-            }
+                    VariablePacket::UnsubackPacket(..) => Ok(HandlePacket::UnSubAck),
 
-            // @ Broker knows that client has the message
-            // @ release the message stored in 'recorded' queue
-            // @ send 'pubcomp' to sender indicating that message is released
-            // @ if 'pubcomp' packet is lost, broker will send pubrel again
-            // @ for the released message, for which we send dummy 'pubcomp' again
-            VariablePacket::PubrelPacket(ref pubrel) => {
-                let pkid = pubrel.packet_identifier();
-                let message = match self.incoming_rec
-                    .iter()
-                    .position(|ref x| x.get_pkid() == Some(pkid)) {
-                    Some(i) => {
-                        if let Some(message) = self.incoming_rec.remove(i) {
-                            Some(message)
-                        } else {
-                            None
-                        }
+                    _ => {
+                        error!("Invalid Packet in Connected State --> {:?}", packet);
+                        Ok(HandlePacket::Invalid)
                     }
-                    None => {
-                        error!("Oopssss..unsolicited release. Message might have already been released --> {:?}", pubrel);
-                        None
-                    }
-                };
-                try!(self._pubcomp(pkid));
-
-                if let Some(message) = message {
-                    Ok(HandlePacket::Publish(message))
-                } else {
-                    Ok(HandlePacket::Invalid)
                 }
             }
-
-            // @ Remove this pkid from 'outgoing_rel' queue
-            VariablePacket::PubcompPacket(ref pubcomp) => {
-                let pkid = pubcomp.packet_identifier();
-                match self.outgoing_rel
-                    .iter()
-                    .position(|ref x| x.1 == PacketIdentifier(pkid)) {
-                    Some(pos) => self.outgoing_rel.remove(pos),
-                    None => {
-                        error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
-                        None
-                    }
-                };
-                Ok(HandlePacket::PubComp)
+            MqttState::Disconnected | MqttState::Handshake => {
+                error!("Invalid State While Handling Packet --> {:?}", packet);
+                Err(Error::ConnectionAbort)
             }
-
-            VariablePacket::UnsubackPacket(..) => Ok(HandlePacket::UnSubAck),
-
-            _ => Ok(HandlePacket::Invalid), //TODO: Replace this with panic later
         }
     }
 

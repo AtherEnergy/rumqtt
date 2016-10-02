@@ -33,6 +33,7 @@ pub enum Error {
     Timeout,
     InvalidPacket,
     InvalidState,
+    HandshakeFailed,
     Handshake(HandShakeError),
 }
 
