@@ -87,6 +87,8 @@ pub struct Connection {
     pub outgoing_rec: VecDeque<(i64, Box<Message>)>,
     /// For Qos2. Store for outgoing `pubrel` packets.
     pub outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
+    /// For Qos2. Store for outgoing `pubcomp` packets.
+    pub outgoing_comp: VecDeque<(i64, PacketIdentifier)>,
 
     // clean_session=false will remember subscriptions only till lives.
     // If broker crashes, all its state will be lost (most brokers).
@@ -125,6 +127,7 @@ impl Connection {
             outgoing_pub: VecDeque::new(),
             outgoing_rec: VecDeque::new(),
             outgoing_rel: VecDeque::new(),
+            outgoing_comp: VecDeque::new(),
 
             // Subscriptions
             subscriptions: VecDeque::new(),
@@ -225,7 +228,6 @@ impl Connection {
                     }
                 };
                 if let Err(e) = self.post_handle_packet(&packet) {
-                    self.state = MqttState::Disconnected;
                     continue 'receive;
                 }
             }
@@ -473,8 +475,10 @@ impl Connection {
 
                         // After receiving PUBREC packet and removing corrosponding
                         // message from outgoing_rec queue, send PUBREL and add it queue.
-                        try!(self._pubrel(pkid));
                         self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                        // NOTE: Don't Error return here. It's ok to fail during writes coz of disconnection.
+                        // `force_transmit` will resend when reconnection is successful
+                        let _ = self._pubrel(pkid);
                         Ok(HandlePacket::PubRec(m))
                     }
 
@@ -500,7 +504,9 @@ impl Connection {
                                 None
                             }
                         };
-                        try!(self._pubcomp(pkid));
+
+                        self.outgoing_comp.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                        let _ = self._pubcomp(pkid);
 
                         if let Some(message) = message {
                             Ok(HandlePacket::Publish(message))
@@ -533,7 +539,7 @@ impl Connection {
                 }
             }
             MqttState::Disconnected | MqttState::Handshake => {
-                error!("Invalid State While Handling Packet --> {:?}", packet);
+                error!("Invalid ({:?}) State While Handling Packet --> {:?}", self.state, packet);
                 Err(Error::ConnectionAbort)
             }
         }
@@ -620,10 +626,27 @@ impl Connection {
             while let Some(message) = outgoing_pub.pop_front() {
                 let _ = self._publish(*message.1);
             }
+
             let mut outgoing_rec = self.outgoing_rec.clone();
             self.outgoing_rec.clear();
             while let Some(message) = outgoing_rec.pop_front() {
                 let _ = self._publish(*message.1);
+            }
+
+            let mut outgoing_rel = self.outgoing_rel.clone();
+            self.outgoing_rel.clear();
+            while let Some(rel) = outgoing_rel.pop_front() {
+                self.outgoing_rel.push_back((time::get_time().sec, rel.1));
+                let PacketIdentifier(pkid) = rel.1;
+                let _ = self._pubrel(pkid);
+            }
+
+            let mut outgoing_comp = self.outgoing_comp.clone();
+            self.outgoing_comp.clear();
+            while let Some(comp) = outgoing_comp.pop_front() {
+                self.outgoing_comp.push_back((time::get_time().sec, comp.1));
+                let PacketIdentifier(pkid) = comp.1;
+                let _ = self._pubcomp(pkid);
             }
         }
     }
@@ -727,13 +750,7 @@ impl Connection {
 
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
-        match self.stream.write_all(&packet) {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Error writing packet. Error = {:?}", e);
-                return Err(e.into());
-            }
-        };
+        try!(self.stream.write_all(&packet));
         try!(self._flush());
         Ok(())
     }
