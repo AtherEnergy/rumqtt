@@ -5,7 +5,7 @@ use std::net::Shutdown;
 use std::path::Path;
 use std::time::Duration;
 
-use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE};
+use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE, SSL_VERIFY_PEER};
 use openssl::x509::X509FileType;
 
 pub type SslStream = ssl::SslStream<TcpStream>;
@@ -18,7 +18,7 @@ pub struct SslContext {
 }
 
 impl SslContext {
-    pub fn new<CA, C, K>(ca: CA, client_pair: Option<(C, K)>) -> Result<Self>
+    pub fn new<CA, C, K>(ca: CA, client_pair: Option<(C, K)>, should_verify_ca: bool) -> Result<Self>
         where CA: AsRef<Path>,
               C: AsRef<Path>,
               K: AsRef<Path>
@@ -31,7 +31,11 @@ impl SslContext {
             try!(ctx.set_certificate_file(cert, X509FileType::PEM));
             try!(ctx.set_private_key_file(key, X509FileType::PEM));
         }
-        ctx.set_verify(SSL_VERIFY_NONE);
+        if should_verify_ca {
+          ctx.set_verify(SSL_VERIFY_PEER);
+        } else {
+          ctx.set_verify(SSL_VERIFY_NONE);
+        }
         Ok(SslContext { inner: Arc::new(ctx) })
     }
 

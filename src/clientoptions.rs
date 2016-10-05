@@ -19,6 +19,7 @@ pub struct MqttOptions {
     // wait time for ack beyond which packet(publish/subscribe) will be resent
     pub queue_timeout: u16,
     pub ca: Option<PathBuf>,
+    pub verify_ca: bool,
     pub client_cert: Option<(PathBuf, PathBuf)>,
 }
 
@@ -39,6 +40,7 @@ impl Default for MqttOptions {
             sub_q_len: 5,
             queue_timeout: 60,
             ca: None,
+            verify_ca: true,
             client_cert: None,
         }
     }
@@ -175,6 +177,13 @@ impl MqttOptions {
         where P: AsRef<Path>
     {
         self.ca = Some(cafile.as_ref().to_path_buf());
+        self
+    }
+
+    /// Set flag to ignore server CA verification during TLS connection
+    pub fn set_should_verify_ca(mut self, should_verify_ca: bool) -> Self
+    {
+        self.verify_ca = should_verify_ca;
         self
     }
 
