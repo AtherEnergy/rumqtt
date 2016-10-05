@@ -180,7 +180,7 @@ impl MqttOptions {
         self
     }
 
-    /// Set flag to ignore server CA verification during TLS connection
+    /// Set flag to determine whether or not to verify server CA during TLS connection
     pub fn set_should_verify_ca(mut self, should_verify_ca: bool) -> Self
     {
         self.verify_ca = should_verify_ca;
