@@ -20,15 +20,14 @@ install:
 - export PATH="$HOME/.cargo/bin:$PATH"
 - rustup toolchain install stable
 - rustup default stable
-- rustup target add armv7-unknown-linux-gnueabihf
 - rustc -V
 - cargo -V
 branches:
   only:
   - master
 before_script:
-  sudo cp scripts/mosquitto.conf /etc/mosquitto/conf.d/mosquitto.conf
-  sudo service mosquitto restart
+  - sudo cp scripts/mosquitto.conf /etc/mosquitto/conf.d/mosquitto.conf
+  - sudo service mosquitto restart
 script:
 - cargo build
 - cargo test

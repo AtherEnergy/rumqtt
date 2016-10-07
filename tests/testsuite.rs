@@ -338,7 +338,7 @@ fn qos1_stress_publish_with_reconnections() {
 
 #[test]
 fn simple_qos2_stress_publish() {
-    env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
