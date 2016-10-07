@@ -140,11 +140,11 @@ impl Connection {
 
         connection.state = MqttState::Disconnected;
         try!(connection._try_reconnect());
-        try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
         connection.state = MqttState::Handshake;
         try!(connection._await_connack());
         connection.state = MqttState::Connected;
         try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
+        try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
         Ok(connection)
     }
 
@@ -159,12 +159,12 @@ impl Connection {
                     try!(self.nw_notification_tx.send(NetworkNotification::Disconnected));
                     match self._try_reconnect() {
                         Ok(_) => {
-                            try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
                             self.state = MqttState::Handshake;
                             let packet = try!(self._await_connack());
                             self.state = MqttState::Connected;
                             try!(self.post_connack_handle(&packet));
                             try!(self.nw_notification_tx.send(NetworkNotification::Connected));
+                            try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
                             break;
                         }
                         Err(_) => {
