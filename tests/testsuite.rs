@@ -338,7 +338,7 @@ fn qos1_stress_publish_with_reconnections() {
 
 #[test]
 fn simple_qos2_stress_publish() {
-    // env_logger::init().unwrap();
+    env_logger::init().unwrap();
     let client_options = MqttOptions::new()
                                     .set_keep_alive(5)
                                     .set_reconnect(3)
@@ -359,7 +359,7 @@ fn simple_qos2_stress_publish() {
         request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(40, 0));
+    thread::sleep(Duration::new(30, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
     assert!(1000 == final_count.load(Ordering::SeqCst));
 }

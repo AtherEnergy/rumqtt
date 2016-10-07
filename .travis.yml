@@ -27,7 +27,8 @@ branches:
   only:
   - master
 before_script:
-  mosquitto -c scripts/mosquitto.conf &
+  sudo cp scripts/mosquitto.conf /etc/mosquitto/conf.d/mosquitto.conf
+  sudo service mosquitto restart
 script:
 - cargo build
 - cargo test
