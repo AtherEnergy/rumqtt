@@ -241,9 +241,9 @@ impl Connection {
             MqttState::Connected => {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
-                    if elapsed >= Duration::new(keep_alive as u64, 0) {
+                    if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
                         return Err(Error::Timeout);
-                    } else if elapsed >= Duration::new((keep_alive as f32 * 0.8) as u64, 0) {
+                    } else if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
                         try!(self._ping());
                     }
                 }
