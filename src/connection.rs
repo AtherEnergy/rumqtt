@@ -190,7 +190,7 @@ impl Connection {
                                             let _ = self.write();
 
                                             // TODO: Test if PINGRESPs are properly recieved before
-                                            //      next ping incase of high frequency incoming messages
+                                            // next ping incase of high frequency incoming messages
                                             if let Err(e) = self.ping() {
                                                 match e {
                                                     Error::PingTimeout | Error::AwaitPingResp => {
@@ -244,22 +244,22 @@ impl Connection {
         // self.await_ping);
         match self.state {
             MqttState::Connected => {
-                // @ Prevents half open connections. Tcp writes will buffer up
-                // with out throwing any error (till a timeout) when internet
-                // is down. Eventhough broker closes the socket, EOF will be
-                // known only after reconnection.
-                // We just unbind the socket if there in no pingresp before next ping
-                // (TODO: What about case when pings aren't sen't because of constant publishes
-                // ?)
-                if self.await_pingresp {
-                    return Err(Error::AwaitPingResp);
-                }
-
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
                     if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
                         return Err(Error::PingTimeout);
                     } else if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+                        // @ Prevents half open connections. Tcp writes will buffer up
+                        // with out throwing any error (till a timeout) when internet
+                        // is down. Eventhough broker closes the socket, EOF will be
+                        // known only after reconnection.
+                        // We just unbind the socket if there in no pingresp before next ping
+                        // (TODO: What about case when pings aren't sent because of constant publishes
+                        // ?)
+                        if self.await_pingresp {
+                            return Err(Error::AwaitPingResp);
+                        }
+
                         try!(self._ping());
                     }
                 }
