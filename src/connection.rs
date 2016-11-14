@@ -188,21 +188,13 @@ impl Connection {
                                     match err.kind() {
                                         ErrorKind::TimedOut | ErrorKind::WouldBlock => {
                                             let _ = self.write();
-                                            // @ Prevents half open connections. Tcp writes will buffer up
-                                            // with out throwing any error (till a timeout) when internet
-                                            // is down. Eventhough broker closes the socket, EOF will be
-                                            // known only after reconnection.
-                                            // We just unbind the socket if there in no pingresp before next ping
-                                            // (TODO: What about case when pings aren't sen't because of constant publishes
-                                            // ?)
-                                            if self.await_pingresp {
-                                                self._unbind();
-                                                continue 'reconnect;
-                                            }
+
+                                            // TODO: Test if PINGRESPs are properly recieved before
+                                            //      next ping incase of high frequency incoming messages
                                             if let Err(e) = self.ping() {
                                                 match e {
-                                                    Error::Timeout => {
-                                                        error!("Couldn't PING in time :( . Err = {:?}", e);
+                                                    Error::PingTimeout | Error::AwaitPingResp => {
+                                                        error!("Can't Ping :( . Err = {:?}", e);
                                                         self._unbind();
                                                         continue 'reconnect;
                                                     }
@@ -217,9 +209,8 @@ impl Connection {
                                         }
                                         _ => {
                                             // Socket error are readily available here as soon as
-                                            // disconnection happens. So it might be right for this
-                                            // thread to ask for reconnection rather than reconnecting
-                                            // during write failures
+                                            // broker closes its socket end. (But not inbetween n/w disconnection
+                                            // and socket close at broker [i.e ping req timeout])
                                             // UPDATE: Lot of publishes are being written by the time this notified
                                             // the eventloop thread. Setting disconnect_block = true during write failure
                                             error!("Error in receiving packet {:?}", err);
@@ -253,10 +244,21 @@ impl Connection {
         // self.await_ping);
         match self.state {
             MqttState::Connected => {
+                // @ Prevents half open connections. Tcp writes will buffer up
+                // with out throwing any error (till a timeout) when internet
+                // is down. Eventhough broker closes the socket, EOF will be
+                // known only after reconnection.
+                // We just unbind the socket if there in no pingresp before next ping
+                // (TODO: What about case when pings aren't sen't because of constant publishes
+                // ?)
+                if self.await_pingresp {
+                    return Err(Error::AwaitPingResp);
+                }
+
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
                     if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
-                        return Err(Error::Timeout);
+                        return Err(Error::PingTimeout);
                     } else if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
                         try!(self._ping());
                     }
