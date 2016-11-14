@@ -32,9 +32,9 @@ impl SslContext {
             try!(ctx.set_private_key_file(key, X509FileType::PEM));
         }
         if should_verify_ca {
-          ctx.set_verify(SSL_VERIFY_PEER);
+            ctx.set_verify(SSL_VERIFY_PEER);
         } else {
-          ctx.set_verify(SSL_VERIFY_NONE);
+            ctx.set_verify(SSL_VERIFY_NONE);
         }
         Ok(SslContext { inner: Arc::new(ctx) })
     }

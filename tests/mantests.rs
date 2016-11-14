@@ -10,22 +10,27 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
+// TEST 1: Check if ping requests are going in time in a stable connection. [working]
+// TEST 2: Disconnect the network while pinging and check if reconnections are being tried [working]
+// TEST 3: Reconnect the same network and check if reconnection is successful [working]
+// TEST 4: Reconnect different network and check if reconnection is successful [working]
 #[ignore]
 #[test]
-fn send_ping_reqs_in_time() {
+fn ping_reqs_in_time_and_reconnections() {
     env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
+                                    .set_keep_alive(10)
                                     .set_pub_q_len(2)
                                     .set_reconnect(3)
                                     .set_q_timeout(10)
-                                    .broker("localhost:1883");
+                                    .set_client_id("test-ping-reqs-in-time")
+                                    .broker("endurance-broker.atherengineering.in:1883");
 
     let request = MqttClient::new(client_options)
                                             .start()
                                             .expect("Coudn't start");
 
-    thread::sleep(Duration::new(60, 0));
+    thread::sleep(Duration::new(180, 0));
 }
 
 /// This handles the case where messages in channel are being

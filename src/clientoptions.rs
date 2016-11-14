@@ -27,7 +27,7 @@ impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
             addr: "localhost:1883".to_string(),
-            keep_alive: Some(5),
+            keep_alive: Some(10),
             clean_session: true,
             client_id: None,
             username: None,
@@ -56,7 +56,7 @@ impl MqttOptions {
     /// |-------------------------|--------------------------|
     /// | **client_id**           | Randomly generated       |
     /// | **clean_session**       | true                     |
-    /// | **keep_alive**          | 5 secs                   |
+    /// | **keep_alive**          | 10 secs                   |
     /// | **reconnect try**       | Doesn't try to reconnect |
     /// | **retransmit try time** | 60 secs                  |
     /// | **pub_q_len**           | 50                       |
@@ -180,9 +180,9 @@ impl MqttOptions {
         self
     }
 
-    /// Set flag to determine whether or not to verify server CA during TLS connection
-    pub fn set_should_verify_ca(mut self, should_verify_ca: bool) -> Self
-    {
+    /// Set flag to determine whether or not to verify server CA during TLS
+    /// connection
+    pub fn set_should_verify_ca(mut self, should_verify_ca: bool) -> Self {
         self.verify_ca = should_verify_ca;
         self
     }
