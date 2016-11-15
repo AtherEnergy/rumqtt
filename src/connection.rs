@@ -18,7 +18,7 @@ use time;
 
 use error::{Result, Error};
 use clientoptions::MqttOptions;
-use tls::{NetworkStream, SslContext};
+use stream::{NetworkStream, SslContext};
 use genpack;
 use message::Message;
 

@@ -56,7 +56,7 @@ impl MqttOptions {
     /// |-------------------------|--------------------------|
     /// | **client_id**           | Randomly generated       |
     /// | **clean_session**       | true                     |
-    /// | **keep_alive**          | 10 secs                   |
+    /// | **keep_alive**          | 10 secs                  |
     /// | **reconnect try**       | Doesn't try to reconnect |
     /// | **retransmit try time** | 60 secs                  |
     /// | **pub_q_len**           | 50                       |

@@ -67,7 +67,7 @@ extern crate threadpool;
 
 mod error;
 mod genpack;
-mod tls;
+mod stream;
 mod message;
 mod clientoptions;
 mod connection;
