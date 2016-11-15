@@ -376,13 +376,17 @@ impl Connection {
                 match *packet {
                     VariablePacket::ConnackPacket(..) => {
                         self.no_of_reconnections += 1;
-                        // Resubscribe after a reconnection.
-                        for s in self.subscriptions.clone() {
-                            let _ = self._subscribe(s);
+                        if self.opts.clean_session {
+                            // Resubscribe after a reconnection when connected with clean session.
+                            for s in self.subscriptions.clone() {
+                                let _ = self._subscribe(s);
+                            }
                         }
-                        // Retransmit QoS1,2 queues after reconnection. Clears the queue by the time
-                        // QoS*Reconnect notifications are sent to read pending messages in the channel
-                        self._force_retransmit();
+
+                        // Retransmit QoS1,2 queues after reconnection when clean_session = false
+                        if !self.opts.clean_session {
+                            self._force_retransmit();
+                        }
                         Ok(())
                     }
                     _ => {
@@ -639,30 +643,28 @@ impl Connection {
     // NOTE: Sending duplicate pubrels isn't a problem (I guess ?). Broker will
     // just resend pubcomps
     fn _force_retransmit(&mut self) {
-        if !self.opts.clean_session {
-            // Cloning because iterating and removing isn't possible.
-            // Iterating over indexes and and removing elements messes
-            // up the remove sequence
-            let mut outgoing_pub = self.outgoing_pub.clone();
-            self.outgoing_pub.clear();
-            while let Some(message) = outgoing_pub.pop_front() {
-                let _ = self._publish(*message.1);
-            }
+        // Cloning because iterating and removing isn't possible.
+        // Iterating over indexes and and removing elements messes
+        // up the remove sequence
+        let mut outgoing_pub = self.outgoing_pub.clone();
+        self.outgoing_pub.clear();
+        while let Some(message) = outgoing_pub.pop_front() {
+            let _ = self._publish(*message.1);
+        }
 
-            let mut outgoing_rec = self.outgoing_rec.clone();
-            self.outgoing_rec.clear();
-            while let Some(message) = outgoing_rec.pop_front() {
-                let _ = self._publish(*message.1);
-            }
-            // println!("{:?}", self.outgoing_rec.iter().map(|e|
-            // e.1.qos).collect::<Vec<_>>());
-            let mut outgoing_rel = self.outgoing_rel.clone();
-            self.outgoing_rel.clear();
-            while let Some(rel) = outgoing_rel.pop_front() {
-                self.outgoing_rel.push_back((time::get_time().sec, rel.1));
-                let PacketIdentifier(pkid) = rel.1;
-                let _ = self._pubrel(pkid);
-            }
+        let mut outgoing_rec = self.outgoing_rec.clone();
+        self.outgoing_rec.clear();
+        while let Some(message) = outgoing_rec.pop_front() {
+            let _ = self._publish(*message.1);
+        }
+        // println!("{:?}", self.outgoing_rec.iter().map(|e|
+        // e.1.qos).collect::<Vec<_>>());
+        let mut outgoing_rel = self.outgoing_rel.clone();
+        self.outgoing_rel.clear();
+        while let Some(rel) = outgoing_rel.pop_front() {
+            self.outgoing_rel.push_back((time::get_time().sec, rel.1));
+            let PacketIdentifier(pkid) = rel.1;
+            let _ = self._pubrel(pkid);
         }
     }
 

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
-const BROKER_ADDRESS: &'static str = "broker.toggleme.in:1883";
+const BROKER_ADDRESS: &'static str = "endurance-broker.atherengineering.in:1883";
 
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial tcp connect.
