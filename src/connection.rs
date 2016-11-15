@@ -189,18 +189,15 @@ impl Connection {
                                     match err.kind() {
                                         // Timedout for Windows, WouldBlock for linux
                                         ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                                            if let Err(e) = self.write() {
-                                                // Detects write errors especially timeouts when write
-                                                // buffers are full. Ping below will error out because of
-                                                // PingTimeout when (n * write timeout) > ping timeout
+                                            // During timeout write errors when tcp write
+                                            // buffers are full, ping below will error out because of
+                                            // PingTimeout when (n * write timeout) > ping timeout
 
-                                                // NOTE: Force pings during Write timeout/ Queue overflow is
-                                                // bad because unlike idle state, publishes might be continous
-                                                // and connection might not go into read mode before consequent
-                                                // publishes
-                                                error!("Write Error --> {:?}", e);
-                                            }
-
+                                            // NOTE: Force pings during Write timeout/ Queue overflow is
+                                            // bad because unlike idle state, publishes might be continous
+                                            // and connection might not go into read mod for detecting
+                                            // pingreps before consequent publishes
+                                            let _ = self.write();
 
                                             // TODO: Test if PINGRESPs are properly recieved before
                                             // next ping incase of high frequency incoming messages

@@ -40,7 +40,7 @@ fn ping_reqs_in_time_and_reconnections() {
 //         count is proper [working]
 // TEST 3: Reconnect different network and check if reconnection is successful and publish
 //         count is proper [working]
-// #[ignore]
+#[ignore]
 #[test]
 fn half_open_publishes_and_reconnections() {
     env_logger::init().unwrap();
