@@ -29,6 +29,17 @@ fn inital_tcp_connect_failure(){
                                 .start().expect("Couldn't start");
 }
 
+/// After connecting to tcp, should timeout error if it didn't receive CONNACK before timeout
+#[test]
+#[should_panic]
+fn connect_timeout_failure() {
+    let client_options = MqttOptions::new()
+                                    .broker("broker.hivemq.com:9999");
+
+    let request = MqttClient::new(client_options).start().expect("Couldn't restart");
+    thread::sleep(Duration::new(12, 0));
+}
+
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial mqtt connect.
 #[test]

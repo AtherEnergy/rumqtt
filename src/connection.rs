@@ -146,6 +146,7 @@ impl Connection {
         connection.state = MqttState::Connected;
         try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
+        try!(connection.stream.set_write_timeout(Some(Duration::new(10, 0))));
         Ok(connection)
     }
 
@@ -186,8 +187,20 @@ impl Connection {
                             VariablePacketError::FixedHeaderError(err) => {
                                 if let FixedHeaderError::IoError(err) = err {
                                     match err.kind() {
+                                        // Timedout for Windows, WouldBlock for linux
                                         ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                                            let _ = self.write();
+                                            if let Err(e) = self.write() {
+                                                // Detects write errors especially timeouts when write
+                                                // buffers are full. Ping below will error out because of
+                                                // PingTimeout when (n * write timeout) > ping timeout
+
+                                                // NOTE: Force pings during Write timeout/ Queue overflow is
+                                                // bad because unlike idle state, publishes might be continous
+                                                // and connection might not go into read mode before consequent
+                                                // publishes
+                                                error!("Write Error --> {:?}", e);
+                                            }
+
 
                                             // TODO: Test if PINGRESPs are properly recieved before
                                             // next ping incase of high frequency incoming messages
@@ -232,6 +245,7 @@ impl Connection {
                         }
                     }
                 };
+
                 if let Err(e) = self.post_handle_packet(&packet) {
                     continue 'receive;
                 }
@@ -246,16 +260,20 @@ impl Connection {
             MqttState::Connected => {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
-                    if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
-                        return Err(Error::PingTimeout);
-                    } else if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+
+                    if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+                        if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
+                            return Err(Error::PingTimeout);
+                        }
+
                         // @ Prevents half open connections. Tcp writes will buffer up
                         // with out throwing any error (till a timeout) when internet
                         // is down. Eventhough broker closes the socket, EOF will be
                         // known only after reconnection.
                         // We just unbind the socket if there in no pingresp before next ping
-                        // (TODO: What about case when pings aren't sent because of constant publishes
-                        // ?)
+                        // (What about case when pings aren't sent because of constant publishes
+                        // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
+                        // secs and then error out because of timeout.)
                         if self.await_pingresp {
                             return Err(Error::AwaitPingResp);
                         }
@@ -393,14 +411,6 @@ impl Connection {
                 }
             }
             HandlePacket::PubAck(m) => {
-                // Don't notify everytime q len is < max. This will always be true initially
-                // leading to dup notify.
-                // Send only for notify() to recover if channel is blocked.
-                // Blocking = true is set during publish if pub q len is more than desired.
-                if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
-                    error!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
-                }
-
                 if m.is_none() {
                     return Ok(());
                 }
@@ -412,10 +422,6 @@ impl Connection {
             }
             // TODO: Better read from channel again after PubComp instead of PubRec
             HandlePacket::PubRec(m) => {
-                if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
-                    error!(":( :( Outgoing Publish Queue Length growing bad");
-                }
-
                 if m.is_none() {
                     return Ok(());
                 }
@@ -706,9 +712,17 @@ impl Connection {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
                 self.outgoing_pub.push_back((time::get_time().sec, message_box.clone()));
+
+                if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
+                    warn!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
+                }
             }
             QoSWithPacketIdentifier::Level2(_) => {
                 self.outgoing_rec.push_back((time::get_time().sec, message_box.clone()));
+
+                if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
+                    warn!(":( :( Outgoing Publish Queue Length growing bad");
+                }
             }
         }
         // error!("Queue --> {:?}\n\n", self.outgoing_pub);
@@ -769,6 +783,12 @@ impl Connection {
         error!("  Disconnected {:?}", self.opts.client_id);
     }
 
+    // NOTE: write_all() will block indefinitely by default if
+    // underlying Tcp Buffer is full (during disconnections). This
+    // is evident when test cases are publishing lot of data when
+    // ethernet cable is unplugged (mantests/half_open_publishes_and_reconnections
+    // but not during mantests/ping_reqs_in_time_and_reconnections due to low
+    // frequency writes. 10 seconds migth be good default for write timeout ?)
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
         try!(self.stream.write_all(&packet));
