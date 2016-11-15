@@ -25,7 +25,6 @@ use message::Message;
 static mut N: i32 = 0;
 
 enum HandlePacket {
-
     Publish(Box<Message>),
     PubAck(Option<Message>),
     PubRec(Option<Message>),
@@ -71,6 +70,7 @@ pub struct Connection {
     pub nw_notification_tx: SyncSender<NetworkNotification>,
     pub state: MqttState,
     pub initial_connect: bool,
+    pub await_pingresp: bool,
     pub last_flush: Instant,
 
     /// On message callback
@@ -117,6 +117,7 @@ impl Connection {
             nw_notification_tx: nw_notification_tx,
             state: MqttState::Disconnected,
             initial_connect: true,
+            await_pingresp: false,
             last_flush: Instant::now(),
 
             publish_callback: publish_callback,
@@ -167,7 +168,9 @@ impl Connection {
                             try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
                             break;
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            error!("Couldn't connect. Error = {:?}", e);
+                            error!("  Will try Reconnect in {:?} seconds", self.opts.reconnect);
                             continue;
                         }
                     }
@@ -185,10 +188,13 @@ impl Connection {
                                     match err.kind() {
                                         ErrorKind::TimedOut | ErrorKind::WouldBlock => {
                                             let _ = self.write();
+
+                                            // TODO: Test if PINGRESPs are properly recieved before
+                                            // next ping incase of high frequency incoming messages
                                             if let Err(e) = self.ping() {
                                                 match e {
-                                                    Error::Timeout => {
-                                                        error!("Couldn't PING in time :( . Err = {:?}", e);
+                                                    Error::PingTimeout | Error::AwaitPingResp => {
+                                                        error!("Can't Ping :( . Err = {:?}", e);
                                                         self._unbind();
                                                         continue 'reconnect;
                                                     }
@@ -203,9 +209,8 @@ impl Connection {
                                         }
                                         _ => {
                                             // Socket error are readily available here as soon as
-                                            // disconnection happens. So it might be right for this
-                                            // thread to ask for reconnection rather than reconnecting
-                                            // during write failures
+                                            // broker closes its socket end. (But not inbetween n/w disconnection
+                                            // and socket close at broker [i.e ping req timeout])
                                             // UPDATE: Lot of publishes are being written by the time this notified
                                             // the eventloop thread. Setting disconnect_block = true during write failure
                                             error!("Error in receiving packet {:?}", err);
@@ -242,8 +247,19 @@ impl Connection {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
                     if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
-                        return Err(Error::Timeout);
+                        return Err(Error::PingTimeout);
                     } else if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+                        // @ Prevents half open connections. Tcp writes will buffer up
+                        // with out throwing any error (till a timeout) when internet
+                        // is down. Eventhough broker closes the socket, EOF will be
+                        // known only after reconnection.
+                        // We just unbind the socket if there in no pingresp before next ping
+                        // (TODO: What about case when pings aren't sent because of constant publishes
+                        // ?)
+                        if self.await_pingresp {
+                            return Err(Error::AwaitPingResp);
+                        }
+
                         try!(self._ping());
                     }
                 }
@@ -279,10 +295,9 @@ impl Connection {
     fn _try_reconnect(&mut self) -> Result<()> {
         match self.opts.reconnect {
             // TODO: Implement
-            None => panic!("To be implemented"),
+            None => unimplemented!(),
             Some(dur) => {
                 if !self.initial_connect {
-                    error!("  Will try Reconnect in {} seconds", dur);
                     thread::sleep(Duration::new(dur as u64, 0));
                 }
                 let stream = try!(TcpStream::connect(&self.addr));
@@ -421,7 +436,10 @@ impl Connection {
                 match *packet {
                     VariablePacket::SubackPacket(..) => Ok(HandlePacket::SubAck),
 
-                    VariablePacket::PingrespPacket(..) => Ok(HandlePacket::PingResp),
+                    VariablePacket::PingrespPacket(..) => {
+                        self.await_pingresp = false;
+                        Ok(HandlePacket::PingResp)
+                    }
 
                     VariablePacket::DisconnectPacket(..) => Ok(HandlePacket::Disconnect),
 
@@ -476,7 +494,8 @@ impl Connection {
                         // After receiving PUBREC packet and removing corrosponding
                         // message from outgoing_rec queue, send PUBREL and add it queue.
                         self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
-                        // NOTE: Don't Error return here. It's ok to fail during writes coz of disconnection.
+                        // NOTE: Don't Error return here. It's ok to fail during writes coz of
+                        // disconnection.
                         // `force_transmit` will resend when reconnection is successful
                         let _ = self._pubrel(pkid);
                         Ok(HandlePacket::PubRec(m))
@@ -713,9 +732,10 @@ impl Connection {
 
     fn _ping(&mut self) -> Result<()> {
         let ping = try!(genpack::generate_pingreq_packet());
-        // self.await_ping = true;
+        self.await_pingresp = true;
         try!(self._write_packet(ping));
-        self._flush()
+        try!(self._flush());
+        Ok(())
     }
 
     fn _puback(&mut self, pkid: u16) -> Result<()> {
@@ -744,8 +764,9 @@ impl Connection {
 
     fn _unbind(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
+        self.await_pingresp = false;
         self.state = MqttState::Disconnected;
-        info!("  Disconnected {:?}", self.opts.client_id);
+        error!("  Disconnected {:?}", self.opts.client_id);
     }
 
     #[inline]
