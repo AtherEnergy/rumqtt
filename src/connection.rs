@@ -516,6 +516,8 @@ impl Connection {
                             .position(|ref x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(message) = self.incoming_rec.remove(i) {
+                                    self.outgoing_comp.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                                    let _ = self._pubcomp(pkid);
                                     Some(message)
                                 } else {
                                     None
@@ -632,14 +634,12 @@ impl Connection {
         Ok(())
     }
 
-    // Spec says that client (for QoS > 0, clean session) should retransmit all the
-    // unacked messages after reconnection. Instead of waiting for retransmit
-    // timeout
-    // to kickin, this methods retransmits everthing in the queue immediately
-    // NOTE: outgoing_rels are handled in _try_retransmit. Sending duplicate pubrels
-    // isn't a problem (I guess ?). Broker will just resend pubcomps
+    // Spec says that client (for QoS > 0, persistant session [clean session = 0])
+    // should retransmit all the unacked publishes and pubrels after reconnection.
+    // NOTE: Sending duplicate pubrels isn't a problem (I guess ?). Broker will
+    // just resend pubcomps
     fn _force_retransmit(&mut self) {
-        if self.opts.clean_session {
+        if !self.opts.clean_session {
             // Cloning because iterating and removing isn't possible.
             // Iterating over indexes and and removing elements messes
             // up the remove sequence
@@ -654,21 +654,14 @@ impl Connection {
             while let Some(message) = outgoing_rec.pop_front() {
                 let _ = self._publish(*message.1);
             }
-
+            // println!("{:?}", self.outgoing_rec.iter().map(|e|
+            // e.1.qos).collect::<Vec<_>>());
             let mut outgoing_rel = self.outgoing_rel.clone();
             self.outgoing_rel.clear();
             while let Some(rel) = outgoing_rel.pop_front() {
                 self.outgoing_rel.push_back((time::get_time().sec, rel.1));
                 let PacketIdentifier(pkid) = rel.1;
                 let _ = self._pubrel(pkid);
-            }
-
-            let mut outgoing_comp = self.outgoing_comp.clone();
-            self.outgoing_comp.clear();
-            while let Some(comp) = outgoing_comp.pop_front() {
-                self.outgoing_comp.push_back((time::get_time().sec, comp.1));
-                let PacketIdentifier(pkid) = comp.1;
-                let _ = self._pubcomp(pkid);
             }
         }
     }
@@ -777,6 +770,15 @@ impl Connection {
         let _ = self.stream.shutdown(Shutdown::Both);
         self.await_pingresp = false;
         self.state = MqttState::Disconnected;
+
+        // remove all the state
+        if self.opts.clean_session {
+            self.outgoing_pub.clear();
+            self.outgoing_rec.clear();
+            self.outgoing_rel.clear();
+            self.outgoing_comp.clear();
+        }
+
         error!("  Disconnected {:?}", self.opts.client_id);
     }
 

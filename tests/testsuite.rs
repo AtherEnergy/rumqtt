@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
-const BROKER_ADDRESS: &'static str = "endurance-broker.atherengineering.in:1883";
+const BROKER_ADDRESS: &'static str = "broker.toggleme.in:1883";
 
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial tcp connect.
@@ -20,7 +20,6 @@ fn inital_tcp_connect_failure(){
     //env_logger::init().unwrap();
     // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .broker("localhost:9999");
 
@@ -46,7 +45,6 @@ fn connect_timeout_failure() {
 #[should_panic]
 fn inital_mqtt_connect_failure() {
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .broker("test.mosquitto.org:8883");
 
@@ -60,7 +58,6 @@ fn inital_mqtt_connect_failure() {
 fn basic_publishes_and_subscribes() {
     //env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .broker(BROKER_ADDRESS);
 
@@ -129,7 +126,6 @@ fn simple_reconnection() {
 #[test]
 fn acked_message() {
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(5)
                                     .set_client_id("test-reconnect-client")
                                     .broker(BROKER_ADDRESS);
@@ -156,7 +152,6 @@ fn acked_message() {
 fn will() {
     // env_logger::init().unwrap();
     let client_options1 = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(15)
                                     .set_client_id("test-will-c1")
                                     .set_clean_session(false)
@@ -203,7 +198,6 @@ fn will() {
 fn retained_messages() {
     //env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("test-retain-client")
                                     .set_clean_session(true)
@@ -250,7 +244,6 @@ fn retained_messages() {
 #[test]
 fn qos0_stress_publish() {
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos0-stress-publish")
                                     .broker(BROKER_ADDRESS);
@@ -281,7 +274,6 @@ fn qos0_stress_publish() {
 fn simple_qos1_stress_publish() {
     // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos1-stress-publish")
                                     .set_pub_q_len(50)
@@ -319,9 +311,9 @@ fn simple_qos1_stress_publish() {
 fn qos1_stress_publish_with_reconnections() {
     // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos1-stress-reconnect-publish")
+                                    .set_clean_session(false)
                                     .set_pub_q_len(50)
                                     .broker(BROKER_ADDRESS);
 
@@ -351,7 +343,6 @@ fn qos1_stress_publish_with_reconnections() {
 fn simple_qos2_stress_publish() {
     // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(3)
                                     .set_client_id("qos2-stress-publish")
                                     .broker(BROKER_ADDRESS);
@@ -379,8 +370,8 @@ fn simple_qos2_stress_publish() {
 fn qos2_stress_publish_with_reconnections() {
     // env_logger::init().unwrap();
     let client_options = MqttOptions::new()
-                                    .set_keep_alive(5)
                                     .set_reconnect(3)
+                                    .set_clean_session(false)
                                     .set_client_id("qos2-stress-reconnect-publish")
                                     .broker(BROKER_ADDRESS);
 
@@ -393,15 +384,57 @@ fn qos2_stress_publish_with_reconnections() {
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
     
-    for i in 0..10{
+    for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
-        if i == 5 {
+        if i == 40 || i == 500 || i == 900 {
             let _ = request.disconnect();
         }
         request.publish("test/qos2/reconnection_stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
     }
 
-    thread::sleep(Duration::new(10, 0));
+    thread::sleep(Duration::new(30, 0));
     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
-    assert!(10 == final_count.load(Ordering::SeqCst));
+    assert!(1000 == final_count.load(Ordering::SeqCst));
 }
+
+
+// NOTE: POTENTIAL MOSQUITTO BUG
+// client publishing 1..40 and disconnect and 40..46(with errors) before read triggered
+// broker receives 1..40 but sends acks for only 1..20  (don't know why)
+// client reconnects and sends 21..46 again and received pubrecs (qos2 publish queue empty)
+// broker now sends pubrecs from 21..X resulting in unsolicited records
+
+// doesn't seem to be a problem with qos1
+// emqttd doesn't have this issue
+
+// #[test]
+// fn qos2_stress_publish_with_reconnections() {
+//     env_logger::init().unwrap();
+//     let client_options = MqttOptions::new()
+//                                     .set_keep_alive(5)
+//                                     .set_reconnect(3)
+//                                     .set_clean_session(false)
+//                                     .set_client_id("qos2-stress-reconnect-publish")
+//                                     .broker(BROKER_ADDRESS);
+
+//     let count = Arc::new(AtomicUsize::new(0));
+//     let final_count = count.clone();
+//     let count = count.clone();
+
+//     let request = MqttClient::new(client_options).publish_callback(move |message| {
+//         count.fetch_add(1, Ordering::SeqCst);
+//         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+//     }).start().expect("Coudn't start");
+    
+//     for i in 0..50 {
+//         let payload = format!("{}. hello rust", i);
+//         if i == 40 || i == 500 || i == 900 {
+//             let _ = request.disconnect();
+//         }
+//         request.publish("test/qos2/reconnection_stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
+//     }
+
+//     thread::sleep(Duration::new(10, 0));
+//     println!("QoS2 Final Count = {:?}", final_count.load(Ordering::SeqCst));
+//     assert!(50 == final_count.load(Ordering::SeqCst));
+// }
