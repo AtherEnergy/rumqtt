@@ -76,6 +76,14 @@ impl NetworkStream {
             NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
         }
     }
+
+    pub fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
+        match *self {
+            NetworkStream::Tcp(ref s) => s.set_write_timeout(dur),
+            NetworkStream::Tls(ref s) => s.get_ref().set_write_timeout(dur),
+            NetworkStream::None => Err(io::Error::new(io::ErrorKind::Other, "No stream!")),
+        }
+    }
 }
 
 impl Read for NetworkStream {

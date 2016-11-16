@@ -33,6 +33,44 @@ fn ping_reqs_in_time_and_reconnections() {
     thread::sleep(Duration::new(180, 0));
 }
 
+
+// TEST 1: Start and immediately the unplug the cable. Broker will close the 
+//         socket after timeout. Check if reconnections are being tried [working]
+// TEST 2: Reconnect the same network and check if reconnection is successful and publish 
+//         count is proper [working]
+// TEST 3: Reconnect different network and check if reconnection is successful and publish
+//         count is proper [working]
+#[ignore]
+#[test]
+fn half_open_publishes_and_reconnections() {
+    env_logger::init().unwrap();
+    let client_options = MqttOptions::new()
+                                    .set_reconnect(3)
+                                    .set_client_id("test-ho-publishes")
+                                    .broker("endurance-broker.atherengineering.in:1883");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    // Connects to a broker and returns a `request` 
+    let request = MqttClient::new(client_options).
+    publish_callback(move |message| {
+        count.fetch_add(1, Ordering::SeqCst);
+    }).
+    start().expect("Coudn't start");
+
+    for i in 0..10_000 {
+        let payload = format!("{}. hello rust", i);
+        request.publish("test/half/publish",  QoS::Level1, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::new(0, 10000));
+    }
+
+    thread::sleep(Duration::new(60, 0));
+    println!("Final Count = {:?}", final_count.load(Ordering::SeqCst));
+    assert!(10_000 == final_count.load(Ordering::SeqCst));
+}
+
 /// This handles the case where messages in channel are being
 /// read but pubacks not being received. 
 /// If queue holds 10, recv() stops after queue is full. publish

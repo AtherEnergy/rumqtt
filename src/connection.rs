@@ -18,7 +18,7 @@ use time;
 
 use error::{Result, Error};
 use clientoptions::MqttOptions;
-use tls::{NetworkStream, SslContext};
+use stream::{NetworkStream, SslContext};
 use genpack;
 use message::Message;
 
@@ -146,6 +146,7 @@ impl Connection {
         connection.state = MqttState::Connected;
         try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
+        try!(connection.stream.set_write_timeout(Some(Duration::new(10, 0))));
         Ok(connection)
     }
 
@@ -186,7 +187,16 @@ impl Connection {
                             VariablePacketError::FixedHeaderError(err) => {
                                 if let FixedHeaderError::IoError(err) = err {
                                     match err.kind() {
+                                        // Timedout for Windows, WouldBlock for linux
                                         ErrorKind::TimedOut | ErrorKind::WouldBlock => {
+                                            // During timeout write errors when tcp write
+                                            // buffers are full, ping below will error out because of
+                                            // PingTimeout when (n * write timeout) > ping timeout
+
+                                            // NOTE: Force pings during Write timeout/ Queue overflow is
+                                            // bad because unlike idle state, publishes might be continous
+                                            // and connection might not go into read mod for detecting
+                                            // pingreps before consequent publishes
                                             let _ = self.write();
 
                                             // TODO: Test if PINGRESPs are properly recieved before
@@ -232,6 +242,7 @@ impl Connection {
                         }
                     }
                 };
+
                 if let Err(e) = self.post_handle_packet(&packet) {
                     continue 'receive;
                 }
@@ -246,16 +257,20 @@ impl Connection {
             MqttState::Connected => {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
-                    if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
-                        return Err(Error::PingTimeout);
-                    } else if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+
+                    if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+                        if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
+                            return Err(Error::PingTimeout);
+                        }
+
                         // @ Prevents half open connections. Tcp writes will buffer up
                         // with out throwing any error (till a timeout) when internet
                         // is down. Eventhough broker closes the socket, EOF will be
                         // known only after reconnection.
                         // We just unbind the socket if there in no pingresp before next ping
-                        // (TODO: What about case when pings aren't sent because of constant publishes
-                        // ?)
+                        // (What about case when pings aren't sent because of constant publishes
+                        // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
+                        // secs and then error out because of timeout.)
                         if self.await_pingresp {
                             return Err(Error::AwaitPingResp);
                         }
@@ -361,13 +376,17 @@ impl Connection {
                 match *packet {
                     VariablePacket::ConnackPacket(..) => {
                         self.no_of_reconnections += 1;
-                        // Resubscribe after a reconnection.
-                        for s in self.subscriptions.clone() {
-                            let _ = self._subscribe(s);
+                        if self.opts.clean_session {
+                            // Resubscribe after a reconnection when connected with clean session.
+                            for s in self.subscriptions.clone() {
+                                let _ = self._subscribe(s);
+                            }
                         }
-                        // Retransmit QoS1,2 queues after reconnection. Clears the queue by the time
-                        // QoS*Reconnect notifications are sent to read pending messages in the channel
-                        self._force_retransmit();
+
+                        // Retransmit QoS1,2 queues after reconnection when clean_session = false
+                        if !self.opts.clean_session {
+                            self._force_retransmit();
+                        }
                         Ok(())
                     }
                     _ => {
@@ -393,14 +412,6 @@ impl Connection {
                 }
             }
             HandlePacket::PubAck(m) => {
-                // Don't notify everytime q len is < max. This will always be true initially
-                // leading to dup notify.
-                // Send only for notify() to recover if channel is blocked.
-                // Blocking = true is set during publish if pub q len is more than desired.
-                if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
-                    error!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
-                }
-
                 if m.is_none() {
                     return Ok(());
                 }
@@ -412,10 +423,6 @@ impl Connection {
             }
             // TODO: Better read from channel again after PubComp instead of PubRec
             HandlePacket::PubRec(m) => {
-                if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
-                    error!(":( :( Outgoing Publish Queue Length growing bad");
-                }
-
                 if m.is_none() {
                     return Ok(());
                 }
@@ -513,6 +520,8 @@ impl Connection {
                             .position(|ref x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(message) = self.incoming_rec.remove(i) {
+                                    self.outgoing_comp.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                                    let _ = self._pubcomp(pkid);
                                     Some(message)
                                 } else {
                                     None
@@ -629,44 +638,33 @@ impl Connection {
         Ok(())
     }
 
-    // Spec says that client (for QoS > 0, clean session) should retransmit all the
-    // unacked messages after reconnection. Instead of waiting for retransmit
-    // timeout
-    // to kickin, this methods retransmits everthing in the queue immediately
-    // NOTE: outgoing_rels are handled in _try_retransmit. Sending duplicate pubrels
-    // isn't a problem (I guess ?). Broker will just resend pubcomps
+    // Spec says that client (for QoS > 0, persistant session [clean session = 0])
+    // should retransmit all the unacked publishes and pubrels after reconnection.
+    // NOTE: Sending duplicate pubrels isn't a problem (I guess ?). Broker will
+    // just resend pubcomps
     fn _force_retransmit(&mut self) {
-        if self.opts.clean_session {
-            // Cloning because iterating and removing isn't possible.
-            // Iterating over indexes and and removing elements messes
-            // up the remove sequence
-            let mut outgoing_pub = self.outgoing_pub.clone();
-            self.outgoing_pub.clear();
-            while let Some(message) = outgoing_pub.pop_front() {
-                let _ = self._publish(*message.1);
-            }
+        // Cloning because iterating and removing isn't possible.
+        // Iterating over indexes and and removing elements messes
+        // up the remove sequence
+        let mut outgoing_pub = self.outgoing_pub.clone();
+        self.outgoing_pub.clear();
+        while let Some(message) = outgoing_pub.pop_front() {
+            let _ = self._publish(*message.1);
+        }
 
-            let mut outgoing_rec = self.outgoing_rec.clone();
-            self.outgoing_rec.clear();
-            while let Some(message) = outgoing_rec.pop_front() {
-                let _ = self._publish(*message.1);
-            }
-
-            let mut outgoing_rel = self.outgoing_rel.clone();
-            self.outgoing_rel.clear();
-            while let Some(rel) = outgoing_rel.pop_front() {
-                self.outgoing_rel.push_back((time::get_time().sec, rel.1));
-                let PacketIdentifier(pkid) = rel.1;
-                let _ = self._pubrel(pkid);
-            }
-
-            let mut outgoing_comp = self.outgoing_comp.clone();
-            self.outgoing_comp.clear();
-            while let Some(comp) = outgoing_comp.pop_front() {
-                self.outgoing_comp.push_back((time::get_time().sec, comp.1));
-                let PacketIdentifier(pkid) = comp.1;
-                let _ = self._pubcomp(pkid);
-            }
+        let mut outgoing_rec = self.outgoing_rec.clone();
+        self.outgoing_rec.clear();
+        while let Some(message) = outgoing_rec.pop_front() {
+            let _ = self._publish(*message.1);
+        }
+        // println!("{:?}", self.outgoing_rec.iter().map(|e|
+        // e.1.qos).collect::<Vec<_>>());
+        let mut outgoing_rel = self.outgoing_rel.clone();
+        self.outgoing_rel.clear();
+        while let Some(rel) = outgoing_rel.pop_front() {
+            self.outgoing_rel.push_back((time::get_time().sec, rel.1));
+            let PacketIdentifier(pkid) = rel.1;
+            let _ = self._pubrel(pkid);
         }
     }
 
@@ -706,9 +704,17 @@ impl Connection {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
                 self.outgoing_pub.push_back((time::get_time().sec, message_box.clone()));
+
+                if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
+                    warn!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
+                }
             }
             QoSWithPacketIdentifier::Level2(_) => {
                 self.outgoing_rec.push_back((time::get_time().sec, message_box.clone()));
+
+                if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
+                    warn!(":( :( Outgoing Publish Queue Length growing bad");
+                }
             }
         }
         // error!("Queue --> {:?}\n\n", self.outgoing_pub);
@@ -766,9 +772,24 @@ impl Connection {
         let _ = self.stream.shutdown(Shutdown::Both);
         self.await_pingresp = false;
         self.state = MqttState::Disconnected;
+
+        // remove all the state
+        if self.opts.clean_session {
+            self.outgoing_pub.clear();
+            self.outgoing_rec.clear();
+            self.outgoing_rel.clear();
+            self.outgoing_comp.clear();
+        }
+
         error!("  Disconnected {:?}", self.opts.client_id);
     }
 
+    // NOTE: write_all() will block indefinitely by default if
+    // underlying Tcp Buffer is full (during disconnections). This
+    // is evident when test cases are publishing lot of data when
+    // ethernet cable is unplugged (mantests/half_open_publishes_and_reconnections
+    // but not during mantests/ping_reqs_in_time_and_reconnections due to low
+    // frequency writes. 10 seconds migth be good default for write timeout ?)
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
         try!(self.stream.write_all(&packet));

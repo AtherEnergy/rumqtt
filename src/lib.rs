@@ -19,7 +19,7 @@
 //!                                   .set_keep_alive(5)
 //!                                   .set_reconnect(3)
 //!                                   .set_client_id("rumqtt-docs")
-//!                                   .broker("localhost:1883");
+//!                                   .broker("test.mosquitto.org:1883");
 //!
 //! // Create a new `MqttClient` object from `MqttOptions`
 //! let mq_client = MqttClient::new(client_options);
@@ -67,7 +67,7 @@ extern crate threadpool;
 
 mod error;
 mod genpack;
-mod tls;
+mod stream;
 mod message;
 mod clientoptions;
 mod connection;
