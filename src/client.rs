@@ -191,7 +191,7 @@ impl MqttClient {
                                                     self.message_callback.clone()));
         thread::spawn(move || -> Result<()> {
             let _ = connection.run();
-            error!("Network Thread Stopped !!");
+            error!("Network Thread Stopped !!!!!!!!!");
             Ok(())
         });
 
@@ -306,12 +306,14 @@ impl MqttClient {
             self.pub0_channel_pending += 1;
         }
 
-        debug!("Mqtt State = {:?}. Channel pending @@@@@ {}", self.state, self.pub0_channel_pending);
+        debug!(" * Pub QoS0. Clear Backlog = {}, Mqtt State = {:?}, Channel pending = {}",
+               clear_backlog,
+               self.state,
+               self.pub0_channel_pending);
         // Receive from publish qos0 channel only when connected.
         if self.state == MqttState::Connected {
             loop {
                 if self.pub0_channel_pending == 0 {
-                    debug!("Finished everything in channel");
                     break;
                 }
                 let message = {
@@ -340,7 +342,7 @@ impl MqttClient {
             self.pub1_channel_pending += 1;
         }
 
-        debug!("## Clear Backlog = {}, Mqtt State = {:?}, Channel pending = {}",
+        debug!(" * Pub QoS1. Clear Backlog = {}, Mqtt State = {:?}, Channel pending = {}",
                clear_backlog,
                self.state,
                self.pub1_channel_pending);
@@ -350,7 +352,6 @@ impl MqttClient {
         if self.state == MqttState::Connected {
             loop {
                 if self.pub1_channel_pending == 0 {
-                    debug!("Finished everything in channel");
                     break;
                 }
                 let mut message = {
@@ -383,14 +384,16 @@ impl MqttClient {
             self.pub2_channel_pending += 1;
         }
 
-        debug!("QoS2 Channel pending @@@@@ {}", self.pub2_channel_pending);
+        debug!(" * Pub QoS2. Clear Backlog = {}, Mqtt State = {:?}, Channel pending = {}",
+               clear_backlog,
+               self.state,
+               self.pub2_channel_pending);
         // Receive from publish qos2 channel only when outgoing pub queue
         // length is < max and in connected state
         if self.state == MqttState::Connected {
             loop {
                 // Before
                 if self.pub2_channel_pending == 0 {
-                    debug!("Finished everything in channel");
                     break;
                 }
                 let mut message = {

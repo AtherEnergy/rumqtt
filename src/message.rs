@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::fmt;
 
 use mqtt::topic_name::TopicName;
 use mqtt::packet::*;
@@ -6,7 +7,7 @@ use error::Result;
 
 
 
-#[derive(Debug, Clone)] //TODO: add Clone here
+#[derive(Clone)] //TODO: add Clone here
 pub struct Message {
     pub topic: TopicName,
     pub retain: bool,
@@ -81,5 +82,16 @@ impl Message {
             payload: self.payload.clone(),
             userdata: self.userdata.clone(),
         })
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,
+               "topic = {:?}, qos = {:?}, retain = {:?}, payload size = {:?} bytes",
+               self.topic,
+               self.qos,
+               self.retain,
+               self.payload.len())
     }
 }

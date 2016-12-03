@@ -144,6 +144,7 @@ impl Connection {
         connection.state = MqttState::Handshake;
         try!(connection._await_connack());
         connection.state = MqttState::Connected;
+        info!("$$$ Connected to broker");
         try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
         try!(connection.stream.set_write_timeout(Some(Duration::new(10, 0))));
@@ -164,6 +165,7 @@ impl Connection {
                             self.state = MqttState::Handshake;
                             let packet = try!(self._await_connack());
                             self.state = MqttState::Connected;
+                            info!("$$$ Connected to broker");
                             try!(self.post_connack_handle(&packet));
                             try!(self.nw_notification_tx.send(NetworkNotification::Connected));
                             try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
@@ -451,8 +453,8 @@ impl Connection {
                     VariablePacket::DisconnectPacket(..) => Ok(HandlePacket::Disconnect),
 
                     VariablePacket::PubackPacket(ref puback) => {
-                        debug!("*** puback --> {:?}\n @@@ queue --> {:?}\n\n", puback, self.outgoing_pub);
                         let pkid = puback.packet_identifier();
+                        debug!("*** PubAck --> Pkid({:?})\n--- Publish Queue =\n{:#?}\n\n", pkid, self.outgoing_pub);
                         let m = match self.outgoing_pub
                             .iter()
                             .position(|ref x| x.1.get_pkid() == Some(pkid)) {
@@ -482,6 +484,7 @@ impl Connection {
                     // @ Send 'pubrel' to broker
                     VariablePacket::PubrecPacket(ref pubrec) => {
                         let pkid = pubrec.packet_identifier();
+                        debug!("*** PubRec --> Pkid({:?})\n--- Record Queue =\n{:#?}\n\n", pkid, self.outgoing_rec);
                         let m = match self.outgoing_rec
                             .iter()
                             .position(|ref x| x.1.get_pkid() == Some(pkid)) {
@@ -647,12 +650,14 @@ impl Connection {
         // Iterating over indexes and and removing elements messes
         // up the remove sequence
         let mut outgoing_pub = self.outgoing_pub.clone();
+        debug!("*** Force Retransmission. Publish Queue =\n{:#?}\n\n", outgoing_pub);
         self.outgoing_pub.clear();
         while let Some(message) = outgoing_pub.pop_front() {
             let _ = self._publish(*message.1);
         }
 
         let mut outgoing_rec = self.outgoing_rec.clone();
+        debug!("*** Force Retransmission. Record Queue =\n{:#?}\n\n", outgoing_rec);
         self.outgoing_rec.clear();
         while let Some(message) = outgoing_rec.pop_front() {
             let _ = self._publish(*message.1);
@@ -713,7 +718,7 @@ impl Connection {
                 self.outgoing_rec.push_back((time::get_time().sec, message_box.clone()));
 
                 if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
-                    warn!(":( :( Outgoing Publish Queue Length growing bad");
+                    warn!(":( :( Outgoing Record Queue Length growing bad --> {:?}", self.outgoing_rec.len());
                 }
             }
         }
@@ -729,7 +734,7 @@ impl Connection {
                 if self.state == MqttState::Connected {
                     try!(self._write_packet(publish_packet));
                 } else {
-                    error!("State = {:?}. Skip network write", self.state);
+                    warn!("State = {:?}. Skip network write", self.state);
                 }
             }
         };
