@@ -1,0 +1,10 @@
+[package]
+name = "tokio-mqtt"
+version = "0.1.0"
+authors = ["kteza1 <k.teza1@gmail.com>"]
+
+[dependencies]
+mqtt3 = "0.1"
+futures = "0.1"
+tokio-core = "0.1"
+tokio-proto = { git = "https://github.com/tokio-rs/tokio-proto" }
