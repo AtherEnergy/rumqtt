@@ -16,6 +16,7 @@ impl Codec for MqttCodec {
         let buf = buf.as_ref();
         let mut buf = BufReader::new(buf);
         let packet = buf.read_packet().unwrap();
+        println!("{:?}", packet);
         Ok(Some(packet))
     }
 
