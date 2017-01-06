@@ -2,17 +2,19 @@ extern crate tokio_mqtt;
 extern crate mqtt3;
 extern crate futures;
 extern crate tokio_core as core;
-extern crate tokio_proto as proto;
-extern crate tokio_service as service;
 
 use futures::Future;
-use proto::TcpClient;
-use service::Service;
+use futures::Sink;
+use futures::Stream;
+use core::net::TcpStream;
+use core::io::Io;
 
-use tokio_mqtt::client::MqttClientProto;
+use tokio_mqtt::client::MqttCodec;
 use mqtt3::{Packet, Protocol,Connect, LastWill, QoS};
 
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::thread;
+use std::time::Duration;
 
 fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
         let addrs = addr.to_socket_addrs().expect("Conversion Failed");
@@ -29,11 +31,9 @@ fn main() {
     let mut event_loop = core::reactor::Core::new().unwrap();
     let handle = event_loop.handle();
 
-    let addr = lookup_ipv4("test.mosquitto.org:1883");
-    let test = TcpClient::new(MqttClientProto)
-        .connect(&addr, &handle.clone())
-        .and_then(|mut client| {
-            let connect = Packet::Connect(Box::new(Connect {
+    let addr = lookup_ipv4("localhost:1883");
+
+    let connect = Packet::Connect(Box::new(Connect {
             protocol: Protocol::MQTT(4),
             keep_alive: 10,
             client_id: "tokio-mqtt".to_owned(),
@@ -43,9 +43,31 @@ fn main() {
             password: None,
             }));
 
-            client.call(connect)
-        })
-        .map(|res| println!("res: {:?}", res));
+    let f_response = TcpStream::connect(&addr, &handle).and_then(|connection| {
+            // A Framed knows how to encode and give it to TcpStream
+            // framed --> core::io::Framed<core::net::TcpStream, tokio_mqtt::client::MqttCodec>
+            let framed = connection.framed(MqttCodec);
 
-    event_loop.run(test).unwrap();
+            // Encode and send the frame 
+            // f1 -> futures::sink::Send<core::io::Framed<core::net::TcpStream, tokio_mqtt::client::MqttCodec>>
+            // A future which might not be sent yet
+            let f1 = framed.send(connect);
+            f1.and_then(|framed| {
+                // framed (Framed) knows how to decode data from TcpStream
+                // framed --> core::io::Framed<core::net::TcpStream, tokio_mqtt::client::MqttCodec>
+
+                framed.into_future().and_then(|(res, stream)| {
+                    Ok((res, stream))
+                }).map_err(|(err, _stream)| err)
+            }).boxed()
+        });
+
+    // response --> std::result::Result<(std::option::Option<mqtt3::Packet>, core::io::Framed<core::net::TcpStream, tokio_mqtt::client::MqttCodec>), std::io::Error>   
+    let response = event_loop.run(f_response);
+    
+    // don't use '_' to ignore frame or else 'frame' (which contains TcpStream)
+    // will be dropped and broker closes the connection immediately
+    let (packet, frame) = response.unwrap();
+    println!("{:?}", packet);
+    thread::sleep(Duration::new(20, 0));
 }

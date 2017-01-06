@@ -7,5 +7,3 @@ authors = ["kteza1 <k.teza1@gmail.com>"]
 mqtt3 = "0.1"
 futures = "0.1"
 tokio-core = "0.1"
-tokio-proto = { git = "https://github.com/tokio-rs/tokio-proto" }
-tokio-service = { git = "https://github.com/tokio-rs/tokio-service" }
