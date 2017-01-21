@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["kteza1 <k.teza1@gmail.com>"]
 
 [dependencies]
-mqtt3 = "0.1"
+mqtt3 = {path = "../mqtt3"}
 futures = "0.1"
 tokio-core = "0.1"
+error-chain = "0.8"
+mqtt-protocol = "0.3"
+rand = "0.3"

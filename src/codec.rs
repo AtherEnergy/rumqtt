@@ -1,5 +1,5 @@
 use std::io::{self, BufReader, Cursor};
-use core::io::{Codec, EasyBuf};
+use tokio_core::io::{Codec, EasyBuf};
 
 use mqtt3::{Packet, MqttWrite, MqttRead};
 
@@ -18,7 +18,12 @@ impl Codec for MqttCodec {
 
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> io::Result<()> {
         let mut stream = Cursor::new(Vec::new());
-        stream.write_packet(&msg);
+
+        if let Err(e) = stream.write_packet(&msg) {
+            println!("{:?}", e);
+            return Err(io::Error::new(io::ErrorKind::Other, "oh no!"));
+        }
+
         for i in stream.get_ref() {
             buf.push(*i);
         }
