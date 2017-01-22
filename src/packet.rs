@@ -27,3 +27,7 @@ pub fn generate_connect_packet(client_id: String,
         password: password,
     }))
 }
+
+pub fn generate_pingreq_packet() -> Packet {
+    Packet::Pingreq
+}

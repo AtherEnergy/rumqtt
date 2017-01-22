@@ -35,8 +35,7 @@ fn main() {
 
     let addr = lookup_ipv4("localhost:1883");
     let opts = MqttOptions::new();
-
-    let (mut connection, framed) = Connection::start(addr, opts).unwrap();
-    connection.run(framed);
+    
+    let connection = Connection::start(addr, opts).unwrap();
     thread::sleep(Duration::new(20, 0));
 }

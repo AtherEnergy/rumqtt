@@ -1,4 +1,6 @@
 use std::io::{self, BufReader, Cursor};
+use std::thread;
+use std::time::Duration;
 use tokio_core::io::{Codec, EasyBuf};
 
 use mqtt3::{Packet, MqttWrite, MqttRead};
@@ -10,9 +12,17 @@ impl Codec for MqttCodec {
     type Out = Packet;
 
     fn decode(&mut self, buf: &mut EasyBuf) -> Result<Option<Self::In>, io::Error> {
-        let buf = buf.as_ref();
-        let mut buf = BufReader::new(buf);
-        let packet = buf.read_packet().unwrap();
+        let (packet, len) = {
+            let buf_ref = buf.as_ref();
+            let mut reader = BufReader::new(buf_ref);
+            match reader.read_packet_with_len() {
+                Err(e) => return Ok(None),
+                Ok(v) => v,
+            }
+        };
+
+        buf.drain_to(len);
+        println!("{:?}, {:?}", len, packet);
         Ok(Some(packet))
     }
 

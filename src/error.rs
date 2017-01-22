@@ -2,25 +2,34 @@ use std::io;
 
 use mqtt::topic_name::TopicNameError;
 use mqtt3;
+use tokio_timer::TimerError;
 
-error_chain! {
-    foreign_links {
-        Io(io::Error);
-        TopicName(TopicNameError);
-        Mqtt3(mqtt3::Error);
+quick_error! {
+    #[derive(Debug)]
+    pub enum Error {
+        Io(err: io::Error) {
+            from()
+            description("io error")
+            display("I/O error: {}", err)
+            cause(err)
+        }
+        Mqtt3(err: mqtt3::Error) {
+            from()
+        }
+        TopicName(err: TopicNameError) {
+            from()
+        }
+        Timer(err: TimerError) {
+            from()
+            description("Timer error")
+            cause(err)
+        }
+        Other(descr: &'static str) {
+            description(descr)
+            display("Error {}", descr)
+        }       
+        Discard {
+            from(&'static str)
+        }
     }
-
-    errors {
-        // MQTT(e: mqtt3::Error) { description("MQTT error") display("MQTT says: {:?}", e) }
-    }
- }
-
-//  impl From<mqtt3::Error> for io::Error {
-//     fn from(err: mqtt3::Error) -> io::Error {
-//         // match err {
-//         //     Error::Io(e) => e,
-//         //     _ => panic!("invalid error"),
-//         // }
-//         panic!("hello world");
-//     }
-// }
+}

@@ -1,10 +1,9 @@
-#![recursion_limit = "1024"]
-
 extern crate mqtt3;
 extern crate futures;
 extern crate tokio_core;
+extern crate tokio_timer;
 #[macro_use]
-extern crate error_chain;
+extern crate quick_error;
 extern crate mqtt;
 extern crate rand;
 
