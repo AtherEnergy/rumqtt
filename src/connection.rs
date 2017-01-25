@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_core::io::{Io, Framed};
-use tokio_timer::{Timer};
+use tokio_timer::{Timer, Interval};
 use futures::Future;
 use futures::Sink;
 use futures::Stream;
@@ -31,7 +31,7 @@ pub struct Connection {
     pub last_flush: Instant,
 
     pub no_of_reconnections: u32,
-    
+
     /// On message callback
     pub message_callback: Option<Arc<MessageSendableFn>>,
     /// On publish callback
@@ -142,6 +142,18 @@ impl Connection {
         Ok((connection, framed))
     }
 
+    fn pingtimer(&mut self) -> Interval {
+        let timer = Timer::default();
+
+        let keep_alive = if self.opts.keep_alive.is_some() {
+            self.opts.keep_alive.unwrap() as u64
+        } else {
+            1000
+        };
+
+        timer.interval(Duration::new(keep_alive, 0))
+    }
+
     pub fn run(&mut self, framed: Framed<TcpStream, MqttCodec>) -> Result<(), Error> {
         let (mut sender, receiver) = framed.split();
         let rx_future = receiver.for_each(|msg| {
@@ -151,17 +163,8 @@ impl Connection {
 
         let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
 
-        // Ping timer
-        let timer = Timer::default();
-
-        let keep_alive = if self.opts.keep_alive.is_some() {
-            self.opts.keep_alive.unwrap() as u64
-        } else {
-            1000
-        };
-
-        let interval = timer.interval(Duration::new(keep_alive, 0));
-        let timer_future = interval.for_each(|_| {
+        let pingtimer = self.pingtimer();
+        let timer_future = pingtimer.for_each(|_| {
                 let ref mut sender_tx = sender_tx;
                 sender_tx.send(NetworkRequest::Ping).wait().unwrap();
                 Ok(())
