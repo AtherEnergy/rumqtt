@@ -4,7 +4,6 @@ extern crate tokio_core;
 extern crate tokio_timer;
 #[macro_use]
 extern crate quick_error;
-extern crate mqtt;
 extern crate rand;
 
 pub mod codec;

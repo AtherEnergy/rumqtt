@@ -1,6 +1,5 @@
 use std::io;
 
-use mqtt::topic_name::TopicNameError;
 use mqtt3;
 use tokio_timer::TimerError;
 
@@ -15,10 +14,7 @@ quick_error! {
         }
         Mqtt3(err: mqtt3::Error) {
             from()
-        }
-        TopicName(err: TopicNameError) {
-            from()
-        }
+        }      
         Timer(err: TimerError) {
             from()
             description("Timer error")
