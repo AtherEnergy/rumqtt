@@ -1,5 +1,7 @@
 use std::net::{SocketAddr};
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
@@ -10,12 +12,15 @@ use futures::Sink;
 use futures::Stream;
 use futures::sync::mpsc;
 
-use mqtt3::{Message, QoS, TopicPath};
+use mqtt3::{Message, QoS, TopicPath, PacketIdentifier, SubscribeTopic};
 
 use error::*;
 use packet::*;
 use codec::MqttCodec;
 use clientoptions::MqttOptions;
+
+pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
+pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 pub struct Connection {
     pub addr: SocketAddr,
@@ -24,6 +29,30 @@ pub struct Connection {
     pub initial_connect: bool,
     pub await_pingresp: bool,
     pub last_flush: Instant,
+
+    pub no_of_reconnections: u32,
+    
+    /// On message callback
+    pub message_callback: Option<Arc<MessageSendableFn>>,
+    /// On publish callback
+    pub publish_callback: Option<Arc<PublishSendableFn>>,
+
+    // Queues. Note: 'record' is qos2 term for 'publish'
+    /// For QoS 1. Stores outgoing publishes
+    pub outgoing_pub: VecDeque<Box<Message>>,
+    /// For QoS 2. Store for incoming publishes to record.
+    pub incoming_rec: VecDeque<Box<Message>>, //
+    /// For QoS 2. Store for outgoing publishes.
+    pub outgoing_rec: VecDeque<PacketIdentifier>,
+    /// For Qos2. Store for outgoing `pubrel` packets.
+    pub outgoing_rel: VecDeque<PacketIdentifier>,
+    /// For Qos2. Store for outgoing `pubcomp` packets.
+    pub outgoing_comp: VecDeque<PacketIdentifier>,
+
+    // clean_session=false will remember subscriptions only till lives.
+    // If broker crashes, all its state will be lost (most brokers).
+    // client wouldn't want to loose messages after it comes back up again
+    pub subscriptions: VecDeque<Vec<SubscribeTopic>>,
 
     pub reactor: Core,
 }
@@ -76,7 +105,10 @@ fn _try_reconnect(addr: SocketAddr, reactor: &mut Core) -> Result<Framed<TcpStre
 }
 
 impl Connection {
-    pub fn start(addr: SocketAddr, opts: MqttOptions) -> Result<(Self, Framed<TcpStream, MqttCodec>), Error> {
+    pub fn start(addr: SocketAddr, 
+                 opts: MqttOptions, 
+                 publish_callback: Option<Arc<PublishSendableFn>>,
+                 message_callback: Option<Arc<MessageSendableFn>>) -> Result<(Self, Framed<TcpStream, MqttCodec>), Error> {
         let mut reactor = Core::new().unwrap();
 
         let framed = _try_reconnect(addr, &mut reactor)?;
@@ -88,6 +120,21 @@ impl Connection {
             initial_connect: true,
             await_pingresp: false,
             last_flush: Instant::now(),
+
+            no_of_reconnections: 0,
+
+            publish_callback: publish_callback,
+            message_callback: message_callback,
+
+            // Queues
+            incoming_rec: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+            outgoing_comp: VecDeque::new(),
+
+            // Subscriptions
+            subscriptions: VecDeque::new(),
 
             reactor: reactor,
         };
