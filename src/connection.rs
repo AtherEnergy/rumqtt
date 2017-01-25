@@ -125,7 +125,7 @@ impl Connection {
                 _ => panic!("Misc")
             };
 
-            (&mut sender).send(packet);
+            (&mut sender).send(packet).wait();
             Ok(())
         }).map_err(|_|Error::Sender);
         
