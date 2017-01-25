@@ -24,6 +24,9 @@ quick_error! {
             description("Timer error")
             cause(err)
         }
+        Sender {
+            description("Sender error")
+        }
         Other(descr: &'static str) {
             description(descr)
             display("Error {}", descr)

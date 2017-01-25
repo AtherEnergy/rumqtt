@@ -1,7 +1,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 use std::thread;
-use std::io;
+use std::io::{self, Read, Write};
 
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
@@ -10,6 +10,9 @@ use tokio_timer::{Timer, TimerError};
 use futures::Future;
 use futures::Sink;
 use futures::Stream;
+use futures::sync::mpsc;
+
+use mqtt3::{Message, QoS, TopicPath};
 
 use error::*;
 use packet::*;
@@ -32,6 +35,22 @@ pub enum MqttState {
     Handshake,
     Connected,
     Disconnected,
+}
+
+#[derive(Debug)]
+pub enum NetworkRequest {
+    Subscribe(Vec<(TopicPath, QoS)>),
+    Publish(Message),
+    Retransmit,
+    Shutdown,
+    Disconnect,
+    Ping,
+}
+
+#[derive(Debug)]
+pub enum NetworkNotification {
+    Disconnected,
+    Connected,
 }
 
 // DESIGN: Initial connect status should be immediately known.
@@ -79,21 +98,38 @@ impl Connection {
     }
 
     pub fn run(&mut self, framed: Framed<TcpStream, MqttCodec>) -> Result<(), Error> {
-        let (sender, receiver) = framed.split();
+        let (mut sender, receiver) = framed.split();
         let rx_future = receiver.for_each(|msg| {
             print!("{:?}", msg);
             Ok(())
         }).map_err(|e| Error::Io(e));
 
+        let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
+
+        // Ping timer
         let timer = Timer::default();
-        let interval = timer.interval(Duration::new(1, 0));
+        let interval = timer.interval(Duration::new(5, 0));
         let timer_future = interval.for_each(|_| {
-                let ping = generate_pingreq_packet();
-                //sender.send(ping);
+                let ref mut sender_tx = sender_tx;
+                sender_tx.send(NetworkRequest::Ping).wait().unwrap();
                 Ok(())
             }).map_err(|e| Error::Timer(e));
 
-        let mqtt_future =  timer_future.join(rx_future);
+        // Sender which does network writes
+        let sender_future = sender_rx.for_each(move |r| {
+            let packet = match r {
+                NetworkRequest::Ping => {
+                    println!("{:?}", r);
+                    generate_pingreq_packet()
+                }
+                _ => panic!("Misc")
+            };
+
+            (&mut sender).send(packet);
+            Ok(())
+        }).map_err(|_|Error::Sender);
+        
+        let mqtt_future =  timer_future.join3(rx_future, sender_future);
 
         let _ = self.reactor.run(mqtt_future)?;
         Ok(())
