@@ -106,7 +106,14 @@ impl Connection {
 
         // Ping timer
         let timer = Timer::default();
-        let interval = timer.interval(Duration::new(5, 0));
+
+        let keep_alive = if self.opts.keep_alive.is_some() {
+            self.opts.keep_alive.unwrap() as u64
+        } else {
+            1000
+        };
+
+        let interval = timer.interval(Duration::new(keep_alive, 0));
         let timer_future = interval.for_each(|_| {
                 let ref mut sender_tx = sender_tx;
                 sender_tx.send(NetworkRequest::Ping).wait().unwrap();
