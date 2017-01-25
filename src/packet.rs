@@ -1,20 +1,13 @@
-use mqtt3::{Packet, Protocol, Connect};
+use std::sync::Arc;
 
-use rand::{self, Rng};
+use mqtt3::{Packet, Protocol, Connect, Subscribe, Unsubscribe, 
+            Publish, QoS, SubscribeTopic, PacketIdentifier};
 
 pub fn generate_connect_packet(client_id: String,
                                clean_session: bool,
                                username: Option<String>,
                                password: Option<String>)
                                -> Packet {
-
-    let client_id = if client_id == "".to_string() {
-        let mut rng = rand::thread_rng();
-        let id = rng.gen::<u32>();
-        format!("rumqtt_{}", id)
-    } else {
-        client_id
-    };
 
     Packet::Connect(Box::new(Connect {
         protocol: Protocol::MQTT(4),
@@ -27,6 +20,61 @@ pub fn generate_connect_packet(client_id: String,
     }))
 }
 
+pub fn generate_disconnect_packet() -> Packet {
+    Packet::Disconnect
+}
+
 pub fn generate_pingreq_packet() -> Packet {
     Packet::Pingreq
+}
+
+pub fn generate_pingresp_packet() -> Packet {
+    Packet::Pingresp
+}
+
+pub fn generate_subscribe_packet(pkid: PacketIdentifier, topics: Vec<SubscribeTopic>) -> Packet {
+    Packet::Subscribe(Box::new(Subscribe {
+        pid: pkid,
+        topics: topics
+    } ))
+}
+
+pub fn generate_unsubscribe_packet(pkid: PacketIdentifier, topics: Vec<String>) -> Packet {
+    Packet::Unsubscribe(Box::new(Unsubscribe {
+        pid: pkid,
+        topics: topics
+    } ))
+}
+
+pub fn generate_publish_packet(topic_name: String,
+                               qos: QoS,
+                               pkid: Option<PacketIdentifier>,
+                               retain: bool,
+                               dup: bool,
+                               payload: Arc<Vec<u8>>)
+                               -> Packet {
+    Packet::Publish(Box::new(Publish {
+        dup: dup,
+        qos: qos,
+        retain: retain,
+        topic_name: topic_name,
+        pid: pkid,
+        payload: payload
+    }))
+}
+
+pub fn generate_puback_packet(pkid: PacketIdentifier) -> Packet {
+    Packet::Puback(pkid)
+}
+
+pub fn generate_pubrec_packet(pkid: PacketIdentifier) -> Packet {
+    Packet::Pubrec(pkid)
+}
+
+pub fn generate_pubrel_packet(pkid: PacketIdentifier) -> Packet {
+    Packet::Pubrel(pkid)
+}
+
+pub fn generate_pubcomp_packet(pkid: PacketIdentifier) -> Packet {
+    Packet::Pubcomp(pkid)
 }

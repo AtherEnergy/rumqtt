@@ -215,7 +215,7 @@ impl MqttOptions {
     ///
     // TODO: Rename
     pub fn broker(mut self, addr: &str) -> Self {
-        if self.client_id == None {
+        if self.client_id == None || self.client_id == Some("".to_string()) {
             self.generate_client_id();
         }
         self.addr = addr.to_string();
