@@ -1,12 +1,10 @@
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr};
 use std::time::{Duration, Instant};
-use std::thread;
-use std::io::{self, Read, Write};
 
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_core::io::{Io, Framed};
-use tokio_timer::{Timer, TimerError};
+use tokio_timer::{Timer};
 use futures::Future;
 use futures::Sink;
 use futures::Stream;
@@ -125,7 +123,7 @@ impl Connection {
                 _ => panic!("Misc")
             };
 
-            (&mut sender).send(packet).wait();
+            let _ = (&mut sender).send(packet).wait();
             Ok(())
         }).map_err(|_|Error::Sender);
         

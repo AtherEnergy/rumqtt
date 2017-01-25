@@ -1,5 +1,4 @@
 use mqtt3::{Packet, Protocol, Connect};
-use error::*;
 
 use rand::{self, Rng};
 
