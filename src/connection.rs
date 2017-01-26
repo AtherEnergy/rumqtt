@@ -53,7 +53,7 @@ pub struct Connection {
     // client wouldn't want to loose messages after it comes back up again
     pub subscriptions: VecDeque<Vec<SubscribeTopic>>,
 
-    pub reactor: Core,
+    // pub reactor: Core,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +112,7 @@ fn _try_reconnect(opts: MqttOptions,
 
     let response = reactor.run(f_response);
     let (packet, frame) = response?;
-    println!("{:?}", packet);
+    // println!("{:?}", packet);
     Ok(frame)
 }
 
@@ -143,8 +143,6 @@ impl Connection {
 
             // Subscriptions
             subscriptions: VecDeque::new(),
-
-            reactor: Core::new()?,
         };
 
         Ok(connection)
@@ -163,15 +161,17 @@ impl Connection {
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
+        let mut reactor = Core::new()?;
+
         'reconnect: loop {
             let framed;
             loop {
                 if self.initial_connect {
                     self.initial_connect = false;
-                    framed = _try_reconnect(self.opts.clone(), &mut self.reactor)?;
+                    framed = _try_reconnect(self.opts.clone(), &mut reactor)?;
                     break;
                 } else {
-                    framed = match _try_reconnect(self.opts.clone(), &mut self.reactor) {
+                    framed = match _try_reconnect(self.opts.clone(), &mut reactor) {
                         Ok(f) => f,
                         Err(_) => continue,
                     };
@@ -181,7 +181,7 @@ impl Connection {
 
             let (mut sender, receiver) = framed.split();
             let rx_future = receiver.for_each(|msg| {
-                    print!("{:?}", msg);
+                    // print!("{:?}", msg);
                     Ok(())
                 })
                 .map_err(|e| Error::Io(e));
@@ -197,23 +197,25 @@ impl Connection {
                 .map_err(|e| Error::Timer(e));
 
             // Sender which does network writes
-            let sender_future = sender_rx.for_each(move |r| {
-                    let packet = match r {
+            let sender_future = sender_rx.map(|r| {
+                    match r {
                         NetworkRequest::Ping => {
-                            println!("{:?}", r);
-                            generate_pingreq_packet()
+                            if self.await_pingresp {
+                                return Err(Error::AwaitPingResp);
+                            }
+                            self.await_pingresp = true;
+                            Ok(generate_pingreq_packet())
                         }
                         _ => panic!("Misc"),
-                    };
-
-                    let _ = (&mut sender).send(packet).wait();
-                    Ok(())
-                })
-                .map_err(|_| Error::Sender);
+                    }
+                }).map_err(|e| Error::Sender)
+                  .map(|p| p.unwrap())
+                  .forward(sender);
 
             let mqtt_future = timer_future.join3(rx_future, sender_future);
 
-            let _ = self.reactor.run(mqtt_future)?;
+            let e = reactor.run(mqtt_future);
+            println!("@@@@@@@@@@@@@@@@@@@@");
         }
     }
 }

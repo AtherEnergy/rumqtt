@@ -37,6 +37,6 @@ fn main() {
     //let addr = lookup_ipv4("localhost:1883");
 
     let mut connection = Connection::start(opts, None, None).unwrap();
-    connection.run();
-    thread::sleep(Duration::new(20, 0));
+    let e = connection.run();
+    println!("{:?}", e);
 }

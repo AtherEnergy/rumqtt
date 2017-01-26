@@ -23,6 +23,9 @@ quick_error! {
         Sender {
             description("Sender error")
         }
+        AwaitPingResp {
+            description("Await PingResp error")
+        }
         Other(descr: &'static str) {
             description(descr)
             display("Error {}", descr)

@@ -19,7 +19,7 @@ impl Codec for MqttCodec {
         };
 
         buf.drain_to(len);
-        println!("{:?}, {:?}", len, packet);
+        // println!("{:?}, {:?}", len, packet);
         Ok(Some(packet))
     }
 
@@ -27,7 +27,7 @@ impl Codec for MqttCodec {
         let mut stream = Cursor::new(Vec::new());
 
         if let Err(e) = stream.write_packet(&msg) {
-            println!("{:?}", e);
+            // println!("{:?}", e);
             return Err(io::Error::new(io::ErrorKind::Other, "oh no!"));
         }
 
