@@ -5,9 +5,9 @@ use mqtt3::QoS;
 #[derive(Clone)]
 pub struct MqttOptions {
     pub addr: String, // TODO: Use a default localhost here instead of option
-    pub keep_alive: Option<u16>,
+    pub keep_alive: u16,
     pub clean_session: bool,
-    pub client_id: Option<String>,
+    pub client_id: String,
     pub username: Option<String>,
     pub password: Option<String>,
     pub reconnect: Option<u16>,
@@ -23,13 +23,19 @@ pub struct MqttOptions {
     pub client_cert: Option<(PathBuf, PathBuf)>,
 }
 
+fn generate_client_id() -> String {
+    let mut rng = rand::thread_rng();
+    let id = rng.gen::<u32>();
+    format!("rumqtt_{}", id)
+}
+
 impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
             addr: "localhost:1883".to_string(),
-            keep_alive: Some(10),
+            keep_alive: 15,
             clean_session: true,
-            client_id: None,
+            client_id: generate_client_id(),
             username: None,
             password: None,
             reconnect: Some(5),
@@ -69,7 +75,7 @@ impl MqttOptions {
     /// Number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(mut self, secs: u16) -> Self {
-        self.keep_alive = Some(secs);
+        self.keep_alive = secs;
         self
     }
 
@@ -77,14 +83,16 @@ impl MqttOptions {
 
     /// if you don't set one
     pub fn set_client_id(mut self, client_id: &str) -> Self {
-        self.client_id = Some(client_id.to_string());
+        if client_id != "" {
+            self.client_id = client_id.to_string();
+        }
         self
     }
 
     /// `clean_session = true` instructs the broker to clean all the client
     /// state when it disconnects. Note that it is broker which is discarding
     /// the client state. But this client will hold its queues and attemts to
-    /// to retransmit when reconnection happens.  (TODO: Verify this)
+    /// to retransmit when reconnection happens.
     ///
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
@@ -94,13 +102,6 @@ impl MqttOptions {
     /// `clean_session` is false**
     pub fn set_clean_session(mut self, clean_session: bool) -> Self {
         self.clean_session = clean_session;
-        self
-    }
-
-    fn generate_client_id(&mut self) -> &mut Self {
-        let mut rng = rand::thread_rng();
-        let id = rng.gen::<u32>();
-        self.client_id = Some(format!("mqttc_{}", id));
         self
     }
 
@@ -215,9 +216,6 @@ impl MqttOptions {
     ///
     // TODO: Rename
     pub fn broker(mut self, addr: &str) -> Self {
-        if self.client_id == None || self.client_id == Some("".to_string()) {
-            self.generate_client_id();
-        }
         self.addr = addr.to_string();
         self
     }

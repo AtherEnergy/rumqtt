@@ -33,10 +33,10 @@ fn main() {
     let mut event_loop = core::reactor::Core::new().unwrap();
     let handle = event_loop.handle();
 
-    let addr = lookup_ipv4("localhost:1883");
     let opts = MqttOptions::new();
+    //let addr = lookup_ipv4("localhost:1883");
 
-    let (mut connection, framed) = Connection::start(addr, opts).unwrap();
-    connection.run(framed);
+    let mut connection = Connection::start(opts, None, None).unwrap();
+    connection.run();
     thread::sleep(Duration::new(20, 0));
 }

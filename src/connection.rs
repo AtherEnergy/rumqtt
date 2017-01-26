@@ -1,7 +1,7 @@
-use std::net::{SocketAddr};
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
@@ -23,7 +23,6 @@ pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
 pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 pub struct Connection {
-    pub addr: SocketAddr,
     pub state: MqttState,
     pub opts: MqttOptions,
     pub initial_connect: bool,
@@ -80,11 +79,24 @@ pub enum NetworkNotification {
     Connected,
 }
 
+fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
+    let addrs = addr.to_socket_addrs().expect("Conversion Failed");
+    for addr in addrs {
+        if let SocketAddr::V4(_) = addr {
+            return addr;
+        }
+    }
+    unreachable!("Cannot lookup address");
+}
+
 // DESIGN: Initial connect status should be immediately known.
 //        Intermediate disconnections should be automatically reconnected
-fn _try_reconnect(addr: SocketAddr, reactor: &mut Core) -> Result<Framed<TcpStream, MqttCodec>, Error> {
+fn _try_reconnect(opts: MqttOptions,
+                  reactor: &mut Core)
+                  -> Result<Framed<TcpStream, MqttCodec>, Error> {
 
-    let connect = generate_connect_packet("".to_string(), true, None, None);
+    let connect = generate_connect_packet(opts.client_id, opts.clean_session, opts.keep_alive, None, None);
+    let addr = lookup_ipv4(opts.addr.as_str());
 
     let f_response = TcpStream::connect(&addr, &reactor.handle()).and_then(|connection| {
         let framed = connection.framed(MqttCodec);
@@ -105,16 +117,12 @@ fn _try_reconnect(addr: SocketAddr, reactor: &mut Core) -> Result<Framed<TcpStre
 }
 
 impl Connection {
-    pub fn start(addr: SocketAddr, 
-                 opts: MqttOptions, 
+    pub fn start(opts: MqttOptions,
                  publish_callback: Option<Arc<PublishSendableFn>>,
-                 message_callback: Option<Arc<MessageSendableFn>>) -> Result<(Self, Framed<TcpStream, MqttCodec>), Error> {
-        let mut reactor = Core::new().unwrap();
-
-        let framed = _try_reconnect(addr, &mut reactor)?;
+                 message_callback: Option<Arc<MessageSendableFn>>)
+                 -> Result<Self, Error> {
 
         let connection = Connection {
-            addr: addr,
             state: MqttState::Disconnected,
             opts: opts,
             initial_connect: true,
@@ -136,17 +144,17 @@ impl Connection {
             // Subscriptions
             subscriptions: VecDeque::new(),
 
-            reactor: reactor,
+            reactor: Core::new()?,
         };
 
-        Ok((connection, framed))
+        Ok(connection)
     }
 
     fn pingtimer(&mut self) -> Interval {
         let timer = Timer::default();
 
-        let keep_alive = if self.opts.keep_alive.is_some() {
-            self.opts.keep_alive.unwrap() as u64
+        let keep_alive = if self.opts.keep_alive > 0 {
+            self.opts.keep_alive as u64
         } else {
             1000
         };
@@ -154,39 +162,58 @@ impl Connection {
         timer.interval(Duration::new(keep_alive, 0))
     }
 
-    pub fn run(&mut self, framed: Framed<TcpStream, MqttCodec>) -> Result<(), Error> {
-        let (mut sender, receiver) = framed.split();
-        let rx_future = receiver.for_each(|msg| {
-            print!("{:?}", msg);
-            Ok(())
-        }).map_err(|e| Error::Io(e));
-
-        let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
-
-        let pingtimer = self.pingtimer();
-        let timer_future = pingtimer.for_each(|_| {
-                let ref mut sender_tx = sender_tx;
-                sender_tx.send(NetworkRequest::Ping).wait().unwrap();
-                Ok(())
-            }).map_err(|e| Error::Timer(e));
-
-        // Sender which does network writes
-        let sender_future = sender_rx.for_each(move |r| {
-            let packet = match r {
-                NetworkRequest::Ping => {
-                    println!("{:?}", r);
-                    generate_pingreq_packet()
+    pub fn run(&mut self) -> Result<(), Error> {
+        'reconnect: loop {
+            let framed;
+            loop {
+                if self.initial_connect {
+                    self.initial_connect = false;
+                    framed = _try_reconnect(self.opts.clone(), &mut self.reactor)?;
+                    break;
+                } else {
+                    framed = match _try_reconnect(self.opts.clone(), &mut self.reactor) {
+                        Ok(f) => f,
+                        Err(_) => continue,
+                    };
+                    break;
                 }
-                _ => panic!("Misc")
-            };
+            }
 
-            let _ = (&mut sender).send(packet).wait();
-            Ok(())
-        }).map_err(|_|Error::Sender);
-        
-        let mqtt_future =  timer_future.join3(rx_future, sender_future);
+            let (mut sender, receiver) = framed.split();
+            let rx_future = receiver.for_each(|msg| {
+                    print!("{:?}", msg);
+                    Ok(())
+                })
+                .map_err(|e| Error::Io(e));
 
-        let _ = self.reactor.run(mqtt_future)?;
-        Ok(())
+            let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
+
+            let pingtimer = self.pingtimer();
+            let timer_future = pingtimer.for_each(|_| {
+                    let ref mut sender_tx = sender_tx;
+                    sender_tx.send(NetworkRequest::Ping).wait().unwrap();
+                    Ok(())
+                })
+                .map_err(|e| Error::Timer(e));
+
+            // Sender which does network writes
+            let sender_future = sender_rx.for_each(move |r| {
+                    let packet = match r {
+                        NetworkRequest::Ping => {
+                            println!("{:?}", r);
+                            generate_pingreq_packet()
+                        }
+                        _ => panic!("Misc"),
+                    };
+
+                    let _ = (&mut sender).send(packet).wait();
+                    Ok(())
+                })
+                .map_err(|_| Error::Sender);
+
+            let mqtt_future = timer_future.join3(rx_future, sender_future);
+
+            let _ = self.reactor.run(mqtt_future)?;
+        }
     }
 }
