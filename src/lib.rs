@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 
 //! A fast, lock free Mqtt client implementation in Rust.
 //!

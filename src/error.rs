@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::result;
 use std::io;
 use std::sync::mpsc::{self, RecvError, TryRecvError};
@@ -16,6 +18,7 @@ pub type SslError = openssl::error::ErrorStack;
 pub type HandShakeError = openssl::ssl::HandshakeError<TcpStream>;
 pub type Result<T> = result::Result<T, Error>;
 
+/// Error variants for different error states in Mqtt
 #[derive(Debug)]
 pub enum Error {
     ConnectionAbort,
@@ -27,14 +30,23 @@ pub enum Error {
     Timer(TimerError),
     TopicName,
     TopicFilter,
+    /// Reconnection not attempted
     NoReconnectTry,
+    /// Error related to an MqttPacket
     MqttPacket,
+    /// Ssl related error
     Ssl(SslError),
+    /// Ping timout occured
     PingTimeout,
+    /// Ping response not received
     AwaitPingResp,
+    /// Received a malformed/corrupted packet
     InvalidPacket,
+    /// Connection state is invalid
     InvalidState,
+    /// A handshake failed
     HandshakeFailed,
+    /// A handshake error
     Handshake(HandShakeError),
 }
 

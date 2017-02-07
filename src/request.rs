@@ -19,32 +19,37 @@ use client::MiscNwRequest;
 //     QoS2QLen(usize),
 // }
 
+/// 
 pub struct MqRequest {
-    // QoS 0 publish request to eventloop
+    /// QoS 0 publish request to eventloop
     pub pub0_tx: SyncSender<Message>,
-    // QoS 1 publish request to eventloop
+    /// QoS 1 publish request to eventloop
     pub pub1_tx: SyncSender<Message>,
-    // QoS 2 publish request to eventloop
+    /// QoS 2 publish request to eventloop
     pub pub2_tx: SyncSender<Message>,
-    // Subscribe request to eventloop
+    /// Subscribe request to eventloop
     pub subscribe_tx: SyncSender<Vec<(TopicFilter, QualityOfService)>>,
-    // miscellaneous requests to eventloop
+    /// Miscellaneous requests to eventloop
     pub misc_tx: SyncSender<MiscNwRequest>,
 }
 
 impl MqRequest {
+    /// Publish a message with a topic and with the given QoS
     pub fn publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
         self._publish(topic, false, qos, payload, None)
     }
 
+    /// Publish a message with the retained flag set to true
     pub fn retained_publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
         self._publish(topic, true, qos, payload, None)
     }
 
+    /// Publish a message containing the user details payload
     pub fn userdata_publish(&self, topic: &str, qos: QualityOfService, payload: Vec<u8>, userdata: Vec<u8>) -> Result<()> {
         self._publish(topic, false, qos, payload, Some(userdata))
     }
 
+    /// Publish a message containing the user details payload in retain mode
     pub fn retained_userdata_publish(&self,
                                      topic: &str,
                                      qos: QualityOfService,
@@ -102,6 +107,7 @@ impl MqRequest {
         Ok(())
     }
 
+    /// Subscribe to a list of topics
     pub fn subscribe(&self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
         let mut sub_topics = vec![];
         for topic in topics {
@@ -112,12 +118,13 @@ impl MqRequest {
         try!(self.subscribe_tx.send(sub_topics));
         Ok(())
     }
-
+    /// Send a discoonect request to the broker  
     pub fn disconnect(&self) -> Result<()> {
         try!(self.misc_tx.send(MiscNwRequest::Disconnect));
         Ok(())
     }
 
+    /// Send a shutdown request to the broker
     pub fn shutdown(&self) -> Result<()> {
         try!(self.misc_tx.send(MiscNwRequest::Shutdown));
         Ok(())

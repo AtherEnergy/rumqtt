@@ -23,6 +23,7 @@ const SUB_CHANNEL: Token = Token(5);
 const MISC_CHANNEL: Token = Token(7);
 const NETWORK_NOTIFICATION_CHANNEL: Token = Token(6);
 
+/// Connection state messages
 pub enum MiscNwRequest {
     Disconnect,
     Shutdown,
@@ -40,32 +41,36 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
 pub struct MqttClient {
+    /// Specifies the options for MQTT client
     pub opts: MqttOptions,
-    // state
+    /// The connection state for the mqtt client
     pub state: MqttState,
+    /// Used as an indentifier mainly for messages with QoS > 0
     pub last_pkid: PacketIdentifier,
-
-    // no. of pending messages in qos0 pub channel
+    /// no. of pending messages in qos0 pub channel
     pub pub0_channel_pending: u32,
-    // no. of pending messages in qos1 pub channel
+    /// no. of pending messages in qos1 pub channel
     pub pub1_channel_pending: u32,
-    // no. of pending messages in qos2 pub channel
+    /// no. of pending messages in qos2 pub channel
     pub pub2_channel_pending: u32,
-
-    // Channels
+    /// QoS 0 receiver endpoint
     pub pub0_rx: Option<Receiver<Message>>,
+    /// QoS 1 receiver endpoint
     pub pub1_rx: Option<Receiver<Message>>,
+    /// QoS 2 receiver endpoint
     pub pub2_rx: Option<Receiver<Message>>,
+    /// A list of receivers from subscriber
     pub sub_rx: Option<Receiver<Vec<(TopicFilter, QualityOfService)>>>,
+    /// Sender for sending messages by the client
     pub nw_request_tx: Option<mpsc::Sender<NetworkRequest>>,
+    /// Receiver for state notifications sent to the client by the broker
     pub nw_notification_rx: Option<Receiver<NetworkNotification>>,
+    /// Receiver for any misc network requests.
     pub misc_rx: Option<Receiver<MiscNwRequest>>,
-
     /// On message callback
     pub message_callback: Option<Arc<MessageSendableFn>>,
     /// On publish callback
     pub publish_callback: Option<Arc<PublishSendableFn>>,
-
     /// Poll
     pub poll: Poll,
 }
@@ -81,6 +86,7 @@ impl MqttClient {
         unreachable!("Cannot lookup address");
     }
 
+    /// Create a new mqtt client with MqttOptions
     pub fn new(opts: MqttOptions) -> Self {
         // TODO: Move state initialization to MqttClient constructor
         MqttClient {
@@ -111,6 +117,7 @@ impl MqttClient {
         }
     }
 
+    /// Mock method for unit tests
     pub fn mock_start(mut self) -> Result<(Self, MqRequest, mpsc::Receiver<NetworkRequest>)> {
         let (pub0_tx, pub0_rx) = channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
         self.pub0_rx = Some(pub0_rx);
@@ -215,9 +222,9 @@ impl MqttClient {
         Ok(mq_request)
     }
 
+    /// Register events and add to the event set from all channels in the client
     fn poll(&mut self) -> Result<Events> {
         let events = Events::with_capacity(1024);
-
         let pub0_rx = self.pub0_rx.as_ref().unwrap();
         self.poll.register(pub0_rx, PUB0_CHANNEL, Ready::readable(), PollOpt::edge()).expect("Poll Register Error");
         let pub1_rx = self.pub1_rx.as_ref().unwrap();
@@ -235,6 +242,7 @@ impl MqttClient {
         Ok(events)
     }
 
+    /// Run the client forever acting accordingly on the message received on its channels
     fn run(mut self) -> Result<()> {
         let mut events = try!(self.poll());
 
@@ -290,6 +298,7 @@ impl MqttClient {
         self
     }
 
+    /// Subscribe the topics
     fn subscribe(&mut self) -> Result<()> {
         let topics = {
             let sub_rx = self.sub_rx.as_ref().unwrap();
@@ -300,6 +309,7 @@ impl MqttClient {
         Ok(())
     }
 
+    /// Publish a message with QoS 0
     fn publish0(&mut self, clear_backlog: bool) -> Result<()> {
         // Increment only if notificication is from publisher
         if !clear_backlog {

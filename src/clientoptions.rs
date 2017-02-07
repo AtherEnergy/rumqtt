@@ -2,24 +2,40 @@ use rand::{self, Rng};
 use std::path::{Path, PathBuf};
 use mqtt::QualityOfService;
 
+/// The `MqttOptions` struct specifies various options for an mqtt client
 #[derive(Clone)]
 pub struct MqttOptions {
+    /// The address of the broker to connect to 
     pub addr: String, // TODO: Use a default localhost here instead of option
+    /// keep_alive timeout
     pub keep_alive: Option<u16>,
+    /// Whether to clean session after disconnect
     pub clean_session: bool,
+    /// The client id
     pub client_id: Option<String>,
+    /// an optional username for the client
     pub username: Option<String>,
+    /// an optional username for the client
     pub password: Option<String>,
+    /// reconnect timeout
     pub reconnect: Option<u16>,
+    /// A Will message which will be sent by the client if the client abbruptly disconnects
     pub will: Option<(String, String)>,
+    /// A Will messages qos
     pub will_qos: QualityOfService,
+    /// A Will messages's retain flag
     pub will_retain: bool,
+    /// publishes' queue length
     pub pub_q_len: u16,
+    /// subscriptions queue length
     pub sub_q_len: u16,
-    // wait time for ack beyond which packet(publish/subscribe) will be resent
+    /// wait time for ack from broker beyond which packet(publish/subscribe) will be resent
     pub queue_timeout: u16,
+    /// Any optional ssl certificates
     pub ca: Option<PathBuf>,
+    /// verify certificates flag
     pub verify_ca: bool,
+    /// Specifies the location of the client ssl certificates
     pub client_cert: Option<(PathBuf, PathBuf)>,
 }
 
@@ -125,7 +141,7 @@ impl MqttOptions {
     ///
     /// Publish queue length specifies maximum queue capacity upto which
     /// `Publisher`
-    /// can push with out blocking. Messages in this queue will published as
+    /// can push without blocking. Messages in this queue will published as
     /// soon as
     /// connection is reestablished and `Publisher` gets unblocked
     pub fn set_pub_q_len(mut self, len: u16) -> Self {
@@ -133,11 +149,13 @@ impl MqttOptions {
         self
     }
 
+    /// Set subscribers queue length
     pub fn set_sub_q_len(mut self, len: u16) -> Self {
         self.sub_q_len = len;
         self
     }
 
+    /// Set the queue timeout
     pub fn set_q_timeout(mut self, secs: u16) -> Self {
         self.queue_timeout = secs;
         self
