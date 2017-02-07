@@ -5,23 +5,24 @@ use mqtt::topic_name::TopicName;
 use mqtt::packet::*;
 use error::Result;
 
-
-
-#[derive(Clone)] //TODO: add Clone here
+/// A message/payload that is sent by publishers
+#[derive(Clone)]
 pub struct Message {
+    /// Topic name of the message
     pub topic: TopicName,
+    /// Whether to retain messages or not
     pub retain: bool,
-    // Only for QoS 1,2
+    /// Only for QoS 1,2
     pub qos: QoSWithPacketIdentifier,
-
-    // TODO: Why does payload need to be atomic
+    /// TODO: Why does payload need to be atomic
     pub payload: Arc<Vec<u8>>,
+    /// A payload containing user data
     pub userdata: Option<Arc<Vec<u8>>>,
 }
 
 impl Message {
+    /// Convert a `PublishPacket` to a boxed `Message`
     pub fn from_pub(publish: &PublishPacket) -> Result<Box<Message>> {
-
         let topic = publish.topic_name().to_string();
         let topic = TopicName::new(topic).unwrap();
         // TODO From mqtt errors to rumqtt errors and do try!
@@ -35,6 +36,7 @@ impl Message {
         }))
     }
 
+    /// Sets the packet identifier for the message
     pub fn set_pkid(&mut self, pkid: u16) {
         match self.qos {
             QoSWithPacketIdentifier::Level0 => (),
@@ -43,6 +45,7 @@ impl Message {
         };
     }
 
+    /// Retrieves the packet identifier for the message
     pub fn get_pkid(&self) -> Option<u16> {
         match self.qos {
             QoSWithPacketIdentifier::Level0 => None,
@@ -63,6 +66,7 @@ impl Message {
     //     })
     // }
 
+    /// Create a boxed Publish packet for storing in a queue
     pub fn to_pub(&self, qos: Option<QoSWithPacketIdentifier>, dup: bool) -> Box<PublishPacket> {
         let qos = qos.unwrap_or(self.qos);
 
@@ -73,6 +77,7 @@ impl Message {
         Box::new(publish_packet)
     }
 
+    /// Create a boxed message for storing in a queue
     pub fn transform(&self, qos: Option<QoSWithPacketIdentifier>) -> Box<Message> {
         let qos = qos.unwrap_or(self.qos);
         Box::new(Message {

@@ -37,6 +37,7 @@ enum HandlePacket {
     Invalid,
 }
 
+/// The connection state of the MQTT client
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttState {
     Handshake,
@@ -44,6 +45,7 @@ pub enum MqttState {
     Disconnected,
 }
 
+// The Request type from the client
 #[derive(Debug)]
 pub enum NetworkRequest {
     Subscribe(Vec<(TopicFilter, QualityOfService)>),
@@ -63,21 +65,26 @@ pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
 pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 pub struct Connection {
+    /// Address of the broker
     pub addr: SocketAddr,
+    /// the specified configurations by the client
     pub opts: MqttOptions,
+    /// A stream of data from the underlying socket
     pub stream: NetworkStream,
+    /// Receiver for NetworkRequest
     pub nw_request_rx: Receiver<NetworkRequest>,
+    /// Sender for NetworkNotification
     pub nw_notification_tx: SyncSender<NetworkNotification>,
+    /// connection state for the broker
     pub state: MqttState,
     pub initial_connect: bool,
     pub await_pingresp: bool,
+    /// Last flush time
     pub last_flush: Instant,
-
     /// On message callback
     pub message_callback: Option<Arc<MessageSendableFn>>,
     /// On publish callback
     pub publish_callback: Option<Arc<PublishSendableFn>>,
-
     // Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
     pub outgoing_pub: VecDeque<(i64, Box<Message>)>,
@@ -89,14 +96,13 @@ pub struct Connection {
     pub outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
     /// For Qos2. Store for outgoing `pubcomp` packets.
     pub outgoing_comp: VecDeque<(i64, PacketIdentifier)>,
-
-    // clean_session=false will remember subscriptions only till lives.
-    // If broker crashes, all its state will be lost (most brokers).
-    // client wouldn't want to loose messages after it comes back up again
+    /// clean_session=false will remember subscriptions only till lives.
+    /// If broker crashes, all its state will be lost (most brokers).
+    /// client wouldn't want to loose messages after it comes back up again
     pub subscriptions: VecDeque<Vec<(TopicFilter, QualityOfService)>>,
-
+    /// Reconnection count that was attempted
     pub no_of_reconnections: u32,
-
+    /// thread pool to manage client connections
     pub pool: ThreadPool,
 }
 
