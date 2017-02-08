@@ -95,24 +95,27 @@ fn _try_reconnect(opts: MqttOptions,
                   reactor: &mut Core)
                   -> Result<Framed<TcpStream, MqttCodec>, Error> {
 
-    let connect = generate_connect_packet(opts.client_id, opts.clean_session, opts.keep_alive, None, None);
+    let connect_packet = generate_connect_packet(opts.client_id, opts.clean_session, opts.keep_alive, None, None);
     let addr = lookup_ipv4(opts.addr.as_str());
 
     let f_response = TcpStream::connect(&addr, &reactor.handle()).and_then(|connection| {
+        
+        // `connection` is now a ((TcpStreamNew)) reference to a Sink + Stream iface
+        // So we call framed to convert to a Framed
         let framed = connection.framed(MqttCodec);
-        let f1 = framed.send(connect);
+        // Since Framed implements Sink we can call send on it.
+        let f1 = framed.send(connect_packet);
 
         f1.and_then(|framed| {
-                framed.into_future()
-                    .and_then(|(res, stream)| Ok((res, stream)))
-                    .map_err(|(err, _stream)| err)
-            })
-            .boxed()
+            framed.into_future()
+            .and_then(|(res, stream)| Ok((res, stream)))
+            .map_err(|(err, _stream)| err)
+        }).boxed()
     });
 
     let response = reactor.run(f_response);
     let (packet, frame) = response?;
-    // println!("{:?}", packet);
+    println!("{:?}", packet);
     Ok(frame)
 }
 
@@ -148,7 +151,8 @@ impl Connection {
         Ok(connection)
     }
 
-    fn pingtimer(&mut self) -> Interval {
+    // Interval is a Stream and can be iterated over
+    fn pingtimer(&self) -> Interval {
         let timer = Timer::default();
 
         let keep_alive = if self.opts.keep_alive > 0 {
@@ -178,15 +182,22 @@ impl Connection {
                     break;
                 }
             }
-
-            let (mut sender, receiver) = framed.split();
+            // Since Framed implements Split trait, we can call split on it.
+            // split() gives seperate Sink and Stream objects respectively.
+            let (sender, receiver) = framed.split();
+            // receiver is a `Stream` type
+            // for_each will process each msg on the stream we get
+            let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
             let rx_future = receiver.for_each(|msg| {
-                    // print!("{:?}", msg);
+                    println!("Received {:?}", msg);
+                    //self.await_pingresp = false;
                     Ok(())
                 })
                 .map_err(|e| Error::Io(e));
 
-            let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
+
+
+            // create a Stream of `Interval`
 
             let pingtimer = self.pingtimer();
             let timer_future = pingtimer.for_each(|_| {
@@ -197,8 +208,11 @@ impl Connection {
                 .map_err(|e| Error::Timer(e));
 
             // Sender which does network writes
+            // Sender implements Sink which allows the task to 
+            // send messages
             let sender_future = sender_rx.map(|r| {
                     match r {
+                        // We receive a ping response from broker
                         NetworkRequest::Ping => {
                             if self.await_pingresp {
                                 return Err(Error::AwaitPingResp);
@@ -209,8 +223,10 @@ impl Connection {
                         _ => panic!("Misc"),
                     }
                 }).map_err(|e| Error::Sender)
-                  .map(|p| p.unwrap())
+                  .and_then(|p| p)
                   .forward(sender);
+
+            //let sender_future.
 
             let mqtt_future = timer_future.join3(rx_future, sender_future);
 
