@@ -101,7 +101,7 @@ pub enum NetworkNotification {
 
 // DESIGN: Initial connect status should be immediately known.
 //        Intermediate disconnections should be automatically reconnected
-fn _try_reconnect(opts: MqttOptions,
+fn try_reconnect(opts: MqttOptions,
                   reactor: &mut Core)
                   -> Result<Framed<TcpStream, MqttCodec>, Error> {
     let addr: SocketAddr = opts.get_ip_addr().parse()?;
@@ -173,10 +173,10 @@ impl Connection {
             loop {
                 if self.initial_connect {
                     self.initial_connect = false;
-                    framed = _try_reconnect(self.opts.clone(), &mut reactor)?;
+                    framed = try_reconnect(self.opts.clone(), &mut reactor)?;
                     break;
                 } else {
-                    framed = match _try_reconnect(self.opts.clone(), &mut reactor) {
+                    framed = match try_reconnect(self.opts.clone(), &mut reactor) {
                         Ok(f) => f,
                         Err(_) => continue,
                     };
@@ -233,20 +233,20 @@ mod tests {
     use ::clientoptions::MqttOptions;
     use ::connection::Connection;
     use std::process::Command;
+    use tokio_core::reactor::Core;
+    use super::try_reconnect;
+    use std::error::Error;
 
     #[test]
+    #[should_panic]
     fn test_fail_no_listening_broker() {
         // Check no broker is listening on default port 1883
-        let status = Command::new("lsof")
-                         .arg("-i")
-                         .arg(":1883")
-                         .arg("-S")
-                         .status()
-                         .expect("failed to execute process");
-        assert!(!status.success());
         let opts = MqttOptions::new();
-        let mut connection = Connection::start(opts, None, None).unwrap();
-        let e = connection.run();
-        assert!(e.is_err());
+        let mut reactor = Core::new().unwrap();
+        let mut connection = try_reconnect(opts, &mut reactor);
+        let e = connection.map_err(|e| {
+            println!("{:?}", e);
+            assert!(false);
+        });
     }
 }
