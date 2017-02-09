@@ -71,7 +71,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         State {
-            last_pingresp:true
+            last_pingresp: true
         }
     }
 }
@@ -118,6 +118,7 @@ fn try_reconnect(opts: MqttOptions,
     });
 
     let response = reactor.run(f_response);
+    //TODO: Check ConnAck Status and Error out incase of failure
     let (packet, frame) = response?;
     Ok(frame)
 }
@@ -220,6 +221,7 @@ impl Connection {
                 }).map_err(|e| Error::AwaitPingResp) //TODO: Why isn't this working without map_err??
                   .and_then(|p| p)
                   .forward(sender);
+
 
             let mqtt_future = timer_future.join3(rx_future, sender_future);
             let _ = reactor.run(mqtt_future);
