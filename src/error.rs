@@ -2,6 +2,7 @@ use std::io;
 
 use mqtt3;
 use tokio_timer::TimerError;
+use std::net::AddrParseError;
 
 quick_error! {
     #[derive(Debug)]
@@ -32,6 +33,9 @@ quick_error! {
         }       
         Discard {
             from(&'static str)
+        }
+        AddressResolution(err: AddrParseError) {
+            from()
         }
     }
 }

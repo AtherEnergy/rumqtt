@@ -4,9 +4,13 @@ version = "0.1.0"
 authors = ["kteza1 <k.teza1@gmail.com>"]
 
 [dependencies]
-mqtt3 = {path = "../mqtt3"}
+mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
 futures = "0.1"
 tokio-core = "0.1"
 tokio-timer = "0.1"
 quick-error = "1.1"
 rand = "0.3"
+
+[[bin]]
+name="simple"
+path="examples/simple.rs"
