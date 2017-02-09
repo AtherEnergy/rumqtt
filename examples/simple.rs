@@ -14,28 +14,8 @@ use tokio_mqtt::packet::*;
 use tokio_mqtt::clientoptions::MqttOptions;
 use tokio_mqtt::connection::Connection;
 
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::thread;
-use std::time::Duration;
-
-fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
-    let addrs = addr.to_socket_addrs().expect("Conversion Failed");
-    for addr in addrs {
-        if let SocketAddr::V4(_) = addr {
-            return addr;
-        }
-    }
-    unreachable!("Cannot lookup address");
-}
-
-
 fn main() {
-    let mut event_loop = core::reactor::Core::new().unwrap();
-    let handle = event_loop.handle();
-
     let opts = MqttOptions::new();
-    //let addr = lookup_ipv4("localhost:1883");
-
     let mut connection = Connection::start(opts, None, None).unwrap();
     let e = connection.run();
     println!("{:?}", e);

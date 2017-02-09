@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::cell::RefCell;
 
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
@@ -15,7 +16,7 @@ use futures::sync::mpsc;
 use mqtt3::{Message, QoS, TopicPath, PacketIdentifier, SubscribeTopic};
 
 use error::*;
-use packet::*;
+use packet;
 use codec::MqttCodec;
 use clientoptions::MqttOptions;
 
@@ -23,13 +24,19 @@ pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
 pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 pub struct Connection {
-    pub state: MqttState,
+    /// Holds connection state
+    pub connection_state: MqttState,
+    /// Holds various options according to client prefs
     pub opts: MqttOptions,
+    /// Whether its an initial reconnnect
     pub initial_connect: bool,
-    pub await_pingresp: bool,
     pub last_flush: Instant,
 
+    /// Number of reconnections that happened
     pub no_of_reconnections: u32,
+
+    /// `State` holds data that needs mutation
+    pub state: RefCell<State>,
 
     /// On message callback
     pub message_callback: Option<Arc<MessageSendableFn>>,
@@ -52,8 +59,21 @@ pub struct Connection {
     // If broker crashes, all its state will be lost (most brokers).
     // client wouldn't want to loose messages after it comes back up again
     pub subscriptions: VecDeque<Vec<SubscribeTopic>>,
-
     // pub reactor: Core,
+}
+
+/// States which needs mutation. We keep state as a seperate struct to avoid compile time borrow checker errors.
+pub struct State {
+    /// Flag which describes the ping response ack state, and is initially true.
+    last_pingresp: bool
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            last_pingresp:true
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,31 +99,15 @@ pub enum NetworkNotification {
     Connected,
 }
 
-fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
-    let addrs = addr.to_socket_addrs().expect("Conversion Failed");
-    for addr in addrs {
-        if let SocketAddr::V4(_) = addr {
-            return addr;
-        }
-    }
-    unreachable!("Cannot lookup address");
-}
-
 // DESIGN: Initial connect status should be immediately known.
 //        Intermediate disconnections should be automatically reconnected
 fn _try_reconnect(opts: MqttOptions,
                   reactor: &mut Core)
                   -> Result<Framed<TcpStream, MqttCodec>, Error> {
-
-    let connect_packet = generate_connect_packet(opts.client_id, opts.clean_session, opts.keep_alive, None, None);
-    let addr = lookup_ipv4(opts.addr.as_str());
-
+    let addr: SocketAddr = opts.get_ip_addr().parse()?;
+    let connect_packet = packet::gen_connect_packet(opts, None, None);
     let f_response = TcpStream::connect(&addr, &reactor.handle()).and_then(|connection| {
-        
-        // `connection` is now a ((TcpStreamNew)) reference to a Sink + Stream iface
-        // So we call framed to convert to a Framed
         let framed = connection.framed(MqttCodec);
-        // Since Framed implements Sink we can call send on it.
         let f1 = framed.send(connect_packet);
 
         f1.and_then(|framed| {
@@ -115,7 +119,6 @@ fn _try_reconnect(opts: MqttOptions,
 
     let response = reactor.run(f_response);
     let (packet, frame) = response?;
-    println!("{:?}", packet);
     Ok(frame)
 }
 
@@ -126,17 +129,14 @@ impl Connection {
                  -> Result<Self, Error> {
 
         let connection = Connection {
-            state: MqttState::Disconnected,
+            connection_state: MqttState::Disconnected,
             opts: opts,
             initial_connect: true,
-            await_pingresp: false,
             last_flush: Instant::now(),
-
+            state: RefCell::new(Default::default()),
             no_of_reconnections: 0,
-
             publish_callback: publish_callback,
             message_callback: message_callback,
-
             // Queues
             incoming_rec: VecDeque::new(),
             outgoing_pub: VecDeque::new(),
@@ -151,7 +151,7 @@ impl Connection {
         Ok(connection)
     }
 
-    // Interval is a Stream and can be iterated over
+    /// Returns an Internal which keeps ticking over `keep_alive` secs.
     fn pingtimer(&self) -> Interval {
         let timer = Timer::default();
 
@@ -164,6 +164,7 @@ impl Connection {
         timer.interval(Duration::new(keep_alive, 0))
     }
 
+    /// Spin the event loop of the mqtt client.
     pub fn run(&mut self) -> Result<(), Error> {
         let mut reactor = Core::new()?;
 
@@ -185,19 +186,14 @@ impl Connection {
             // Since Framed implements Split trait, we can call split on it.
             // split() gives seperate Sink and Stream objects respectively.
             let (sender, receiver) = framed.split();
-            // receiver is a `Stream` type
-            // for_each will process each msg on the stream we get
+
             let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
+
             let rx_future = receiver.for_each(|msg| {
-                    println!("Received {:?}", msg);
-                    //self.await_pingresp = false;
+                    (*self.state.borrow_mut()).last_pingresp = true;
                     Ok(())
                 })
                 .map_err(|e| Error::Io(e));
-
-
-
-            // create a Stream of `Interval`
 
             let pingtimer = self.pingtimer();
             let timer_future = pingtimer.for_each(|_| {
@@ -207,31 +203,50 @@ impl Connection {
                 })
                 .map_err(|e| Error::Timer(e));
 
-            // Sender which does network writes
-            // Sender implements Sink which allows the task to 
-            // send messages
+            // Sender implements Sink which allows us to 
+            // send messages to the underlying socket connection.
             let sender_future = sender_rx.map(|r| {
                     match r {
                         // We receive a ping response from broker
                         NetworkRequest::Ping => {
-                            if self.await_pingresp {
+                            if !(*self.state.borrow()).last_pingresp {
                                 return Err(Error::AwaitPingResp);
                             }
-                            self.await_pingresp = true;
-                            Ok(generate_pingreq_packet())
+                            (*self.state.borrow_mut()).last_pingresp = false;
+                            Ok(packet::gen_pingreq_packet())
                         }
                         _ => panic!("Misc"),
                     }
-                }).map_err(|e| Error::Sender)
+                }).map_err(|e| Error::AwaitPingResp) //TODO: Why isn't this working without map_err??
                   .and_then(|p| p)
                   .forward(sender);
 
-            //let sender_future.
-
             let mqtt_future = timer_future.join3(rx_future, sender_future);
-
-            let e = reactor.run(mqtt_future);
+            let _ = reactor.run(mqtt_future);
             println!("@@@@@@@@@@@@@@@@@@@@");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ::clientoptions::MqttOptions;
+    use ::connection::Connection;
+    use std::process::Command;
+
+    #[test]
+    fn test_fail_no_listening_broker() {
+        // Check no broker is listening on default port 1883
+        let status = Command::new("lsof")
+                         .arg("-i")
+                         .arg(":1883")
+                         .arg("-S")
+                         .status()
+                         .expect("failed to execute process");
+        assert!(!status.success());
+        let opts = MqttOptions::new();
+        let mut connection = Connection::start(opts, None, None).unwrap();
+        let e = connection.run();
+        assert!(e.is_err());
     }
 }

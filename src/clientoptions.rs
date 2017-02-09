@@ -23,7 +23,8 @@ pub struct MqttOptions {
     pub client_cert: Option<(PathBuf, PathBuf)>,
 }
 
-fn generate_client_id() -> String {
+/// Generate a mqtt client id
+fn gen_client_id() -> String {
     let mut rng = rand::thread_rng();
     let id = rng.gen::<u32>();
     format!("rumqtt_{}", id)
@@ -32,10 +33,10 @@ fn generate_client_id() -> String {
 impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
-            addr: "localhost:1883".to_string(),
+            addr: "127.0.0.1:1883".to_string(),
             keep_alive: 15,
             clean_session: true,
-            client_id: generate_client_id(),
+            client_id: gen_client_id(),
             username: None,
             password: None,
             reconnect: Some(5),
@@ -62,7 +63,7 @@ impl MqttOptions {
     /// |-------------------------|--------------------------|
     /// | **client_id**           | Randomly generated       |
     /// | **clean_session**       | true                     |
-    /// | **keep_alive**          | 10 secs                   |
+    /// | **keep_alive**          | 10 secs                  |
     /// | **reconnect try**       | Doesn't try to reconnect |
     /// | **retransmit try time** | 60 secs                  |
     /// | **pub_q_len**           | 50                       |
@@ -70,6 +71,12 @@ impl MqttOptions {
     ///
     pub fn new() -> MqttOptions {
         MqttOptions { ..Default::default() }
+    }
+
+
+    /// Get the ip address of the broker as a `&str`
+    pub fn get_ip_addr(&self) -> &str {
+        self.addr.as_str()
     }
 
     /// Number of seconds after which client should ping the broker
@@ -136,11 +143,13 @@ impl MqttOptions {
         self
     }
 
+    /// Sets Subscriber's queue length
     pub fn set_sub_q_len(mut self, len: u16) -> Self {
         self.sub_q_len = len;
         self
     }
 
+    /// Set queue timeouts
     pub fn set_q_timeout(mut self, secs: u16) -> Self {
         self.queue_timeout = secs;
         self
@@ -213,9 +222,7 @@ impl MqttOptions {
     ///                           .set_client_id("my-client-id")
     ///                           .set_clean_session(true)
     ///                           .connect("localhost:1883");
-    ///
-    // TODO: Rename
-    pub fn broker(mut self, addr: &str) -> Self {
+    pub fn set_broker_addr(mut self, addr: &str) -> Self {
         self.addr = addr.to_string();
         self
     }
