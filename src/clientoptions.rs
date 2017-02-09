@@ -34,7 +34,7 @@ impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
             addr: "127.0.0.1:1883".to_string(),
-            keep_alive: 15,
+            keep_alive: 10,
             clean_session: true,
             client_id: gen_client_id(),
             username: None,

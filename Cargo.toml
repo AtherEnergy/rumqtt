@@ -10,6 +10,7 @@ tokio-core = "0.1"
 tokio-timer = "0.1"
 quick-error = "1.1"
 rand = "0.3"
+log = "*"
 
 [[bin]]
 name="simple"

@@ -13,7 +13,7 @@ use futures::Sink;
 use futures::Stream;
 use futures::sync::mpsc;
 
-use mqtt3::{Message, QoS, TopicPath, PacketIdentifier, SubscribeTopic};
+use mqtt3::{Message, QoS, TopicPath, PacketIdentifier, SubscribeTopic, Packet};
 
 use error::*;
 use packet;
@@ -43,36 +43,32 @@ pub struct Connection {
     /// On publish callback
     pub publish_callback: Option<Arc<PublishSendableFn>>,
 
+    // clean_session=false will remember subscriptions only till lives.
+    // If broker crashes, all its state will be lost (most brokers).
+    // client wouldn't want to loose messages after it comes back up again
+    pub subscriptions: VecDeque<Vec<SubscribeTopic>>, // pub reactor: Core,
+}
+
+/// States which needs mutation. We keep state as a seperate struct to avoid compile time borrow checker errors.
+pub struct State {
+    /// Flag which describes the ping response ack state, and is initially true.
+    last_pingresp: bool,
     // Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
     pub outgoing_pub: VecDeque<Box<Message>>,
     /// For QoS 2. Store for incoming publishes to record.
     pub incoming_rec: VecDeque<Box<Message>>, //
     /// For QoS 2. Store for outgoing publishes.
-    pub outgoing_rec: VecDeque<PacketIdentifier>,
+    pub outgoing_rec: VecDeque<Box<Message>>,
     /// For Qos2. Store for outgoing `pubrel` packets.
     pub outgoing_rel: VecDeque<PacketIdentifier>,
     /// For Qos2. Store for outgoing `pubcomp` packets.
     pub outgoing_comp: VecDeque<PacketIdentifier>,
-
-    // clean_session=false will remember subscriptions only till lives.
-    // If broker crashes, all its state will be lost (most brokers).
-    // client wouldn't want to loose messages after it comes back up again
-    pub subscriptions: VecDeque<Vec<SubscribeTopic>>,
-    // pub reactor: Core,
-}
-
-/// States which needs mutation. We keep state as a seperate struct to avoid compile time borrow checker errors.
-pub struct State {
-    /// Flag which describes the ping response ack state, and is initially true.
-    last_pingresp: bool
 }
 
 impl Default for State {
     fn default() -> Self {
-        State {
-            last_pingresp: true
-        }
+        State { last_pingresp: true, ..Default::default() }
     }
 }
 
@@ -102,8 +98,8 @@ pub enum NetworkNotification {
 // DESIGN: Initial connect status should be immediately known.
 //        Intermediate disconnections should be automatically reconnected
 fn try_reconnect(opts: MqttOptions,
-                  reactor: &mut Core)
-                  -> Result<Framed<TcpStream, MqttCodec>, Error> {
+                 reactor: &mut Core)
+                 -> Result<Framed<TcpStream, MqttCodec>, Error> {
     let addr: SocketAddr = opts.get_ip_addr().parse()?;
     let connect_packet = packet::gen_connect_packet(opts, None, None);
     let f_response = TcpStream::connect(&addr, &reactor.handle()).and_then(|connection| {
@@ -111,14 +107,15 @@ fn try_reconnect(opts: MqttOptions,
         let f1 = framed.send(connect_packet);
 
         f1.and_then(|framed| {
-            framed.into_future()
-            .and_then(|(res, stream)| Ok((res, stream)))
-            .map_err(|(err, _stream)| err)
-        }).boxed()
+                framed.into_future()
+                    .and_then(|(res, stream)| Ok((res, stream)))
+                    .map_err(|(err, _stream)| err)
+            })
+            .boxed()
     });
 
     let response = reactor.run(f_response);
-    //TODO: Check ConnAck Status and Error out incase of failure
+    // TODO: Check ConnAck Status and Error out incase of failure
     let (packet, frame) = response?;
     Ok(frame)
 }
@@ -138,12 +135,6 @@ impl Connection {
             no_of_reconnections: 0,
             publish_callback: publish_callback,
             message_callback: message_callback,
-            // Queues
-            incoming_rec: VecDeque::new(),
-            outgoing_pub: VecDeque::new(),
-            outgoing_rec: VecDeque::new(),
-            outgoing_rel: VecDeque::new(),
-            outgoing_comp: VecDeque::new(),
 
             // Subscriptions
             subscriptions: VecDeque::new(),
@@ -191,7 +182,13 @@ impl Connection {
             let (mut sender_tx, sender_rx) = mpsc::channel::<NetworkRequest>(1);
 
             let rx_future = receiver.for_each(|msg| {
-                    (*self.state.borrow_mut()).last_pingresp = true;
+                    match msg {
+                        Packet::Pingresp => {
+                            (*self.state.borrow_mut()).last_pingresp = true;
+                        }
+                        _ => (),
+                    }
+
                     Ok(())
                 })
                 .map_err(|e| Error::Io(e));
@@ -204,18 +201,13 @@ impl Connection {
                 })
                 .map_err(|e| Error::Timer(e));
 
-            // Sender implements Sink which allows us to 
+            // Sender implements Sink which allows us to
             // send messages to the underlying socket connection.
             let sender_future = sender_rx.map(|r| {
                     match r {
                         // We receive a ping response from broker
-                        NetworkRequest::Ping => {
-                            if !(*self.state.borrow()).last_pingresp {
-                                return Err(Error::AwaitPingResp);
-                            }
-                            (*self.state.borrow_mut()).last_pingresp = false;
-                            Ok(packet::gen_pingreq_packet())
-                        }
+                        NetworkRequest::Ping => self.ping(),
+                        NetworkRequest::Publish(m) => self.publish(m),
                         _ => panic!("Misc"),
                     }
                 }).map_err(|e| Error::AwaitPingResp) //TODO: Why isn't this working without map_err??
@@ -227,6 +219,44 @@ impl Connection {
             let _ = reactor.run(mqtt_future);
             println!("@@@@@@@@@@@@@@@@@@@@");
         }
+    }
+
+    fn ping(&self) -> Result<Packet, Error> {
+        if !(*self.state.borrow()).last_pingresp {
+            return Err(Error::AwaitPingResp);
+        }
+        (*self.state.borrow_mut()).last_pingresp = false;
+        Ok(packet::gen_pingreq_packet())
+    }
+
+    fn publish(&self, message: Message) -> Result<Packet, Error> {
+        let topic = message.topic.clone();
+        let payload = message.payload.clone();
+        let retain = message.retain;
+        let qos = message.qos;
+
+        match message.qos {
+            QoS::AtMostOnce => (),
+            QoS::AtLeastOnce => {
+                let ref mut outgoing_pub = (*self.state.borrow_mut()).outgoing_pub;
+
+                outgoing_pub.push_back(Box::new(message));
+
+                if outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
+                    warn!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", outgoing_pub.len());
+                }
+            }
+            QoS::ExactlyOnce => {
+                let ref mut outgoing_rec = (*self.state.borrow_mut()).outgoing_rec;
+                outgoing_rec.push_back(Box::new(message));
+
+                if outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
+                    warn!(":( :( Outgoing Record Queue Length growing bad --> {:?}", outgoing_rec.len());
+                }
+            }
+        }
+
+        Ok(packet::gen_publish_packet(topic.path, qos, None, retain, false, payload.clone()))   
     }
 }
 

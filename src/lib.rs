@@ -5,6 +5,8 @@ extern crate tokio_timer;
 #[macro_use]
 extern crate quick_error;
 extern crate rand;
+#[macro_use]
+extern crate log;
 
 pub mod codec;
 pub mod error;

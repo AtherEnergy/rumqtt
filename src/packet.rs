@@ -3,9 +3,13 @@
 use std::sync::Arc;
 use clientoptions::MqttOptions;
 
-use mqtt3::{Packet, Protocol, Connect, Subscribe, Unsubscribe, Publish, QoS, SubscribeTopic, PacketIdentifier};
+use mqtt3::{Packet, Protocol, Connect, Subscribe, Unsubscribe, Publish, QoS, SubscribeTopic,
+            PacketIdentifier};
 
-pub fn gen_connect_packet(opts: MqttOptions, username: Option<String>, password: Option<String>) -> Packet {
+pub fn gen_connect_packet(opts: MqttOptions,
+                          username: Option<String>,
+                          password: Option<String>)
+                          -> Packet {
     Packet::Connect(Box::new(Connect {
         protocol: Protocol::MQTT(4),
         keep_alive: opts.keep_alive,
@@ -44,12 +48,12 @@ pub fn gen_unsubscribe_packet(pkid: PacketIdentifier, topics: Vec<String>) -> Pa
 }
 
 pub fn gen_publish_packet(topic_name: String,
-                               qos: QoS,
-                               pkid: Option<PacketIdentifier>,
-                               retain: bool,
-                               dup: bool,
-                               payload: Arc<Vec<u8>>)
-                               -> Packet {
+                          qos: QoS,
+                          pkid: Option<PacketIdentifier>,
+                          retain: bool,
+                          dup: bool,
+                          payload: Arc<Vec<u8>>)
+                          -> Packet {
     Packet::Publish(Box::new(Publish {
         dup: dup,
         qos: qos,
