@@ -55,11 +55,11 @@ pub struct State {
     last_pingresp: bool,
     // Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
-    pub outgoing_pub: VecDeque<Box<Message>>,
+    pub outgoing_pub: VecDeque<Message>,
     /// For QoS 2. Store for incoming publishes to record.
-    pub incoming_rec: VecDeque<Box<Message>>, //
+    pub incoming_rec: VecDeque<Message>, //
     /// For QoS 2. Store for outgoing publishes.
-    pub outgoing_rec: VecDeque<Box<Message>>,
+    pub outgoing_rec: VecDeque<Message>,
     /// For Qos2. Store for outgoing `pubrel` packets.
     pub outgoing_rel: VecDeque<PacketIdentifier>,
     /// For Qos2. Store for outgoing `pubcomp` packets.
@@ -68,7 +68,14 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        State { last_pingresp: true, ..Default::default() }
+        State {
+            last_pingresp: true,
+            outgoing_pub: VecDeque::new(),
+            incoming_rec: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+            outgoing_comp: VecDeque::new()
+        }
     }
 }
 
@@ -239,8 +246,7 @@ impl Connection {
             QoS::AtMostOnce => (),
             QoS::AtLeastOnce => {
                 let ref mut outgoing_pub = (*self.state.borrow_mut()).outgoing_pub;
-
-                outgoing_pub.push_back(Box::new(message));
+                outgoing_pub.push_back(message);
 
                 if outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
                     warn!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", outgoing_pub.len());
@@ -248,7 +254,7 @@ impl Connection {
             }
             QoS::ExactlyOnce => {
                 let ref mut outgoing_rec = (*self.state.borrow_mut()).outgoing_rec;
-                outgoing_rec.push_back(Box::new(message));
+                outgoing_rec.push_back(message);
 
                 if outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
                     warn!(":( :( Outgoing Record Queue Length growing bad --> {:?}", outgoing_rec.len());
