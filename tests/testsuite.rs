@@ -24,9 +24,7 @@ fn inital_tcp_connect_failure() {
         .broker("localhost:9999");
 
     // Connects to a broker and returns a `request`
-    let request = MqttClient::connect(client_options)
-        .start()
-        .expect("Couldn't start");
+    let request = MqttClient::connect(client_options).expect("Couldn't start");
 }
 
 // After connecting to tcp, should timeout error if it didn't receive CONNACK
@@ -36,7 +34,7 @@ fn inital_tcp_connect_failure() {
 fn connect_timeout_failure() {
     // TODO: Change the host to remote host and fix blocks
     let client_options = MqttOptions::new().broker("localhost:9999");
-    let request = MqttClient::new(client_options).start().expect("Couldn't restart");
+    let request = MqttClient::connect(client_options).expect("Couldn't restart");
 }
 
 // Shouldn't try to reconnect if there is a connection problem
@@ -50,7 +48,7 @@ fn inital_mqtt_connect_failure() {
 
 
     // Connects to a broker and returns a `request`
-    let client = MqttClient::new(client_options).start().expect("Couldn't start");
+    let client = MqttClient::connect(client_options).expect("Couldn't start");
 }
 
 // #[test]
