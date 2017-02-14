@@ -20,12 +20,6 @@ pub enum MiscNwRequest {
     Shutdown,
 }
 
-// static mut N: i32 = 0;
-// unsafe {
-//     N += 1;
-//     println!("N: {}", N);
-// }
-
 pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
 pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
@@ -56,45 +50,6 @@ impl MqttClient {
             nw_request_tx: None,
         }
     }
-
-    // pub fn mock_start(mut self) -> Result<(Self, MqRequest,
-    // mpsc::Receiver<NetworkRequest>)> {
-    // let (pub0_tx, pub0_rx) =
-    // channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
-    //     self.pub0_rx = Some(pub0_rx);
-    // let (pub1_tx, pub1_rx) =
-    // channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
-    //     self.pub1_rx = Some(pub1_rx);
-    // let (pub2_tx, pub2_rx) =
-    // channel::sync_channel::<Message>(self.opts.pub_q_len as usize);
-    //     self.pub2_rx = Some(pub2_rx);
-
-    // let (sub_tx, sub_rx) = channel::sync_channel::<Vec<(TopicFilter,
-    // QualityOfService)>>(self.opts.sub_q_len as usize);
-    //     self.sub_rx = Some(sub_rx);
-
-    // let (nw_notification_tx, nw_notification_rx) =
-    // channel::sync_channel::<NetworkNotification>(5);
-    //     self.nw_notification_rx = Some(nw_notification_rx);
-
-    //     let (nw_request_tx, nw_request_rx) = mpsc::channel::<NetworkRequest>();
-    //     self.nw_request_tx = Some(nw_request_tx);
-
-    //     let (misc_tx, misc_rx) = channel::sync_channel::<MiscNwRequest>(1);
-    //     self.misc_rx = Some(misc_rx);
-
-    //     // @ Create Request through which user interacts
-    //     // @ These are the handles using which user interacts with rumqtt.
-    //     let mq_request = MqRequest {
-    //         pub0_tx: pub0_tx,
-    //         pub1_tx: pub1_tx,
-    //         pub2_tx: pub2_tx,
-    //         subscribe_tx: sub_tx,
-    //         misc_tx: misc_tx,
-    //     };
-
-    //     Ok((self, mq_request, nw_request_rx))
-    // }
 
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
