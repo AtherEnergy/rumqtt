@@ -12,11 +12,13 @@
 
 // // TEST 1: Check if ping requests are going in time in a stable connection.
 // // [working]
-// // TEST 2: Disconnect the network while pinging and check if reconnections are
+// // TEST 2: Disconnect the network while pinging and check if reconnections
+// are
 // // being tried [working]
 // // TEST 3: Reconnect the same network and check if reconnection is successful
 // // [working]
-// // TEST 4: Reconnect different network and check if reconnection is successful
+// // TEST 4: Reconnect different network and check if reconnection is
+// successful
 // // [working]
 // #[ignore]
 // #[test]
@@ -44,7 +46,8 @@
 // // TEST 2: Reconnect the same network and check if reconnection is successful
 // // and publish
 // //         count is proper [working]
-// // TEST 3: Reconnect different network and check if reconnection is successful
+// // TEST 3: Reconnect different network and check if reconnection is
+// successful
 // // and publish
 // //         count is proper [working]
 // #[ignore]
@@ -70,7 +73,8 @@
 
 //     for i in 0..10_000 {
 //         let payload = format!("{}. hello rust", i);
-//         request.publish("test/half/publish", QoS::Level1, payload.clone().into_bytes()).unwrap();
+// request.publish("test/half/publish", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
 //         thread::sleep(Duration::new(0, 10000));
 //     }
 
@@ -111,7 +115,8 @@
 //         .start()
 //         .expect("Coudn't start");
 
-//     request.subscribe(vec![("test/qos1/block", QoS::Level1)]).expect("Subcription failure");
+// request.subscribe(vec![("test/qos1/block",
+// QoS::Level1)]).expect("Subcription failure");
 
 //     println!("Take broker down in next 10 seconds !!!!!!");
 //     thread::sleep(Duration::new(10, 0));
@@ -119,7 +124,8 @@
 //     for i in 0..10 {
 //         let payload = format!("{}. hello rust", i);
 //         println!("{}. Publishing ...", i);
-//         request.publish("test/qos1/block", QoS::Level1, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos1/block", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
 //         thread::sleep(Duration::new(0, 10000));
 //     }
 
@@ -155,11 +161,13 @@
 //         .start()
 //         .expect("Coudn't start");
 
-//     request.subscribe(vec![("test/qos1/stress", QoS::Level1)]).expect("Subcription failure");
+// request.subscribe(vec![("test/qos1/stress",
+// QoS::Level1)]).expect("Subcription failure");
 
 //     for i in 0..1000 {
 //         let payload = format!("{}. hello rust", i);
-//         request.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos1/stress", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
 //         thread::sleep(Duration::new(0, 10000));
 //     }
 

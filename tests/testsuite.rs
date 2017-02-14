@@ -34,7 +34,7 @@ fn inital_tcp_connect_failure() {
 #[test]
 #[should_panic]
 fn connect_timeout_failure() {
-    //TODO: Change the host to remote host and fix blocks
+    // TODO: Change the host to remote host and fix blocks
     let client_options = MqttOptions::new().broker("localhost:9999");
     let request = MqttClient::new(client_options).start().expect("Couldn't restart");
 }
@@ -79,9 +79,12 @@ fn inital_mqtt_connect_failure() {
 //     request.subscribe(topics).expect("Subcription failure");
 
 //     let payload = format!("hello rust");
-//     request.publish("test/basic", QoS::Level0, payload.clone().into_bytes()).unwrap();
-//     request.publish("test/basic", QoS::Level1, payload.clone().into_bytes()).unwrap();
-//     request.publish("test/basic", QoS::Level2, payload.clone().into_bytes()).unwrap();
+// request.publish("test/basic", QoS::Level0,
+// payload.clone().into_bytes()).unwrap();
+// request.publish("test/basic", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
+// request.publish("test/basic", QoS::Level2,
+// payload.clone().into_bytes()).unwrap();
 
 //     thread::sleep(Duration::new(3, 0));
 //     assert!(3 == final_count.load(Ordering::SeqCst));
@@ -119,7 +122,8 @@ fn inital_mqtt_connect_failure() {
 //     thread::sleep(Duration::new(10, 0));
 
 //     let payload = format!("hello rust");
-//     request.publish("test/reconnect", QoS::Level1, payload.clone().into_bytes()).unwrap();
+// request.publish("test/reconnect", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
 
 //     // Wait for count to be incremented by callback
 //     thread::sleep(Duration::new(5, 0));
@@ -174,7 +178,8 @@ fn inital_mqtt_connect_failure() {
 
 //     // BUG NOTE: don't use _ for dummy subscriber, request. That implies
 //     // channel ends in struct are invalid
-//     let request1 = MqttClient::new(client_options1).start().expect("Coudn't start");
+// let request1 = MqttClient::new(client_options1).start().expect("Coudn't
+// start");
 //     let request2 = MqttClient::new(client_options2)
 //         .message_callback(move |message| {
 //             count.fetch_add(1, Ordering::SeqCst);
@@ -185,7 +190,8 @@ fn inital_mqtt_connect_failure() {
 
 //     request2.subscribe(vec![("test/will", QoS::Level0)]).unwrap();
 
-//     // TODO: Now we are waiting for cli-2 subscriber to finish before disconnecting
+// // TODO: Now we are waiting for cli-2 subscriber to finish before
+// disconnecting
 //     // cli-1. Make an sync version of subscribe()
 //     thread::sleep(Duration::new(1, 0));
 //     // LWT doesn't work on graceful disconnects
@@ -207,7 +213,8 @@ fn inital_mqtt_connect_failure() {
 //         .set_client_id("test-retain-client")
 //         .set_clean_session(true)
 //         .broker(BROKER_ADDRESS);
-//     // NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org" broker
+// // NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org"
+// broker
 
 //     let count = Arc::new(AtomicUsize::new(0));
 //     let final_count = count.clone();
@@ -223,12 +230,17 @@ fn inital_mqtt_connect_failure() {
 
 //     // publish first
 //     let payload = format!("hello rust");
-//     request.retained_publish("test/0/retain", QoS::Level0, payload.clone().into_bytes()).unwrap();
-//     request.retained_publish("test/1/retain", QoS::Level1, payload.clone().into_bytes()).unwrap();
-//     request.retained_publish("test/2/retain", QoS::Level2, payload.clone().into_bytes()).unwrap();
+// request.retained_publish("test/0/retain", QoS::Level0,
+// payload.clone().into_bytes()).unwrap();
+// request.retained_publish("test/1/retain", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
+// request.retained_publish("test/2/retain", QoS::Level2,
+// payload.clone().into_bytes()).unwrap();
 
-//     // NOTE: Request notifications are on different mio channels. We don't know
-//     // about priority. Wait till all the publishes are recived by connection thread
+// // NOTE: Request notifications are on different mio channels. We don't
+// know
+// // about priority. Wait till all the publishes are recived by connection
+// thread
 //     // before disconnection
 //     thread::sleep(Duration::new(1, 0));
 //     request.disconnect().unwrap();
@@ -263,16 +275,19 @@ fn inital_mqtt_connect_failure() {
 //     let request = MqttClient::new(client_options)
 //         .message_callback(move |message| {
 //             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+// // println!("{}. message --> {:?}",
+// count.load(Ordering::SeqCst), message);
 //         })
 //         .start()
 //         .expect("Coudn't start");
 
-//     request.subscribe(vec![("test/qos0/stress", QoS::Level2)]).expect("Subcription failure");
+// request.subscribe(vec![("test/qos0/stress",
+// QoS::Level2)]).expect("Subcription failure");
 
 //     for i in 0..1000 {
 //         let payload = format!("{}. hello rust", i);
-//         request.publish("test/qos0/stress", QoS::Level0, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos0/stress", QoS::Level0,
+// payload.clone().into_bytes()).unwrap();
 //         thread::sleep(Duration::new(0, 10000));
 //     }
 
@@ -301,14 +316,16 @@ fn inital_mqtt_connect_failure() {
 //     let request = MqttClient::new(client_options)
 //         .publish_callback(move |message| {
 //             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+// // println!("{}. message --> {:?}",
+// count.load(Ordering::SeqCst), message);
 //         })
 //         .start()
 //         .expect("Coudn't start");
 
 //     for i in 0..1000 {
 //         let payload = format!("{}. hello rust", i);
-//         request.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos1/stress", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
 //     }
 
 //     thread::sleep(Duration::new(10, 0));
@@ -340,7 +357,8 @@ fn inital_mqtt_connect_failure() {
 //     let request = MqttClient::new(client_options)
 //         .publish_callback(move |message| {
 //             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+// // println!("{}. message --> {:?}",
+// count.load(Ordering::SeqCst), message);
 //         })
 //         .start()
 //         .expect("Coudn't start");
@@ -350,7 +368,8 @@ fn inital_mqtt_connect_failure() {
 //         if i == 100 || i == 500 || i == 900 {
 //             let _ = request.disconnect();
 //         }
-//         request.publish("test/qos1/reconnection_stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos1/reconnection_stress", QoS::Level1,
+// payload.clone().into_bytes()).unwrap();
 //     }
 
 //     thread::sleep(Duration::new(30, 0));
@@ -373,14 +392,16 @@ fn inital_mqtt_connect_failure() {
 //     let request = MqttClient::new(client_options)
 //         .publish_callback(move |message| {
 //             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+// // println!("{}. message --> {:?}",
+// count.load(Ordering::SeqCst), message);
 //         })
 //         .start()
 //         .expect("Coudn't start");
 
 //     for i in 0..1000 {
 //         let payload = format!("{}. hello rust", i);
-//         request.publish("test/qos2/stress", QoS::Level2, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos2/stress", QoS::Level2,
+// payload.clone().into_bytes()).unwrap();
 //     }
 
 //     thread::sleep(Duration::new(30, 0));
@@ -404,7 +425,8 @@ fn inital_mqtt_connect_failure() {
 //     let request = MqttClient::new(client_options)
 //         .publish_callback(move |message| {
 //             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
+// // println!("{}. message --> {:?}",
+// count.load(Ordering::SeqCst), message);
 //         })
 //         .start()
 //         .expect("Coudn't start");
@@ -414,7 +436,8 @@ fn inital_mqtt_connect_failure() {
 //         if i == 40 || i == 500 || i == 900 {
 //             let _ = request.disconnect();
 //         }
-//         request.publish("test/qos2/reconnection_stress", QoS::Level2, payload.clone().into_bytes()).unwrap();
+// request.publish("test/qos2/reconnection_stress", QoS::Level2,
+// payload.clone().into_bytes()).unwrap();
 //     }
 
 //     thread::sleep(Duration::new(30, 0));
@@ -441,7 +464,7 @@ fn inital_mqtt_connect_failure() {
 //                                     .set_keep_alive(5)
 //                                     .set_reconnect(3)
 //                                     .set_clean_session(false)
-// 
+//
 // .set_client_id("qos2-stress-reconnect-publish")
 //                                     .broker(BROKER_ADDRESS);
 
