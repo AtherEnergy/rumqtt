@@ -67,7 +67,6 @@ pub struct Connection {
     pub opts: MqttOptions,
     pub stream: NetworkStream,
     pub nw_request_rx: Receiver<NetworkRequest>,
-    pub nw_notification_tx: SyncSender<NetworkNotification>,
     pub state: MqttState,
     pub initial_connect: bool,
     pub await_pingresp: bool,
@@ -104,7 +103,6 @@ impl Connection {
     pub fn start(addr: SocketAddr,
                  opts: MqttOptions,
                  nw_request_rx: Receiver<NetworkRequest>,
-                 nw_notification_tx: SyncSender<NetworkNotification>,
                  publish_callback: Option<Arc<PublishSendableFn>>,
                  message_callback: Option<Arc<MessageSendableFn>>)
                  -> Result<Self> {
@@ -114,7 +112,6 @@ impl Connection {
             opts: opts,
             stream: NetworkStream::None,
             nw_request_rx: nw_request_rx,
-            nw_notification_tx: nw_notification_tx,
             state: MqttState::Disconnected,
             initial_connect: true,
             await_pingresp: false,
@@ -145,7 +142,6 @@ impl Connection {
         try!(connection._await_connack());
         connection.state = MqttState::Connected;
         info!("$$$ Connected to broker");
-        try!(connection.nw_notification_tx.send(NetworkNotification::Connected));
         try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
         try!(connection.stream.set_write_timeout(Some(Duration::new(10, 0))));
         Ok(connection)
@@ -159,7 +155,6 @@ impl Connection {
                     break;
                 } else {
                     self.state = MqttState::Disconnected;
-                    try!(self.nw_notification_tx.send(NetworkNotification::Disconnected));
                     match self._try_reconnect() {
                         Ok(_) => {
                             self.state = MqttState::Handshake;
@@ -167,7 +162,6 @@ impl Connection {
                             self.state = MqttState::Connected;
                             info!("$$$ Connected to broker");
                             try!(self.post_connack_handle(&packet));
-                            try!(self.nw_notification_tx.send(NetworkNotification::Connected));
                             try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
                             break;
                         }
