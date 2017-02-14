@@ -34,25 +34,24 @@ fn inital_tcp_connect_failure() {
 #[test]
 #[should_panic]
 fn connect_timeout_failure() {
+    //TODO: Change the host to remote host and fix blocks
     let client_options = MqttOptions::new().broker("localhost:9999");
     let request = MqttClient::new(client_options).start().expect("Couldn't restart");
 }
 
 // Shouldn't try to reconnect if there is a connection problem
 // during initial mqtt connect.
-// #[test]
-// #[should_panic]
-// fn inital_mqtt_connect_failure() {
-//     let client_options = MqttOptions::new()
-//         .set_reconnect(5)
-//         .broker("test.mosquitto.org:8883");
+#[test]
+#[should_panic]
+fn inital_mqtt_connect_failure() {
+    let client_options = MqttOptions::new()
+        .set_reconnect(5)
+        .broker("test.mosquitto.org:8883");
 
 
-//     // Connects to a broker and returns a `request`
-//     let request = MqttClient::new(client_options)
-//         .start()
-//         .expect("Couldn't start");
-// }
+    // Connects to a broker and returns a `request`
+    let client = MqttClient::new(client_options).start().expect("Couldn't start");
+}
 
 // #[test]
 // fn basic_publishes_and_subscribes() {

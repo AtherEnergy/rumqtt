@@ -54,7 +54,7 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(mut self) -> Result<()> {
+    pub fn start(mut self) -> Result<Self> {
         let (nw_request_tx, nw_request_rx) = channel::<NetworkRequest>();
         self.nw_request_tx = Some(nw_request_tx);
 
@@ -71,7 +71,7 @@ impl MqttClient {
             Ok(())
         });
 
-        Ok(())
+        Ok(self)
     }
 
 
