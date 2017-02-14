@@ -13,7 +13,6 @@ use mqtt::topic_name::TopicName;
 use error::Result;
 use message::Message;
 use clientoptions::MqttOptions;
-use request::MqRequest;
 use connection::{Connection, NetworkRequest, NetworkNotification, MqttState};
 
 
@@ -64,15 +63,13 @@ impl MqttClient {
 
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
-        let addr = opts.addr.clone();
-        let addr = Self::lookup_ipv4(addr.as_str());
+        let addr = Self::lookup_ipv4(opts.addr.as_str());
         let mut connection = Connection::start(addr, opts, nw_request_rx, None, None)?;
         thread::spawn(move || -> Result<()> {
             let _ = connection.run();
             error!("Network Thread Stopped !!!!!!!!!");
             Ok(())
         });
-
         Ok(self)
     }
 
@@ -153,20 +150,12 @@ impl MqttClient {
                 retain: bool,
                 qos: QualityOfService,
                 payload: Vec<u8>,
-                userdata: Option<Vec<u8>>)
-                -> Result<()> {
-
+                userdata: Option<Vec<u8>>) -> Result<()> {
         let topic = try!(TopicName::new(topic.to_string()));
         let qos_pkid = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
             QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
-        };
-
-        // TODO: use a combinator instead
-        let userdata = match userdata {
-            Some(u) => Some(Arc::new(u)),
-            None => None,
         };
 
         // TODO: Why are qos and pkid in the same structure
@@ -176,20 +165,14 @@ impl MqttClient {
             qos: qos_pkid,
             // Optimizes clones
             payload: Arc::new(payload),
-            userdata: userdata,
+            userdata: userdata.map(|u| Arc::new(u)),
         };
 
         // TODO: Check message sanity here and return error if not
         match qos {
-            QualityOfService::Level0 => {
-                self.publish0(message)?;
-            }
-            QualityOfService::Level1 => {
-                self.publish1(message)?;
-            }
-            QualityOfService::Level2 => {
-                self.publish2(message)?;
-            }
+            QualityOfService::Level0 => self.publish0(message)?,
+            QualityOfService::Level1 => self.publish1(message)?,
+            QualityOfService::Level2 => self.publish2(message)?
         };
 
         Ok(())

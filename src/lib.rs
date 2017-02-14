@@ -71,12 +71,10 @@ mod stream;
 mod message;
 mod clientoptions;
 mod connection;
-mod request;
 mod client;
 
 pub use error::{Error, Result};
 pub use clientoptions::MqttOptions;
 pub use mqtt::QualityOfService as QoS;
 pub use client::MqttClient;
-pub use request::MqRequest;
 pub use message::Message;

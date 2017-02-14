@@ -24,7 +24,7 @@ fn inital_tcp_connect_failure() {
         .broker("localhost:9999");
 
     // Connects to a broker and returns a `request`
-    let request = MqttClient::new(client_options)
+    let request = MqttClient::connect(client_options)
         .start()
         .expect("Couldn't start");
 }
