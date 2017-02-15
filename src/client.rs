@@ -179,7 +179,6 @@ impl MqttClient {
     }
 }
 
-
 // @@@@@@@@@@@@~~~~~~~UNIT TESTS ~~~~~~~~~@@@@@@@@@@@@
 
 #[cfg(test)]
@@ -194,13 +193,16 @@ mod test {
 
     #[test]
     fn next_pkid_roll() {
-        let client_options = MqttOptions::new();
-        let mut mq_client = MqttClient::connect(client_options).unwrap();
-
-        for i in 0..65536 {
-            mq_client._next_pkid();
+        let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
+        match MqttClient::connect(client_options) {
+            Ok(mut mq_client) => {
+                for i in 0..65536 {
+                    mq_client._next_pkid();
+                }
+                assert_eq!(PacketIdentifier(1), mq_client.last_pkid);
+            }
+            Err(e) => panic!("{:?}", e),
         }
 
-        assert_eq!(PacketIdentifier(1), mq_client.last_pkid);
     }
 }
