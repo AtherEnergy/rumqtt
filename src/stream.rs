@@ -23,13 +23,13 @@ impl SslContext {
               C: AsRef<Path>,
               K: AsRef<Path>
     {
-        let mut ctx: ssl::SslContext = try!(ssl::SslContext::new(SslMethod::Tlsv1_2));
-        try!(ctx.set_cipher_list("DEFAULT"));
-        try!(ctx.set_CA_file(ca.as_ref()));
+        let mut ctx: ssl::SslContext = ssl::SslContext::new(SslMethod::Tlsv1_2)?;
+        ctx.set_cipher_list("DEFAULT")?;
+        ctx.set_CA_file(ca.as_ref())?;
 
         if let Some((cert, key)) = client_pair {
-            try!(ctx.set_certificate_file(cert, X509FileType::PEM));
-            try!(ctx.set_private_key_file(key, X509FileType::PEM));
+            ctx.set_certificate_file(cert, X509FileType::PEM)?;
+            ctx.set_private_key_file(key, X509FileType::PEM)?;
         }
         if should_verify_ca {
             ctx.set_verify(SSL_VERIFY_PEER);
@@ -40,7 +40,7 @@ impl SslContext {
     }
 
     pub fn connect(&self, stream: TcpStream) -> Result<SslStream> {
-        let ssl_stream = try!(ssl::SslStream::connect(&*self.inner, stream));
+        let ssl_stream = ssl::SslStream::connect(&*self.inner, stream)?;
         Ok(ssl_stream)
     }
 }
