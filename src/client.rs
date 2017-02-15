@@ -13,7 +13,6 @@ use mqtt::topic_name::TopicName;
 use error::Result;
 use message::Message;
 use clientoptions::MqttOptions;
-use request::MqRequest;
 use connection::{Connection, NetworkRequest, NetworkNotification, MqttState};
 
 
@@ -30,7 +29,7 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct MqttClient {
     pub opts: MqttOptions,
     pub last_pkid: PacketIdentifier,
-    pub nw_request_tx: Option<Sender<NetworkRequest>>,
+    pub nw_request_tx: Sender<NetworkRequest>,
 }
 
 impl MqttClient {
@@ -44,38 +43,30 @@ impl MqttClient {
         unreachable!("Cannot lookup address");
     }
 
-    pub fn new(opts: MqttOptions) -> Self {
-        // TODO: Move state initialization to MqttClient constructor
-        MqttClient {
-            last_pkid: PacketIdentifier(0),
-            opts: opts,
-            nw_request_tx: None,
-        }
-    }
-
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(mut self) -> Result<Self> {
+    pub fn connect(opts: MqttOptions) -> Result<Self> {
         let (nw_request_tx, nw_request_rx) = channel::<NetworkRequest>();
-        self.nw_request_tx = Some(nw_request_tx);
-
-        let opts = self.opts.clone();
-
+        // let opts = opts.clone();
+        let addr = Self::lookup_ipv4(opts.addr.as_str());
+        let mut connection = Connection::start(addr, opts.clone(), nw_request_rx, None, None)?;
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
-        let addr = opts.addr.clone();
-        let addr = Self::lookup_ipv4(addr.as_str());
-        let mut connection = Connection::start(addr, opts, nw_request_rx, None, None)?;
         thread::spawn(move || -> Result<()> {
             let _ = connection.run();
             error!("Network Thread Stopped !!!!!!!!!");
             Ok(())
         });
-
-        Ok(self)
+        
+        let client = MqttClient {
+            last_pkid: PacketIdentifier(0),
+            opts: opts,
+            nw_request_tx: nw_request_tx,
+        };
+        
+        Ok(client)
     }
-
 
     fn subscribe(&mut self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
          let mut sub_topics = vec![];
@@ -84,14 +75,12 @@ impl MqttClient {
             sub_topics.push(topic);
         }
 
-        let nw_request_tx = self.nw_request_tx.as_ref().unwrap();
-        try!(nw_request_tx.send(NetworkRequest::Subscribe(sub_topics)));
+        try!(self.nw_request_tx.send(NetworkRequest::Subscribe(sub_topics)));
         Ok(())
     }
 
     fn publish0(&self, message: Message) -> Result<()> {
-        let nw_request_tx = self.nw_request_tx.as_ref().unwrap();
-        nw_request_tx.send(NetworkRequest::Publish(message))?;
+        self.nw_request_tx.send(NetworkRequest::Publish(message))?;
         Ok(())
     }
 
@@ -100,8 +89,7 @@ impl MqttClient {
         let PacketIdentifier(pkid) = self._next_pkid();
         message.set_pkid(pkid);
 
-        let nw_request_tx = self.nw_request_tx.as_ref().unwrap();
-        nw_request_tx.send(NetworkRequest::Publish(message))?;
+        self.nw_request_tx.send(NetworkRequest::Publish(message))?;
         Ok(())
     }
 
@@ -110,8 +98,7 @@ impl MqttClient {
         let PacketIdentifier(pkid) = self._next_pkid();
         message.set_pkid(pkid);
 
-        let nw_request_tx = self.nw_request_tx.as_ref().unwrap();
-        try!(nw_request_tx.send(NetworkRequest::Publish(message)));
+        try!(self.nw_request_tx.send(NetworkRequest::Publish(message)));
         Ok(())
     }
 
@@ -137,14 +124,12 @@ impl MqttClient {
     }
 
     pub fn disconnect(&self) -> Result<()> {
-        let nw_request_tx = self.nw_request_tx.as_ref().unwrap();
-        try!(nw_request_tx.send(NetworkRequest::Disconnect));
+        try!(self.nw_request_tx.send(NetworkRequest::Disconnect));
         Ok(())
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        let nw_request_tx = self.nw_request_tx.as_ref().unwrap();
-        try!(nw_request_tx.send(NetworkRequest::Shutdown));
+        try!(self.nw_request_tx.send(NetworkRequest::Shutdown));
         Ok(())
     }
 
@@ -153,20 +138,12 @@ impl MqttClient {
                 retain: bool,
                 qos: QualityOfService,
                 payload: Vec<u8>,
-                userdata: Option<Vec<u8>>)
-                -> Result<()> {
-
+                userdata: Option<Vec<u8>>) -> Result<()> {
         let topic = try!(TopicName::new(topic.to_string()));
         let qos_pkid = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
             QualityOfService::Level1 => QoSWithPacketIdentifier::Level1(0),
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
-        };
-
-        // TODO: use a combinator instead
-        let userdata = match userdata {
-            Some(u) => Some(Arc::new(u)),
-            None => None,
         };
 
         // TODO: Why are qos and pkid in the same structure
@@ -176,20 +153,14 @@ impl MqttClient {
             qos: qos_pkid,
             // Optimizes clones
             payload: Arc::new(payload),
-            userdata: userdata,
+            userdata: userdata.map(|u| Arc::new(u)),
         };
 
         // TODO: Check message sanity here and return error if not
         match qos {
-            QualityOfService::Level0 => {
-                self.publish0(message)?;
-            }
-            QualityOfService::Level1 => {
-                self.publish1(message)?;
-            }
-            QualityOfService::Level2 => {
-                self.publish2(message)?;
-            }
+            QualityOfService::Level0 => self.publish0(message)?,
+            QualityOfService::Level1 => self.publish1(message)?,
+            QualityOfService::Level2 => self.publish2(message)?
         };
 
         Ok(())
@@ -208,7 +179,6 @@ impl MqttClient {
     }
 }
 
-
 // @@@@@@@@@@@@~~~~~~~UNIT TESTS ~~~~~~~~~@@@@@@@@@@@@
 
 #[cfg(test)]
@@ -223,13 +193,16 @@ mod test {
 
     #[test]
     fn next_pkid_roll() {
-        let client_options = MqttOptions::new();
-        let mut mq_client = MqttClient::new(client_options);
-
-        for i in 0..65536 {
-            mq_client._next_pkid();
+        let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
+        match MqttClient::connect(client_options) {
+            Ok(mut mq_client) => {
+                for i in 0..65536 {
+                    mq_client._next_pkid();
+                }
+                assert_eq!(PacketIdentifier(1), mq_client.last_pkid);
+            }
+            Err(e) => panic!("{:?}", e),
         }
 
-        assert_eq!(PacketIdentifier(1), mq_client.last_pkid);
     }
 }
