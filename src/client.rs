@@ -58,18 +58,18 @@ impl MqttClient {
             error!("Network Thread Stopped !!!!!!!!!");
             Ok(())
         });
-        
+
         let client = MqttClient {
             last_pkid: PacketIdentifier(0),
             opts: opts,
             nw_request_tx: nw_request_tx,
         };
-        
+
         Ok(client)
     }
 
     fn subscribe(&mut self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
-         let mut sub_topics = vec![];
+        let mut sub_topics = vec![];
         for topic in topics {
             let topic = (TopicFilter::new_checked(topic.0)?, topic.1);
             sub_topics.push(topic);
@@ -79,28 +79,6 @@ impl MqttClient {
         Ok(())
     }
 
-    fn publish0(&self, message: Message) -> Result<()> {
-        self.nw_request_tx.send(NetworkRequest::Publish(message))?;
-        Ok(())
-    }
-
-    fn publish1(&mut self, mut message: Message) -> Result<()> {
-        // Add next packet id to message and publish
-        let PacketIdentifier(pkid) = self._next_pkid();
-        message.set_pkid(pkid);
-
-        self.nw_request_tx.send(NetworkRequest::Publish(message))?;
-        Ok(())
-    }
-
-    fn publish2(&mut self, mut message: Message) -> Result<()> {
-        // Add next packet id to message and publish
-        let PacketIdentifier(pkid) = self._next_pkid();
-        message.set_pkid(pkid);
-
-        self.nw_request_tx.send(NetworkRequest::Publish(message))?;
-        Ok(())
-    }
 
     pub fn publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
         self._publish(topic, false, qos, payload, None)
@@ -138,7 +116,9 @@ impl MqttClient {
                 retain: bool,
                 qos: QualityOfService,
                 payload: Vec<u8>,
-                userdata: Option<Vec<u8>>) -> Result<()> {
+                userdata: Option<Vec<u8>>)
+                -> Result<()> {
+
         let topic = TopicName::new(topic.to_string())?;
         let qos_pkid = match qos {
             QualityOfService::Level0 => QoSWithPacketIdentifier::Level0,
@@ -146,8 +126,7 @@ impl MqttClient {
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
         };
 
-        // TODO: Why are qos and pkid in the same structure
-        let message = Message {
+        let mut message = Message {
             topic: topic,
             retain: retain,
             qos: qos_pkid,
@@ -158,9 +137,13 @@ impl MqttClient {
 
         // TODO: Check message sanity here and return error if not
         match qos {
-            QualityOfService::Level0 => self.publish0(message)?,
-            QualityOfService::Level1 => self.publish1(message)?,
-            QualityOfService::Level2 => self.publish2(message)?
+            QualityOfService::Level0 => self.nw_request_tx.send(NetworkRequest::Publish(message))?,
+            QualityOfService::Level1 |
+            QualityOfService::Level2 => {
+                let PacketIdentifier(pkid) = self._next_pkid();
+                message.set_pkid(pkid);
+                self.nw_request_tx.send(NetworkRequest::Publish(message))?
+            }
         };
 
         Ok(())

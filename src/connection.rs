@@ -101,11 +101,11 @@ pub struct Connection {
 
 impl Connection {
     pub fn connect(addr: SocketAddr,
-                 opts: MqttOptions,
-                 nw_request_rx: Receiver<NetworkRequest>,
-                 publish_callback: Option<Arc<PublishSendableFn>>,
-                 message_callback: Option<Arc<MessageSendableFn>>)
-                 -> Result<Self> {
+                   opts: MqttOptions,
+                   nw_request_rx: Receiver<NetworkRequest>,
+                   publish_callback: Option<Arc<PublishSendableFn>>,
+                   message_callback: Option<Arc<MessageSendableFn>>)
+                   -> Result<Self> {
 
         let mut connection = Connection {
             addr: addr,
@@ -403,7 +403,7 @@ impl Connection {
                         let publish_callback = publish_callback.clone();
                         self.pool.execute(move || publish_callback(val));
                     }
-                    
+
                 }
             }
             // TODO: Better read from channel again after PubComp instead of PubRec
