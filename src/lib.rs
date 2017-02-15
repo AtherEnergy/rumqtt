@@ -62,7 +62,8 @@
 extern crate rand;
 #[macro_use]
 extern crate log;
-extern crate mio;
+#[macro_use]
+extern crate quick_error;
 extern crate mqtt;
 extern crate time;
 extern crate openssl;

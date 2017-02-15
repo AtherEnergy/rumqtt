@@ -2,7 +2,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::str;
 use std::sync::Arc;
 use std::thread;
-use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 
 use mqtt::{QualityOfService, TopicFilter};
 use mqtt::control::variable_header::PacketIdentifier;
@@ -29,7 +29,7 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 pub struct MqttClient {
     pub opts: MqttOptions,
     pub last_pkid: PacketIdentifier,
-    pub nw_request_tx: Sender<NetworkRequest>,
+    pub nw_request_tx: SyncSender<NetworkRequest>,
 }
 
 impl MqttClient {
@@ -43,11 +43,29 @@ impl MqttClient {
         unreachable!("Cannot lookup address");
     }
 
+    fn mock_start(opts: MqttOptions) -> Result<Self> {
+        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
+
+        thread::spawn(move || -> Result<()> {
+            let nw_request_rx = nw_request_rx;
+            thread::sleep_ms(1000_000);
+            Ok(())
+        });
+
+        let client = MqttClient {
+            last_pkid: PacketIdentifier(0),
+            opts: opts,
+            nw_request_tx: nw_request_tx,
+        };
+
+        Ok(client)
+    }
+
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions) -> Result<Self> {
-        let (nw_request_tx, nw_request_rx) = channel::<NetworkRequest>();
+        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
         // let opts = opts.clone();
         let addr = Self::lookup_ipv4(opts.addr.as_str());
         let mut connection = Connection::connect(addr, opts.clone(), nw_request_rx, None, None)?;
@@ -142,7 +160,7 @@ impl MqttClient {
             QualityOfService::Level2 => {
                 let PacketIdentifier(pkid) = self._next_pkid();
                 message.set_pkid(pkid);
-                self.nw_request_tx.send(NetworkRequest::Publish(message))?
+                self.nw_request_tx.try_send(NetworkRequest::Publish(message))?
             }
         };
 
@@ -187,5 +205,20 @@ mod test {
             Err(e) => panic!("{:?}", e),
         }
 
+    }
+
+    #[test]
+    #[should_panic]
+    fn request_queue_blocks_when_buffer_full() {
+        let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
+        match MqttClient::mock_start(client_options) {
+            Ok(mut mq_client) => {
+                for i in 0..65536 {
+                    mq_client.publish("hello/world", QoS::Level1, vec![1u8, 2, 3]);
+                    println!("{:?}", i);
+                }
+            }
+            Err(e) => panic!("{:?}", e),
+        }
     }
 }

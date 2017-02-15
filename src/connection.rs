@@ -12,7 +12,6 @@ use mqtt::control::variable_header::ConnectReturnCode;
 use mqtt::control::fixed_header::FixedHeaderError;
 use mqtt::control::variable_header::PacketIdentifier;
 use mqtt::{QualityOfService, TopicFilter};
-use mio::channel::SyncSender;
 use threadpool::ThreadPool;
 use time;
 
