@@ -346,12 +346,12 @@ impl Connection {
                         return Err(Error::InvalidPacket);
                     }
                 }
-                return Ok(packet);
+                Ok(packet)
             }
 
             MqttState::Disconnected | MqttState::Connected => {
                 error!("Invalid State during CONNACK packet");
-                return Err(Error::InvalidState);
+                Err(Error::InvalidState)
             }
         }
     }
@@ -438,7 +438,7 @@ impl Connection {
                         debug!("*** PubAck --> Pkid({:?})\n--- Publish Queue =\n{:#?}\n\n", pkid, self.outgoing_pub);
                         let m = match self.outgoing_pub
                             .iter()
-                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            .position(|x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(m) = self.outgoing_pub.remove(i) {
                                     Some(*m.1)
@@ -468,7 +468,7 @@ impl Connection {
                         debug!("*** PubRec --> Pkid({:?})\n--- Record Queue =\n{:#?}\n\n", pkid, self.outgoing_rec);
                         let m = match self.outgoing_rec
                             .iter()
-                            .position(|ref x| x.1.get_pkid() == Some(pkid)) {
+                            .position(|x| x.1.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(m) = self.outgoing_rec.remove(i) {
                                     Some(*m.1)
@@ -501,7 +501,7 @@ impl Connection {
                         let pkid = pubrel.packet_identifier();
                         let message = match self.incoming_rec
                             .iter()
-                            .position(|ref x| x.get_pkid() == Some(pkid)) {
+                            .position(|x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(message) = self.incoming_rec.remove(i) {
                                     self.outgoing_comp.push_back((time::get_time().sec, PacketIdentifier(pkid)));
@@ -532,7 +532,7 @@ impl Connection {
                         let pkid = pubcomp.packet_identifier();
                         match self.outgoing_rel
                             .iter()
-                            .position(|ref x| x.1 == PacketIdentifier(pkid)) {
+                            .position(|x| x.1 == PacketIdentifier(pkid)) {
                             Some(pos) => self.outgoing_rel.remove(pos),
                             None => {
                                 error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
@@ -598,7 +598,7 @@ impl Connection {
         // Republish QoS 1 outgoing publishes
         while let Some(index) = self.outgoing_pub
             .iter()
-            .position(|ref x| time::get_time().sec - x.0 > timeout) {
+            .position(|x| time::get_time().sec - x.0 > timeout) {
             // println!("########## {:?}", self.outgoing_pub);
             let message = self.outgoing_pub.remove(index).expect("No such entry");
             let _ = self._publish(*message.1);
@@ -607,18 +607,17 @@ impl Connection {
         // Republish QoS 2 outgoing records
         while let Some(index) = self.outgoing_rec
             .iter()
-            .position(|ref x| time::get_time().sec - x.0 > timeout) {
+            .position(|x| time::get_time().sec - x.0 > timeout) {
             let message = self.outgoing_rec.remove(index).expect("No such entry");
             let _ = self._publish(*message.1);
         }
 
         let outgoing_rel = self.outgoing_rel.clone(); //TODO: Remove the clone
                 // Resend QoS 2 outgoing release
-        for e in outgoing_rel.iter().filter(|ref x| time::get_time().sec - x.0 > timeout) {
+        for e in outgoing_rel.iter().filter(|x| time::get_time().sec - x.0 > timeout) {
             let PacketIdentifier(pkid) = e.1;
             let _ = self._pubrel(pkid);
         }
-
         Ok(())
     }
 
@@ -655,14 +654,7 @@ impl Connection {
     }
 
     fn _connect(&mut self) -> Result<()> {
-        let connect = genpack::generate_connect_packet(self.opts.client_id.clone(),
-                                                            self.opts.clean_session,
-                                                            self.opts.keep_alive,
-                                                            self.opts.will.clone(),
-                                                            self.opts.will_qos,
-                                                            self.opts.will_retain,
-                                                            self.opts.username.clone(),
-                                                            self.opts.password.clone())?;
+        let connect = genpack::generate_connect_packet(self.opts.clone())?;
         self._write_packet(connect)?;
         Ok(())
     }
@@ -681,7 +673,7 @@ impl Connection {
 
     fn _publish(&mut self, message: Message) -> Result<()> {
         let qos = message.qos;
-        let message_box = message.into_boxed(Some(qos));
+        let message_box = message.to_boxed(Some(qos));
         let topic = message.topic;
         let payload = &*message.payload;
         let retain = message.retain;
