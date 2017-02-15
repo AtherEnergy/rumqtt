@@ -2,41 +2,34 @@ use mqtt::packet::*;
 use mqtt::{Encodable, QualityOfService, TopicFilter};
 use mqtt::topic_name::TopicName;
 
+use clientoptions::MqttOptions;
+
 use error::Result;
 
-pub fn generate_connect_packet(client_id: Option<String>,
-                               clean_session: bool,
-                               keep_alive: Option<u16>,
-                               will: Option<(String, String)>,
-                               will_qos: QualityOfService,
-                               will_retain: bool,
-                               username: Option<String>,
-                               password: Option<String>)
-                               -> Result<Vec<u8>> {
+pub fn generate_connect_packet(opts: MqttOptions) -> Result<Vec<u8>> {
+    let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), opts.client_id.unwrap());
 
-    let mut connect_packet = ConnectPacket::new("MQTT".to_owned(), client_id.unwrap());
+    connect_packet.set_clean_session(opts.clean_session);
 
-    connect_packet.set_clean_session(clean_session);
-
-    if let Some(keep_alive) = keep_alive {
+    if let Some(keep_alive) = opts.keep_alive {
         connect_packet.set_keep_alive(keep_alive);
     }
 
     // Converting (String, String) -> (TopicName, String)
-    let will = match will {
+    let will = match opts.will {
         Some(will) => Some((TopicName::new(will.0)?, will.1)),
         None => None,
     };
 
     if will.is_some() {
         connect_packet.set_will(will);
-        connect_packet.set_will_qos(will_qos as u8);
-        connect_packet.set_will_retain(will_retain);
+        connect_packet.set_will_qos(opts.will_qos as u8);
+        connect_packet.set_will_retain(opts.will_retain);
     }
 
     // mqtt-protocol APIs are directly handling None cases.
-    connect_packet.set_user_name(username);
-    connect_packet.set_password(password);
+    connect_packet.set_user_name(opts.username);
+    connect_packet.set_password(opts.password);
 
     let mut buf = Vec::new();
 

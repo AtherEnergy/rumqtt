@@ -1,4 +1,6 @@
-#![feature(test)]
+#![cfg_attr(feature="clippy", feature(plugin))]
+
+#![cfg_attr(feature="clippy", plugin(clippy))]
 
 
 //! A fast, lock free Mqtt client implementation in Rust.
@@ -60,7 +62,6 @@
 extern crate rand;
 #[macro_use]
 extern crate log;
-#[macro_use]
 extern crate mio;
 extern crate mqtt;
 extern crate time;

@@ -73,7 +73,7 @@ impl Message {
         Box::new(publish_packet)
     }
 
-    pub fn into_boxed(&self, qos: Option<QoSWithPacketIdentifier>) -> Box<Message> {
+    pub fn to_boxed(&self, qos: Option<QoSWithPacketIdentifier>) -> Box<Message> {
         let qos = qos.unwrap_or(self.qos);
         Box::new(Message {
             topic: self.topic.clone(),

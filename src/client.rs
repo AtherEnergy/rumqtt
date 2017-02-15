@@ -153,7 +153,7 @@ impl MqttClient {
             qos: qos_pkid,
             // Optimizes clones
             payload: Arc::new(payload),
-            userdata: userdata.map(|u| Arc::new(u)),
+            userdata: userdata.map(Arc::new),
         };
 
         // TODO: Check message sanity here and return error if not
