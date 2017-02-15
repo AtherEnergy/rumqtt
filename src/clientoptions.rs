@@ -10,7 +10,7 @@ pub struct MqttOptions {
     pub client_id: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
-    pub reconnect: Option<u16>,
+    pub reconnect: u16,
     pub will: Option<(String, String)>,
     pub will_qos: QualityOfService,
     pub will_retain: bool,
@@ -32,7 +32,7 @@ impl Default for MqttOptions {
             client_id: None,
             username: None,
             password: None,
-            reconnect: Some(5),
+            reconnect: 5,
             will: None,
             will_qos: QualityOfService::Level0,
             will_retain: false,
@@ -45,7 +45,6 @@ impl Default for MqttOptions {
         }
     }
 }
-
 
 impl MqttOptions {
     /// Creates a new `MqttOptions` object which is used to set connection
@@ -148,7 +147,7 @@ impl MqttOptions {
     /// By default, no retry will happen
     // TODO: Rename
     pub fn set_reconnect(mut self, dur: u16) -> Self {
-        self.reconnect = Some(dur);
+        self.reconnect = dur;
         self
     }
 

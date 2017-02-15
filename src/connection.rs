@@ -198,7 +198,10 @@ impl Connection {
                                             // TODO: Test if PINGRESPs are properly recieved before
                                             // next ping incase of high frequency incoming messages
                                             if let Err(e) = self.ping() {
-                                                match e {
+                                                error!("PING error {:?}", e);
+                                                self._unbind();
+                                                continue 'reconnect;
+                                                /*match e {
                                                     Error::PingTimeout | Error::AwaitPingResp => {
                                                         error!("Can't Ping :( . Err = {:?}", e);
                                                         self._unbind();
@@ -209,7 +212,7 @@ impl Connection {
                                                         self._unbind();
                                                         continue 'reconnect;
                                                     }
-                                                }
+                                                }*/
                                             }
                                             continue 'receive;
                                         }
@@ -304,43 +307,30 @@ impl Connection {
     }
 
     fn _try_reconnect(&mut self) -> Result<()> {
-        match self.opts.reconnect {
-            // TODO: Implement
-            None => unimplemented!(),
-            Some(dur) => {
-                if !self.initial_connect {
-                    thread::sleep(Duration::new(dur as u64, 0));
-                }
-                let stream = try!(TcpStream::connect(&self.addr));
-                let stream = match self.opts.ca {
-                    Some(ref ca) => {
-                        if let Some((ref crt, ref key)) = self.opts.client_cert {
-                            let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key)), self.opts.verify_ca));
-                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
-                        } else {
-                            let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca));
-                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
-                        }
-                    }
-                    None => NetworkStream::Tcp(stream),
-                };
-
-                self.stream = stream;
-                try!(self._connect());
-                Ok(())
-            }
+        if !self.initial_connect {
+            thread::sleep(Duration::new(self.opts.reconnect as u64, 0));
         }
+        let stream = try!(TcpStream::connect(&self.addr));
+        let stream = match self.opts.ca {
+            Some(ref ca) => {
+                if let Some((ref crt, ref key)) = self.opts.client_cert {
+                    let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key)), self.opts.verify_ca));
+                    NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                } else {
+                    let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca));
+                    NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                }
+            }
+            None => NetworkStream::Tcp(stream),
+        };
+
+        self.stream = stream;
+        try!(self._connect());
+        Ok(())
     }
 
     fn _await_connack(&mut self) -> Result<VariablePacket> {
-        let packet = match VariablePacket::decode(&mut self.stream) {
-            Ok(pk) => pk,
-            Err(err) => {
-                error!("Couldn't decode incoming packet. Error = {:?}", err);
-                return Err(Error::InvalidPacket);
-            }
-        };
-
+        let packet = VariablePacket::decode(&mut self.stream).map_err(|_| Error::InvalidPacket)?;
         match self.state {
             MqttState::Handshake => {
                 match packet {
@@ -408,24 +398,21 @@ impl Connection {
                 }
             }
             HandlePacket::PubAck(m) => {
-                if m.is_none() {
-                    return Ok(());
-                }
-
-                if let Some(ref publish_callback) = self.publish_callback {
-                    let publish_callback = publish_callback.clone();
-                    self.pool.execute(move || publish_callback(m.unwrap()));
+                if let Some(val) = m {
+                    if let Some(ref publish_callback) = self.publish_callback {
+                        let publish_callback = publish_callback.clone();
+                        self.pool.execute(move || publish_callback(val));
+                    }
+                    
                 }
             }
             // TODO: Better read from channel again after PubComp instead of PubRec
             HandlePacket::PubRec(m) => {
-                if m.is_none() {
-                    return Ok(());
-                }
-
-                if let Some(ref publish_callback) = self.publish_callback {
-                    let publish_callback = publish_callback.clone();
-                    self.pool.execute(move || publish_callback(m.unwrap()));
+                if let Some(val) = m {
+                    if let Some(ref publish_callback) = self.publish_callback {
+                        let publish_callback = publish_callback.clone();
+                        self.pool.execute(move || publish_callback(val));
+                    }
                 }
             }
             _ => debug!("packet handler says that he doesn't care"),
@@ -789,6 +776,7 @@ impl Connection {
     // ethernet cable is unplugged (mantests/half_open_publishes_and_reconnections
     // but not during mantests/ping_reqs_in_time_and_reconnections due to low
     // frequency writes. 10 seconds migth be good default for write timeout ?)
+
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
         try!(self.stream.write_all(&packet));
