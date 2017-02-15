@@ -1,3 +1,5 @@
+#![feature(test)]
+
 
 //! A fast, lock free Mqtt client implementation in Rust.
 //!

@@ -100,7 +100,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn start(addr: SocketAddr,
+    pub fn connect(addr: SocketAddr,
                  opts: MqttOptions,
                  nw_request_rx: Receiver<NetworkRequest>,
                  publish_callback: Option<Arc<PublishSendableFn>>,
@@ -137,13 +137,13 @@ impl Connection {
         };
 
         connection.state = MqttState::Disconnected;
-        try!(connection._try_reconnect());
+        connection._try_reconnect()?;
         connection.state = MqttState::Handshake;
-        try!(connection._await_connack());
+        connection._await_connack()?;
         connection.state = MqttState::Connected;
         info!("$$$ Connected to broker");
-        try!(connection.stream.set_read_timeout(Some(Duration::new(1, 0))));
-        try!(connection.stream.set_write_timeout(Some(Duration::new(10, 0))));
+        connection.stream.set_read_timeout(Some(Duration::new(1, 0)))?;
+        connection.stream.set_write_timeout(Some(Duration::new(10, 0)))?;
         Ok(connection)
     }
 
@@ -158,11 +158,11 @@ impl Connection {
                     match self._try_reconnect() {
                         Ok(_) => {
                             self.state = MqttState::Handshake;
-                            let packet = try!(self._await_connack());
+                            let packet = self._await_connack()?;
                             self.state = MqttState::Connected;
                             info!("$$$ Connected to broker");
-                            try!(self.post_connack_handle(&packet));
-                            try!(self.stream.set_read_timeout(Some(Duration::new(1, 0))));
+                            self.post_connack_handle(&packet)?;
+                            self.stream.set_read_timeout(Some(Duration::new(1, 0)))?;
                             break;
                         }
                         Err(e) => {
@@ -274,7 +274,7 @@ impl Connection {
                             return Err(Error::AwaitPingResp);
                         }
 
-                        try!(self._ping());
+                        self._ping()?;
                     }
                 }
             }
@@ -291,14 +291,14 @@ impl Connection {
         // state.
         if self.state == MqttState::Connected {
             for _ in 0..1000 {
-                match try!(self.nw_request_rx.try_recv()) {
-                    NetworkRequest::Shutdown => try!(self.stream.shutdown(Shutdown::Both)),
-                    NetworkRequest::Disconnect => try!(self._disconnect()),
-                    NetworkRequest::Retransmit => try!(self._try_retransmit()),
-                    NetworkRequest::Publish(m) => try!(self._publish(m)),
+                match self.nw_request_rx.try_recv()? {
+                    NetworkRequest::Shutdown => self.stream.shutdown(Shutdown::Both)?,
+                    NetworkRequest::Disconnect => self._disconnect()?,
+                    NetworkRequest::Retransmit => self._try_retransmit()?,
+                    NetworkRequest::Publish(m) => self._publish(m)?,
                     NetworkRequest::Subscribe(s) => {
                         self.subscriptions.push_back(s.clone());
-                        try!(self._subscribe(s));
+                        self._subscribe(s)?;
                     }
                 };
             }
@@ -310,22 +310,22 @@ impl Connection {
         if !self.initial_connect {
             thread::sleep(Duration::new(self.opts.reconnect as u64, 0));
         }
-        let stream = try!(TcpStream::connect(&self.addr));
+        let stream = TcpStream::connect(&self.addr)?;
         let stream = match self.opts.ca {
             Some(ref ca) => {
                 if let Some((ref crt, ref key)) = self.opts.client_cert {
-                    let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key)), self.opts.verify_ca));
-                    NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                    let ssl_ctx: SslContext = SslContext::new(ca, Some((crt, key)), self.opts.verify_ca)?;
+                    NetworkStream::Tls(ssl_ctx.connect(stream)?)
                 } else {
-                    let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca));
-                    NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                    let ssl_ctx: SslContext = SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca)?;
+                    NetworkStream::Tls(ssl_ctx.connect(stream)?)
                 }
             }
             None => NetworkStream::Tcp(stream),
         };
 
         self.stream = stream;
-        try!(self._connect());
+        self._connect()?;
         Ok(())
     }
 
@@ -389,7 +389,7 @@ impl Connection {
     }
 
     fn post_handle_packet(&mut self, packet: &VariablePacket) -> Result<()> {
-        let handle = try!(self.handle_packet(packet));
+        let handle = self.handle_packet(packet)?;
         match handle {
             HandlePacket::Publish(m) => {
                 if let Some(ref message_callback) = self.message_callback {
@@ -456,7 +456,7 @@ impl Connection {
                     }
 
                     VariablePacket::PublishPacket(ref publ) => {
-                        let message = try!(Message::from_pub(publ));
+                        let message = Message::from_pub(publ)?;
                         self._handle_message(message)
                     }
 
@@ -566,7 +566,7 @@ impl Connection {
         match message.qos {
             QoSWithPacketIdentifier::Level0 => Ok(HandlePacket::Publish(message)),
             QoSWithPacketIdentifier::Level1(pkid) => {
-                try!(self._puback(pkid));
+                self._puback(pkid)?;
                 Ok(HandlePacket::Publish(message))
             }
 
@@ -586,7 +586,7 @@ impl Connection {
                     }
                 };
 
-                try!(self._pubrec(pkid));
+                self._pubrec(pkid)?;
                 Ok(HandlePacket::None)
             }
         }
@@ -655,37 +655,37 @@ impl Connection {
     }
 
     fn _connect(&mut self) -> Result<()> {
-        let connect = try!(genpack::generate_connect_packet(self.opts.client_id.clone(),
+        let connect = genpack::generate_connect_packet(self.opts.client_id.clone(),
                                                             self.opts.clean_session,
                                                             self.opts.keep_alive,
                                                             self.opts.will.clone(),
                                                             self.opts.will_qos,
                                                             self.opts.will_retain,
                                                             self.opts.username.clone(),
-                                                            self.opts.password.clone()));
-        try!(self._write_packet(connect));
+                                                            self.opts.password.clone())?;
+        self._write_packet(connect)?;
         Ok(())
     }
 
     pub fn _disconnect(&mut self) -> Result<()> {
-        let disconnect = try!(genpack::generate_disconnect_packet());
-        try!(self._write_packet(disconnect));
+        let disconnect = genpack::generate_disconnect_packet()?;
+        self._write_packet(disconnect)?;
         Ok(())
     }
 
     fn _subscribe(&mut self, topics: Vec<(TopicFilter, QualityOfService)>) -> Result<()> {
-        let subscribe_packet = try!(genpack::generate_subscribe_packet(topics));
-        try!(self._write_packet(subscribe_packet));
+        let subscribe_packet = genpack::generate_subscribe_packet(topics)?;
+        self._write_packet(subscribe_packet)?;
         Ok(())
     }
 
     fn _publish(&mut self, message: Message) -> Result<()> {
         let qos = message.qos;
-        let message_box = message.transform(Some(qos));
+        let message_box = message.into_boxed(Some(qos));
         let topic = message.topic;
         let payload = &*message.payload;
         let retain = message.retain;
-        let publish_packet = try!(genpack::generate_publish_packet(topic, qos, retain, payload.clone()));
+        let publish_packet = genpack::generate_publish_packet(topic, qos, retain, payload.clone())?;
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
@@ -709,11 +709,11 @@ impl Connection {
 
 
         match message.qos {
-            QoSWithPacketIdentifier::Level0 => try!(self._write_packet(publish_packet)),
+            QoSWithPacketIdentifier::Level0 => self._write_packet(publish_packet)?,
             QoSWithPacketIdentifier::Level1(_) |
             QoSWithPacketIdentifier::Level2(_) => {
                 if self.state == MqttState::Connected {
-                    try!(self._write_packet(publish_packet));
+                    self._write_packet(publish_packet)?;
                 } else {
                     warn!("State = {:?}. Skip network write", self.state);
                 }
@@ -723,34 +723,34 @@ impl Connection {
     }
 
     fn _ping(&mut self) -> Result<()> {
-        let ping = try!(genpack::generate_pingreq_packet());
+        let ping = genpack::generate_pingreq_packet()?;
         self.await_pingresp = true;
-        try!(self._write_packet(ping));
-        try!(self._flush());
+        self._write_packet(ping)?;
+        self._flush()?;
         Ok(())
     }
 
     fn _puback(&mut self, pkid: u16) -> Result<()> {
-        let puback_packet = try!(genpack::generate_puback_packet(pkid));
-        try!(self._write_packet(puback_packet));
+        let puback_packet = genpack::generate_puback_packet(pkid)?;
+        self._write_packet(puback_packet)?;
         Ok(())
     }
 
     fn _pubrec(&mut self, pkid: u16) -> Result<()> {
-        let pubrec_packet = try!(genpack::generate_pubrec_packet(pkid));
-        try!(self._write_packet(pubrec_packet));
+        let pubrec_packet = genpack::generate_pubrec_packet(pkid)?;
+        self._write_packet(pubrec_packet)?;
         Ok(())
     }
 
     fn _pubrel(&mut self, pkid: u16) -> Result<()> {
-        let pubrel_packet = try!(genpack::generate_pubrel_packet(pkid));
-        try!(self._write_packet(pubrel_packet));
+        let pubrel_packet = genpack::generate_pubrel_packet(pkid)?;
+        self._write_packet(pubrel_packet)?;
         Ok(())
     }
 
     fn _pubcomp(&mut self, pkid: u16) -> Result<()> {
-        let puback_packet = try!(genpack::generate_pubcomp_packet(pkid));
-        try!(self._write_packet(puback_packet));
+        let puback_packet = genpack::generate_pubcomp_packet(pkid)?;
+        self._write_packet(puback_packet)?;
         Ok(())
     }
 
@@ -779,13 +779,13 @@ impl Connection {
 
     #[inline]
     fn _write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
-        try!(self.stream.write_all(&packet));
-        try!(self._flush());
+        self.stream.write_all(&packet)?;
+        self._flush()?;
         Ok(())
     }
 
     fn _flush(&mut self) -> Result<()> {
-        try!(self.stream.flush());
+        self.stream.flush()?;
         self.last_flush = Instant::now();
         Ok(())
     }
