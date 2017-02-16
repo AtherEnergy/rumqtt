@@ -22,6 +22,9 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
 pub struct MqttClient {
+    // TODO: Move pkid to connection thread which allows this 
+    // object to be clonable and user can use this object in
+    // multiple threads
     pub last_pkid: PacketIdentifier,
     pub nw_request_tx: SyncSender<NetworkRequest>,
 }
