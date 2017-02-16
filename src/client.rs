@@ -15,7 +15,6 @@ use message::Message;
 use clientoptions::MqttOptions;
 use connection::{Connection, NetworkRequest};
 
-
 pub enum MiscNwRequest {
     Disconnect,
     Shutdown,
@@ -27,7 +26,6 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
 pub struct MqttClient {
-    pub opts: MqttOptions,
     pub last_pkid: PacketIdentifier,
     pub nw_request_tx: SyncSender<NetworkRequest>,
 }
@@ -54,7 +52,6 @@ impl MqttClient {
 
         let client = MqttClient {
             last_pkid: PacketIdentifier(0),
-            opts: opts,
             nw_request_tx: nw_request_tx,
         };
 
@@ -66,7 +63,6 @@ impl MqttClient {
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions) -> Result<Self> {
         let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
-        // let opts = opts.clone();
         let addr = Self::lookup_ipv4(opts.addr.as_str());
         let mut connection = Connection::connect(addr, opts.clone(), nw_request_rx, None, None)?;
         // This thread handles network reads (coz they are blocking) and
@@ -79,7 +75,6 @@ impl MqttClient {
 
         let client = MqttClient {
             last_pkid: PacketIdentifier(0),
-            opts: opts,
             nw_request_tx: nw_request_tx,
         };
 
@@ -87,12 +82,11 @@ impl MqttClient {
     }
 
     fn subscribe(&mut self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
-        let mut sub_topics = vec![];
+        let mut sub_topics = Vec::with_capacity(topics.len());
         for topic in topics {
             let topic = (TopicFilter::new_checked(topic.0)?, topic.1);
             sub_topics.push(topic);
         }
-
         self.nw_request_tx.send(NetworkRequest::Subscribe(sub_topics))?;
         Ok(())
     }
@@ -101,7 +95,6 @@ impl MqttClient {
     pub fn publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
         let payload = Arc::new(payload);
         loop {
-            //TODO: Remove the clone ASAP
             let payload = payload.clone();
             let _ = self._publish(topic, false, qos, payload, None);
             warn!("Request Queue Full !!!!!!!!");
@@ -200,6 +193,7 @@ mod test {
     use clientoptions::MqttOptions;
     use mqtt::control::variable_header::PacketIdentifier;
     use super::MqttClient;
+    use std::sync::Arc;
 
     #[test]
     fn next_pkid_roll() {
@@ -224,7 +218,7 @@ mod test {
         match MqttClient::mock_start(client_options) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {
-                    mq_client._publish("hello/world", false, QoS::Level1, vec![1u8, 2, 3], None).unwrap();
+                    mq_client._publish("hello/world", false, QoS::Level1, Arc::new(vec![1u8, 2, 3]), None).unwrap();
                 }
             }
             Err(e) => panic!("{:?}", e),
