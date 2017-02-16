@@ -3,7 +3,6 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::io::{Write, ErrorKind};
-use std::sync::Arc;
 use std::collections::VecDeque;
 
 use mqtt::packet::*;
@@ -19,7 +18,7 @@ use clientoptions::MqttOptions;
 use stream::{NetworkStream, SslContext};
 use genpack;
 use message::Message;
-
+use callbacks::MqttCallback;
 // static mut N: i32 = 0;
 
 enum HandlePacket {
@@ -50,9 +49,6 @@ pub enum NetworkRequest {
     Disconnect,
 }
 
-pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
-pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
-
 pub struct Connection {
     pub addr: SocketAddr,
     pub opts: MqttOptions,
@@ -63,10 +59,8 @@ pub struct Connection {
     pub await_pingresp: bool,
     pub last_flush: Instant,
 
-    /// On message callback
-    pub message_callback: Option<Arc<MessageSendableFn>>,
-    /// On publish callback
-    pub publish_callback: Option<Arc<PublishSendableFn>>,
+    // Callbacks
+    pub callback: Option<MqttCallback>,
 
     // Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
@@ -94,8 +88,7 @@ impl Connection {
     pub fn connect(addr: SocketAddr,
                    opts: MqttOptions,
                    nw_request_rx: Receiver<NetworkRequest>,
-                   publish_callback: Option<Arc<PublishSendableFn>>,
-                   message_callback: Option<Arc<MessageSendableFn>>)
+                   callback: Option<MqttCallback>)
                    -> Result<Self> {
 
         let mut connection = Connection {
@@ -108,8 +101,7 @@ impl Connection {
             await_pingresp: false,
             last_flush: Instant::now(),
 
-            publish_callback: publish_callback,
-            message_callback: message_callback,
+            callback: callback,
 
             // Queues
             incoming_rec: VecDeque::new(),
@@ -337,16 +329,20 @@ impl Connection {
         let handle = self.handle_packet(packet)?;
         match handle {
             HandlePacket::Publish(m) => {
-                if let Some(ref message_callback) = self.message_callback {
-                    let message_callback = message_callback.clone();
-                    self.pool.execute(move || message_callback(*m));
+                if let Some(ref callback) = self.callback {
+                    if let Some(ref on_message) = callback.on_message {
+                        let on_message = on_message.clone();
+                        self.pool.execute(move || on_message(*m));
+                    }
                 }
             }
             HandlePacket::PubAck(m) => {
                 if let Some(val) = m {
-                    if let Some(ref publish_callback) = self.publish_callback {
-                        let publish_callback = publish_callback.clone();
-                        self.pool.execute(move || publish_callback(val));
+                    if let Some(ref callback) = self.callback {
+                        if let Some(ref on_publish) = callback.on_publish {
+                            let on_publish = on_publish.clone();
+                            self.pool.execute(move || on_publish(val));
+                        }
                     }
 
                 }
@@ -354,9 +350,11 @@ impl Connection {
             // TODO: Better read from channel again after PubComp instead of PubRec
             HandlePacket::PubRec(m) => {
                 if let Some(val) = m {
-                    if let Some(ref publish_callback) = self.publish_callback {
-                        let publish_callback = publish_callback.clone();
-                        self.pool.execute(move || publish_callback(val));
+                    if let Some(ref callback) = self.callback {
+                        if let Some(ref on_publish) = callback.on_publish {
+                            let on_publish = on_publish.clone();
+                            self.pool.execute(move || on_publish(val));
+                        }
                     }
                 }
             }

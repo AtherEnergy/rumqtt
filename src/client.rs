@@ -14,10 +14,7 @@ use error::Result;
 use message::Message;
 use clientoptions::MqttOptions;
 use connection::{Connection, NetworkRequest};
-
-
-pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
-pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
+use callbacks::MqttCallback;
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
@@ -60,10 +57,10 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> Result<Self> {
+    pub fn start(opts: MqttOptions, callbacks: Option<MqttCallback>) -> Result<Self> {
         let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
         let addr = Self::lookup_ipv4(opts.addr.as_str());
-        let mut connection = Connection::connect(addr, opts.clone(), nw_request_rx, None, None)?;
+        let mut connection = Connection::connect(addr, opts.clone(), nw_request_rx, callbacks)?;
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn(move || -> Result<()> {
