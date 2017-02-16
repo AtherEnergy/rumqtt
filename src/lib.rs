@@ -76,6 +76,7 @@ mod message;
 mod clientoptions;
 mod connection;
 mod client;
+mod callbacks;
 
 pub use error::{Error, Result};
 pub use clientoptions::MqttOptions;
