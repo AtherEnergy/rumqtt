@@ -1,6 +1,6 @@
 use std::result;
 use std::io;
-use std::sync::mpsc::{self, RecvError, TryRecvError, TrySendError, SendError};
+use std::sync::mpsc::{TryRecvError, TrySendError, SendError};
 use std::net::TcpStream;
 
 use openssl;

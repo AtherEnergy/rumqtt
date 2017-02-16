@@ -2,7 +2,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::str;
 use std::sync::Arc;
 use std::thread;
-use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
+use std::sync::mpsc::{sync_channel, SyncSender};
 
 use mqtt::{QualityOfService, TopicFilter};
 use mqtt::control::variable_header::PacketIdentifier;
@@ -13,7 +13,7 @@ use mqtt::topic_name::TopicName;
 use error::Result;
 use message::Message;
 use clientoptions::MqttOptions;
-use connection::{Connection, NetworkRequest, NetworkNotification, MqttState};
+use connection::{Connection, NetworkRequest};
 
 
 pub enum MiscNwRequest {
@@ -99,14 +99,23 @@ impl MqttClient {
 
 
     pub fn publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
-        self._publish(topic, false, qos, payload, None)
+        let payload = Arc::new(payload);
+        loop {
+            //TODO: Remove the clone ASAP
+            let payload = payload.clone();
+            let _ = self._publish(topic, false, qos, payload, None);
+            warn!("Request Queue Full !!!!!!!!");
+            thread::sleep_ms(2000);
+        }
     }
 
     pub fn retained_publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
+        let payload = Arc::new(payload);
         self._publish(topic, true, qos, payload, None)
     }
 
     pub fn userdata_publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>, userdata: Vec<u8>) -> Result<()> {
+        let payload = Arc::new(payload);
         self._publish(topic, false, qos, payload, Some(userdata))
     }
 
@@ -116,6 +125,7 @@ impl MqttClient {
                                      payload: Vec<u8>,
                                      userdata: Vec<u8>)
                                      -> Result<()> {
+        let payload = Arc::new(payload);
         self._publish(topic, true, qos, payload, Some(userdata))
     }
 
@@ -133,7 +143,7 @@ impl MqttClient {
                 topic: &str,
                 retain: bool,
                 qos: QualityOfService,
-                payload: Vec<u8>,
+                payload: Arc<Vec<u8>>,
                 userdata: Option<Vec<u8>>)
                 -> Result<()> {
 
@@ -148,8 +158,7 @@ impl MqttClient {
             topic: topic,
             retain: retain,
             qos: qos_pkid,
-            // Optimizes clones
-            payload: Arc::new(payload),
+            payload: payload,
             userdata: userdata.map(Arc::new),
         };
 
@@ -195,7 +204,7 @@ mod test {
     #[test]
     fn next_pkid_roll() {
         let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
-        match MqttClient::start(client_options) {
+        match MqttClient::mock_start(client_options) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {
                     mq_client._next_pkid();
@@ -210,12 +219,12 @@ mod test {
     #[test]
     #[should_panic]
     fn request_queue_blocks_when_buffer_full() {
+        env_logger::init().unwrap();
         let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
         match MqttClient::mock_start(client_options) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {
-                    mq_client.publish("hello/world", QoS::Level1, vec![1u8, 2, 3]);
-                    println!("{:?}", i);
+                    mq_client._publish("hello/world", false, QoS::Level1, vec![1u8, 2, 3], None).unwrap();
                 }
             }
             Err(e) => panic!("{:?}", e),

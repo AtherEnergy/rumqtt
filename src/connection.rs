@@ -21,7 +21,7 @@ use stream::{NetworkStream, SslContext};
 use genpack;
 use message::Message;
 
-static mut N: i32 = 0;
+// static mut N: i32 = 0;
 
 enum HandlePacket {
     Publish(Box<Message>),
@@ -50,12 +50,6 @@ pub enum NetworkRequest {
     Retransmit,
     Shutdown,
     Disconnect,
-}
-
-#[derive(Debug)]
-pub enum NetworkNotification {
-    Disconnected,
-    Connected,
 }
 
 pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
