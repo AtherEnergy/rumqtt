@@ -15,10 +15,6 @@ use message::Message;
 use clientoptions::MqttOptions;
 use connection::{Connection, NetworkRequest};
 
-pub enum MiscNwRequest {
-    Disconnect,
-    Shutdown,
-}
 
 pub type MessageSendableFn = Box<Fn(Message) + Send + Sync>;
 pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
@@ -45,7 +41,7 @@ impl MqttClient {
         let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
 
         thread::spawn(move || -> Result<()> {
-            let nw_request_rx = nw_request_rx;
+            let _ = nw_request_rx;
             thread::sleep_ms(1000_000);
             Ok(())
         });
@@ -81,7 +77,7 @@ impl MqttClient {
         Ok(client)
     }
 
-    fn subscribe(&mut self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
+    pub fn subscribe(&mut self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
         let mut sub_topics = Vec::with_capacity(topics.len());
         for topic in topics {
             let topic = (TopicFilter::new_checked(topic.0)?, topic.1);

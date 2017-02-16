@@ -13,7 +13,6 @@ use mqtt::control::fixed_header::FixedHeaderError;
 use mqtt::control::variable_header::PacketIdentifier;
 use mqtt::{QualityOfService, TopicFilter};
 use threadpool::ThreadPool;
-use time;
 
 use error::{Result, Error};
 use clientoptions::MqttOptions;
@@ -71,15 +70,15 @@ pub struct Connection {
 
     // Queues. Note: 'record' is qos2 term for 'publish'
     /// For QoS 1. Stores outgoing publishes
-    pub outgoing_pub: VecDeque<(i64, Box<Message>)>,
+    pub outgoing_pub: VecDeque<(Box<Message>)>,
     /// For QoS 2. Store for incoming publishes to record.
     pub incoming_rec: VecDeque<Box<Message>>, //
     /// For QoS 2. Store for outgoing publishes.
-    pub outgoing_rec: VecDeque<(i64, Box<Message>)>,
+    pub outgoing_rec: VecDeque<(Box<Message>)>,
     /// For Qos2. Store for outgoing `pubrel` packets.
-    pub outgoing_rel: VecDeque<(i64, PacketIdentifier)>,
+    pub outgoing_rel: VecDeque<(PacketIdentifier)>,
     /// For Qos2. Store for outgoing `pubcomp` packets.
-    pub outgoing_comp: VecDeque<(i64, PacketIdentifier)>,
+    pub outgoing_comp: VecDeque<(PacketIdentifier)>,
 
     // clean_session=false will remember subscriptions only till lives.
     // If broker crashes, all its state will be lost (most brokers).
@@ -223,6 +222,7 @@ impl Connection {
                 };
 
                 if let Err(e) = self.post_handle_packet(&packet) {
+                    error!("Error handling packet = {:?}", e);
                     continue 'receive;
                 }
             }
@@ -383,10 +383,10 @@ impl Connection {
                         debug!("*** PubAck --> Pkid({:?})\n--- Publish Queue =\n{:#?}\n\n", pkid, self.outgoing_pub);
                         let m = match self.outgoing_pub
                             .iter()
-                            .position(|x| x.1.get_pkid() == Some(pkid)) {
+                            .position(|x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(m) = self.outgoing_pub.remove(i) {
-                                    Some(*m.1)
+                                    Some(*m)
                                 } else {
                                     None
                                 }
@@ -413,10 +413,10 @@ impl Connection {
                         debug!("*** PubRec --> Pkid({:?})\n--- Record Queue =\n{:#?}\n\n", pkid, self.outgoing_rec);
                         let m = match self.outgoing_rec
                             .iter()
-                            .position(|x| x.1.get_pkid() == Some(pkid)) {
+                            .position(|x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(m) = self.outgoing_rec.remove(i) {
-                                    Some(*m.1)
+                                    Some(*m)
                                 } else {
                                     None
                                 }
@@ -429,7 +429,7 @@ impl Connection {
 
                         // After receiving PUBREC packet and removing corrosponding
                         // message from outgoing_rec queue, send PUBREL and add it queue.
-                        self.outgoing_rel.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                        self.outgoing_rel.push_back(PacketIdentifier(pkid));
                         // NOTE: Don't Error return here. It's ok to fail during writes coz of
                         // disconnection.
                         // `force_transmit` will resend when reconnection is successful
@@ -449,7 +449,7 @@ impl Connection {
                             .position(|x| x.get_pkid() == Some(pkid)) {
                             Some(i) => {
                                 if let Some(message) = self.incoming_rec.remove(i) {
-                                    self.outgoing_comp.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                                    self.outgoing_comp.push_back(PacketIdentifier(pkid));
                                     let _ = self.pubcomp(pkid);
                                     Some(message)
                                 } else {
@@ -462,7 +462,7 @@ impl Connection {
                             }
                         };
 
-                        self.outgoing_comp.push_back((time::get_time().sec, PacketIdentifier(pkid)));
+                        self.outgoing_comp.push_back(PacketIdentifier(pkid));
                         let _ = self.pubcomp(pkid);
 
                         if let Some(message) = message {
@@ -477,7 +477,7 @@ impl Connection {
                         let pkid = pubcomp.packet_identifier();
                         match self.outgoing_rel
                             .iter()
-                            .position(|x| x.1 == PacketIdentifier(pkid)) {
+                            .position(|x| *x == PacketIdentifier(pkid)) {
                             Some(pos) => self.outgoing_rel.remove(pos),
                             None => {
                                 error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
@@ -549,22 +549,22 @@ impl Connection {
         debug!("*** Force Retransmission. Publish Queue =\n{:#?}\n\n", outgoing_pub);
         self.outgoing_pub.clear();
         while let Some(message) = outgoing_pub.pop_front() {
-            let _ = self.publish(*message.1);
+            let _ = self.publish(*message);
         }
 
         let mut outgoing_rec = self.outgoing_rec.clone();
         debug!("*** Force Retransmission. Record Queue =\n{:#?}\n\n", outgoing_rec);
         self.outgoing_rec.clear();
         while let Some(message) = outgoing_rec.pop_front() {
-            let _ = self.publish(*message.1);
+            let _ = self.publish(*message);
         }
         // println!("{:?}", self.outgoing_rec.iter().map(|e|
         // e.1.qos).collect::<Vec<_>>());
         let mut outgoing_rel = self.outgoing_rel.clone();
         self.outgoing_rel.clear();
         while let Some(rel) = outgoing_rel.pop_front() {
-            self.outgoing_rel.push_back((time::get_time().sec, rel.1));
-            let PacketIdentifier(pkid) = rel.1;
+            self.outgoing_rel.push_back(rel);
+            let PacketIdentifier(pkid) = rel;
             let _ = self.pubrel(pkid);
         }
     }
@@ -592,14 +592,14 @@ impl Connection {
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
-                self.outgoing_pub.push_back((time::get_time().sec, message_box.clone()));
+                self.outgoing_pub.push_back(message_box.clone());
 
                 if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
                     warn!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
                 }
             }
             QoSWithPacketIdentifier::Level2(_) => {
-                self.outgoing_rec.push_back((time::get_time().sec, message_box.clone()));
+                self.outgoing_rec.push_back(message_box.clone());
 
                 if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
                     warn!(":( :( Outgoing Record Queue Length growing bad --> {:?}", self.outgoing_rec.len());
