@@ -17,7 +17,7 @@ pub fn generate_connect_packet(opts: MqttOptions) -> Result<Vec<u8>> {
 
     // Converting (String, String) -> (TopicName, String)
     let will = match opts.will {
-        Some(will) => Some((TopicName::new(will.0)?, will.1)),
+        Some(will) => Some((TopicName::new(will.0)?, will.1.into_bytes())),
         None => None,
     };
 

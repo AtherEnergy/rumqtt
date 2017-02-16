@@ -124,7 +124,7 @@ impl Connection {
             no_of_reconnections: 0,
 
             // Threadpool
-            pool: ThreadPool::new(4),
+            pool: ThreadPool::new(1),
         };
 
         connection.state = MqttState::Disconnected;
