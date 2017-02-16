@@ -365,130 +365,128 @@ impl Connection {
         Ok(())
     }
 
+    fn handle_puback(&mut self, puback: &PubackPacket) -> Result<HandlePacket> {
+        let pkid = puback.packet_identifier();
+        debug!("*** PubAck --> Pkid({:?})\n--- Publish Queue =\n{:#?}\n\n", pkid, self.outgoing_pub);
+        let m = match self.outgoing_pub
+            .iter()
+            .position(|x| x.get_pkid() == Some(pkid)) {
+            Some(i) => {
+                if let Some(m) = self.outgoing_pub.remove(i) {
+                    Some(*m)
+                } else {
+                    None
+                }
+            }
+            None => {
+                error!("Oopssss..unsolicited ack --> {:?}\n", puback);
+                None
+            }
+        };
+        debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
+        Ok(HandlePacket::PubAck(m))
+    }
+
+    fn handle_pubrec(&mut self, pubrec: &PubrecPacket) -> Result<HandlePacket> {
+        let pkid = pubrec.packet_identifier();
+        debug!("*** PubRec --> Pkid({:?})\n--- Record Queue =\n{:#?}\n\n", pkid, self.outgoing_rec);
+        let m = match self.outgoing_rec
+            .iter()
+            .position(|x| x.get_pkid() == Some(pkid)) {
+            Some(i) => {
+                if let Some(m) = self.outgoing_rec.remove(i) {
+                    Some(*m)
+                } else {
+                    None
+                }
+            }
+            None => {
+                error!("Oopssss..unsolicited record --> {:?}", pubrec);
+                None
+            }
+        };
+
+        // After receiving PUBREC packet and removing corrosponding
+        // message from outgoing_rec queue, send PUBREL and add it queue.
+        self.outgoing_rel.push_back(PacketIdentifier(pkid));
+        // NOTE: Don't Error return here. It's ok to fail during writes coz of
+        // disconnection.
+        // `force_transmit` will resend when reconnection is successful
+        let _ = self.pubrel(pkid);
+        Ok(HandlePacket::PubRec(m))
+
+    }
+
+    fn handle_pubrel(&mut self, pubrel: &PubrelPacket) -> Result<HandlePacket> {
+        let pkid = pubrel.packet_identifier();
+        let message = match self.incoming_rec
+            .iter()
+            .position(|x| x.get_pkid() == Some(pkid)) {
+            Some(i) => {
+                if let Some(message) = self.incoming_rec.remove(i) {
+                    self.outgoing_comp.push_back(PacketIdentifier(pkid));
+                    let _ = self.pubcomp(pkid);
+                    Some(message)
+                } else {
+                    None
+                }
+            }
+            None => {
+                error!("Oopssss..unsolicited release. Message might have already been released --> {:?}", pubrel);
+                None
+            }
+        };
+
+        self.outgoing_comp.push_back(PacketIdentifier(pkid));
+        let _ = self.pubcomp(pkid);
+
+        if let Some(message) = message {
+            Ok(HandlePacket::Publish(message))
+        } else {
+            Ok(HandlePacket::Invalid)
+        }
+    }
+
+    fn handle_pubcomp(&mut self, pubcomp: &PubcompPacket) -> Result<HandlePacket> {
+        let pkid = pubcomp.packet_identifier();
+        match self.outgoing_rel
+            .iter()
+            .position(|x| *x == PacketIdentifier(pkid)) {
+            Some(pos) => self.outgoing_rel.remove(pos),
+            None => {
+                error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
+                None
+            }
+        };
+        Ok(HandlePacket::PubComp)
+    }
+
     fn handle_packet(&mut self, packet: &VariablePacket) -> Result<HandlePacket> {
         match self.state {
             MqttState::Connected => {
                 match *packet {
                     VariablePacket::SubackPacket(..) => Ok(HandlePacket::SubAck),
-
                     VariablePacket::PingrespPacket(..) => {
                         self.await_pingresp = false;
                         Ok(HandlePacket::PingResp)
                     }
-
                     VariablePacket::DisconnectPacket(..) => Ok(HandlePacket::Disconnect),
-
-                    VariablePacket::PubackPacket(ref puback) => {
-                        let pkid = puback.packet_identifier();
-                        debug!("*** PubAck --> Pkid({:?})\n--- Publish Queue =\n{:#?}\n\n", pkid, self.outgoing_pub);
-                        let m = match self.outgoing_pub
-                            .iter()
-                            .position(|x| x.get_pkid() == Some(pkid)) {
-                            Some(i) => {
-                                if let Some(m) = self.outgoing_pub.remove(i) {
-                                    Some(*m)
-                                } else {
-                                    None
-                                }
-                            }
-                            None => {
-                                error!("Oopssss..unsolicited ack --> {:?}\n", puback);
-                                None
-                            }
-                        };
-                        debug!("Pub Q Len After Ack @@@ {:?}", self.outgoing_pub.len());
-                        Ok(HandlePacket::PubAck(m))
-                    }
-
-                    VariablePacket::PublishPacket(ref publ) => {
-                        let message = Message::from_pub(publ)?;
-                        self.handle_message(message)
-                    }
-
+                    VariablePacket::PubackPacket(ref puback) => self.handle_puback(puback),
+                    VariablePacket::PublishPacket(ref publ) => self.handle_message(Message::from_pub(publ)?),
                     // @ Qos2 message published by client is recorded by broker
                     // @ Remove message from 'outgoing_rec' queue and add pkid to 'outgoing_rel'
                     // @ Send 'pubrel' to broker
-                    VariablePacket::PubrecPacket(ref pubrec) => {
-                        let pkid = pubrec.packet_identifier();
-                        debug!("*** PubRec --> Pkid({:?})\n--- Record Queue =\n{:#?}\n\n", pkid, self.outgoing_rec);
-                        let m = match self.outgoing_rec
-                            .iter()
-                            .position(|x| x.get_pkid() == Some(pkid)) {
-                            Some(i) => {
-                                if let Some(m) = self.outgoing_rec.remove(i) {
-                                    Some(*m)
-                                } else {
-                                    None
-                                }
-                            }
-                            None => {
-                                error!("Oopssss..unsolicited record --> {:?}", pubrec);
-                                None
-                            }
-                        };
-
-                        // After receiving PUBREC packet and removing corrosponding
-                        // message from outgoing_rec queue, send PUBREL and add it queue.
-                        self.outgoing_rel.push_back(PacketIdentifier(pkid));
-                        // NOTE: Don't Error return here. It's ok to fail during writes coz of
-                        // disconnection.
-                        // `force_transmit` will resend when reconnection is successful
-                        let _ = self.pubrel(pkid);
-                        Ok(HandlePacket::PubRec(m))
-                    }
-
+                    VariablePacket::PubrecPacket(ref pubrec) => self.handle_pubrec(pubrec),
                     // @ Broker knows that client has the message
                     // @ release the message stored in 'recorded' queue
                     // @ send 'pubcomp' to sender indicating that message is released
                     // @ if 'pubcomp' packet is lost, broker will send pubrel again
                     // @ for the released message, for which we send dummy 'pubcomp' again
-                    VariablePacket::PubrelPacket(ref pubrel) => {
-                        let pkid = pubrel.packet_identifier();
-                        let message = match self.incoming_rec
-                            .iter()
-                            .position(|x| x.get_pkid() == Some(pkid)) {
-                            Some(i) => {
-                                if let Some(message) = self.incoming_rec.remove(i) {
-                                    self.outgoing_comp.push_back(PacketIdentifier(pkid));
-                                    let _ = self.pubcomp(pkid);
-                                    Some(message)
-                                } else {
-                                    None
-                                }
-                            }
-                            None => {
-                                error!("Oopssss..unsolicited release. Message might have already been released --> {:?}", pubrel);
-                                None
-                            }
-                        };
-
-                        self.outgoing_comp.push_back(PacketIdentifier(pkid));
-                        let _ = self.pubcomp(pkid);
-
-                        if let Some(message) = message {
-                            Ok(HandlePacket::Publish(message))
-                        } else {
-                            Ok(HandlePacket::Invalid)
-                        }
-                    }
-
+                    VariablePacket::PubrelPacket(ref pubrel) => self.handle_pubrel(pubrel),
                     // @ Remove this pkid from 'outgoing_rel' queue
-                    VariablePacket::PubcompPacket(ref pubcomp) => {
-                        let pkid = pubcomp.packet_identifier();
-                        match self.outgoing_rel
-                            .iter()
-                            .position(|x| *x == PacketIdentifier(pkid)) {
-                            Some(pos) => self.outgoing_rel.remove(pos),
-                            None => {
-                                error!("Oopssss..unsolicited complete --> {:?}", pubcomp);
-                                None
-                            }
-                        };
-                        Ok(HandlePacket::PubComp)
-                    }
+                    VariablePacket::PubcompPacket(ref pubcomp) => self.handle_pubcomp(pubcomp),
 
                     VariablePacket::UnsubackPacket(..) => Ok(HandlePacket::UnSubAck),
-
                     _ => {
                         error!("Invalid Packet in Connected State --> {:?}", packet);
                         Ok(HandlePacket::Invalid)
