@@ -22,7 +22,7 @@ use std::sync::mpsc::TrySendError;
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
 pub struct MqttClient {
-    // TODO: Move pkid to connection thread which allows this 
+    // TODO: Move pkid to connection thread which allows this
     // object to be clonable and user can use this object in
     // multiple threads
     pub last_pkid: PacketIdentifier,
@@ -106,7 +106,7 @@ impl MqttClient {
                     &TrySendError::Full(_) => {
                         warn!("Request Queue Full !!!!!!!!");
                         thread::sleep(Duration::new(2, 0));
-                        continue
+                        continue;
                     }
                 }
             } else {

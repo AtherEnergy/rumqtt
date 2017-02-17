@@ -622,7 +622,8 @@ impl Connection {
     }
 
     fn ping(&mut self) -> Result<()> {
-        // debug!("client state --> {:?}, await_ping --> {}", self.state, self.await_ping);
+        // debug!("client state --> {:?}, await_ping --> {}", self.state,
+        // self.await_ping);
 
         match self.state {
             MqttState::Connected => {

@@ -40,22 +40,23 @@
 //!
 //! // Connects to the broker, starts event loop and returns a `Request`
 //! // object for making mqtt requests like `publish`, `subscribe` etc..
-//! let request = MqttClient::start(client_options, Some(mq_cbs)).expect("Coudn't start");
+//! let request = MqttClient::start(client_options,
+//! Some(mq_cbs)).expect("Coudn't start");
 //! ```
 //!
 //!
 //! # Publishing
 //!
-//! 
+//!
 //! // use rumqtt::{MqttOptions, MqttClient, QoS};
 //! let payload = format!("{}. hello rust", 1);
 //! request.publish("hello/rust", QoS::Level1, payload.into_bytes())
 //!          .expect("Publish failure");
-//! 
+//!
 //!
 //! # Subscribing
 //!
-//! 
+//!
 //! let topics = vec![("hello/+/world", QoS::Level0),
 //!                   ("hello/rust", QoS::Level1)];
 //!
