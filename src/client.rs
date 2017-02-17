@@ -17,6 +17,7 @@ use connection::{Connection, NetworkRequest};
 use callbacks::MqttCallback;
 
 use std::time::Duration;
+use std::sync::mpsc::TrySendError;
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
@@ -39,12 +40,15 @@ impl MqttClient {
         unreachable!("Cannot lookup address");
     }
 
-    fn mock_start(opts: MqttOptions) -> Result<Self> {
+    fn mock_start(opts: MqttOptions, forever: bool) -> Result<Self> {
         let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
+
 
         thread::spawn(move || -> Result<()> {
             let _ = nw_request_rx;
-            thread::sleep(Duration::new(1000_000, 0));
+            if forever {
+                thread::sleep(Duration::new(1000_000, 0));
+            }
             Ok(())
         });
 
@@ -89,21 +93,27 @@ impl MqttClient {
         Ok(())
     }
 
-
     pub fn publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
         let payload = Arc::new(payload);
         let mut ret_val;
         loop {
             let payload = payload.clone();
             ret_val = self._publish(topic, false, qos, payload, None);
-            if let Err(Error::TrySend(e)) = ret_val {
-                warn!("Request Queue Full !!!!!!!!");
-                thread::sleep(Duration::new(2, 0));
-                continue
+            if let Err(Error::TrySend(ref e)) = ret_val {
+                match e {
+                    // break immediately if rx is dropped
+                    &TrySendError::Disconnected(_) => break,
+                    &TrySendError::Full(_) => {
+                        warn!("Request Queue Full !!!!!!!!");
+                        thread::sleep(Duration::new(2, 0));
+                        continue
+                    }
+                }
             } else {
                 return ret_val;
             }
         }
+        ret_val
     }
 
     pub fn retained_publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
@@ -202,7 +212,7 @@ mod test {
     #[test]
     fn next_pkid_roll() {
         let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
-        match MqttClient::mock_start(client_options) {
+        match MqttClient::mock_start(client_options, true) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {
                     mq_client._next_pkid();
@@ -219,7 +229,22 @@ mod test {
     fn request_queue_blocks_when_buffer_full() {
         env_logger::init().unwrap();
         let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
-        match MqttClient::mock_start(client_options) {
+        match MqttClient::mock_start(client_options, true) {
+            Ok(mut mq_client) => {
+                for i in 0..65536 {
+                    mq_client._publish("hello/world", false, QoS::Level1, Arc::new(vec![1u8, 2, 3]), None).unwrap();
+                }
+            }
+            Err(e) => panic!("{:?}", e),
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn publish_should_not_happen_rxdrop() {
+        env_logger::init().unwrap();
+        let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
+        match MqttClient::mock_start(client_options, false) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {
                     mq_client._publish("hello/world", false, QoS::Level1, Arc::new(vec![1u8, 2, 3]), None).unwrap();
