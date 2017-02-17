@@ -5,7 +5,6 @@ use std::thread;
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use mqtt::{QualityOfService, TopicFilter};
-use mqtt::control::variable_header::PacketIdentifier;
 use mqtt::packet::*;
 use mqtt::topic_name::TopicName;
 
@@ -22,10 +21,6 @@ use std::sync::mpsc::TrySendError;
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
 pub struct MqttClient {
-    // TODO: Move pkid to connection thread which allows this 
-    // object to be clonable and user can use this object in
-    // multiple threads
-    pub last_pkid: PacketIdentifier,
     pub nw_request_tx: SyncSender<NetworkRequest>,
 }
 
@@ -53,7 +48,6 @@ impl MqttClient {
         });
 
         let client = MqttClient {
-            last_pkid: PacketIdentifier(0),
             nw_request_tx: nw_request_tx,
         };
 
@@ -76,7 +70,6 @@ impl MqttClient {
         });
 
         let client = MqttClient {
-            last_pkid: PacketIdentifier(0),
             nw_request_tx: nw_request_tx,
         };
 
@@ -161,7 +154,7 @@ impl MqttClient {
             QualityOfService::Level2 => QoSWithPacketIdentifier::Level2(0),
         };
 
-        let mut message = Message {
+        let message = Message {
             topic: topic,
             retain: retain,
             qos: qos_pkid,
@@ -171,28 +164,11 @@ impl MqttClient {
 
         // TODO: Check message sanity here and return error if not
         match qos {
-            QualityOfService::Level0 => self.nw_request_tx.send(NetworkRequest::Publish(message))?,
-            QualityOfService::Level1 |
-            QualityOfService::Level2 => {
-                let PacketIdentifier(pkid) = self._next_pkid();
-                message.set_pkid(pkid);
-                self.nw_request_tx.try_send(NetworkRequest::Publish(message))?
-            }
+            QualityOfService::Level0 | QualityOfService::Level1 |
+            QualityOfService::Level2 => self.nw_request_tx.try_send(NetworkRequest::Publish(message))?
         };
 
         Ok(())
-    }
-
-    // http://stackoverflow.
-    // com/questions/11115364/mqtt-messageid-practical-implementation
-    #[inline]
-    fn _next_pkid(&mut self) -> PacketIdentifier {
-        let PacketIdentifier(mut pkid) = self.last_pkid;
-        if pkid == 65535 {
-            pkid = 0;
-        }
-        self.last_pkid = PacketIdentifier(pkid + 1);
-        self.last_pkid
     }
 }
 
@@ -208,21 +184,6 @@ mod test {
     use mqtt::control::variable_header::PacketIdentifier;
     use super::MqttClient;
     use std::sync::Arc;
-
-    #[test]
-    fn next_pkid_roll() {
-        let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
-        match MqttClient::mock_start(client_options, true) {
-            Ok(mut mq_client) => {
-                for i in 0..65536 {
-                    mq_client._next_pkid();
-                }
-                assert_eq!(PacketIdentifier(1), mq_client.last_pkid);
-            }
-            Err(e) => panic!("{:?}", e),
-        }
-
-    }
 
     #[test]
     #[should_panic]
