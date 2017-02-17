@@ -19,6 +19,9 @@ use stream::{NetworkStream, SslContext};
 use genpack;
 use message::Message;
 use callbacks::MqttCallback;
+use std::sync::mpsc::channel;
+use std::net::ToSocketAddrs;
+
 // static mut N: i32 = 0;
 
 enum HandlePacket {
@@ -58,6 +61,8 @@ pub struct Connection {
     pub initial_connect: bool,
     pub await_pingresp: bool,
     pub last_flush: Instant,
+
+    pub last_pkid: PacketIdentifier,
 
     // Callbacks
     pub callback: Option<MqttCallback>,
@@ -100,6 +105,7 @@ impl Connection {
             initial_connect: true,
             await_pingresp: false,
             last_flush: Instant::now(),
+            last_pkid: PacketIdentifier(0),
 
             callback: callback,
 
@@ -129,6 +135,47 @@ impl Connection {
         connection.stream.set_write_timeout(Some(Duration::new(10, 0)))?;
         Ok(connection)
     }
+
+    #[cfg(test)]
+    pub fn mock_connect() -> Self {
+        fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
+            let addrs = addr.to_socket_addrs().expect("Conversion Failed");
+            for addr in addrs {
+                if let SocketAddr::V4(_) = addr {
+                    return addr;
+                }
+            }
+            unreachable!("Cannot lookup address");
+        }
+        let addr = lookup_ipv4("test.mosquitto.org:1883");
+        let (tx, rx) = channel();
+        let opts = MqttOptions::new();
+        let mut conn = Connection {
+            addr: addr,
+            opts: opts,
+            stream: NetworkStream::None,
+            nw_request_rx: rx,
+            state: MqttState::Disconnected,
+            initial_connect: true,
+            await_pingresp: false,
+            last_flush: Instant::now(),
+            last_pkid: PacketIdentifier(0),
+            callback: None,
+            // Queues
+            incoming_rec: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+            outgoing_comp: VecDeque::new(),
+            // Subscriptions
+            subscriptions: VecDeque::new(),
+            no_of_reconnections: 0,
+            // Threadpool
+            pool: ThreadPool::new(1),
+        };
+        conn
+    }
+
 
     pub fn run(&mut self) -> Result<()> {
         'reconnect: loop {
@@ -219,6 +266,18 @@ impl Connection {
                 }
             }
         }
+    }
+
+    // http://stackoverflow.
+    // com/questions/11115364/mqtt-messageid-practical-implementation
+    #[inline]
+    fn next_pkid(&mut self) -> PacketIdentifier {
+        let PacketIdentifier(mut pkid) = self.last_pkid;
+        if pkid == 65535 {
+            pkid = 0;
+        }
+        self.last_pkid = PacketIdentifier(pkid + 1);
+        self.last_pkid
     }
 
     fn write(&mut self) -> Result<()> {
@@ -577,7 +636,9 @@ impl Connection {
         Ok(())
     }
 
-    fn publish(&mut self, message: Message) -> Result<()> {
+    fn publish(&mut self, mut message: Message) -> Result<()> {
+        let PacketIdentifier(pkid) = self.next_pkid();
+        message.set_pkid(pkid);
         let qos = message.qos;
         let message_box = message.to_boxed(Some(qos));
         let topic = message.topic;
@@ -717,5 +778,21 @@ impl Connection {
         self.stream.flush()?;
         self.last_flush = Instant::now();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Connection;
+    use mqtt::control::variable_header::PacketIdentifier;
+
+    #[test]
+    fn next_pkid_roll() {
+        let mut connection = Connection::mock_connect();
+        let mut pkt_id = PacketIdentifier(0);
+        for i in 0..65536 {
+            pkt_id = connection.next_pkid();
+        }
+        assert_eq!(PacketIdentifier(1), pkt_id);
     }
 }
