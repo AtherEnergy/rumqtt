@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 extern crate rumqtt;
 
-use rumqtt::{MqttOptions, MqttClient, QoS};
+use rumqtt::{MqttOptions, MqttClient, QoS, MqttCallback, Message};
 use std::thread;
 use std::time::Duration;
 use std::sync::Arc;
@@ -11,6 +11,7 @@ extern crate log;
 extern crate env_logger;
 
 const BROKER_ADDRESS: &'static str = "endurance-broker.atherengineering.in:1883";
+const MOSQUITTO_ADDR: &'static str = "test.mosquitto.org:1883";
 
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial tcp connect.
@@ -21,10 +22,10 @@ fn inital_tcp_connect_failure() {
     // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
     let client_options = MqttOptions::new()
         .set_reconnect(5)
-        .broker("localhost:9999");
+        .set_broker("localhost:9999");
 
     // Connects to a broker and returns a `request`
-    let request = MqttClient::start(client_options).expect("Couldn't start");
+    let request = MqttClient::start(client_options, None).expect("Couldn't start");
 }
 
 // After connecting to tcp, should timeout error if it didn't receive CONNACK
@@ -33,8 +34,8 @@ fn inital_tcp_connect_failure() {
 #[should_panic]
 fn connect_timeout_failure() {
     // TODO: Change the host to remote host and fix blocks
-    let client_options = MqttOptions::new().broker("localhost:9999");
-    let request = MqttClient::start(client_options).expect("Couldn't restart");
+    let client_options = MqttOptions::new().set_broker("localhost:9999");
+    let request = MqttClient::start(client_options, None).expect("Couldn't restart");
 }
 
 // Shouldn't try to reconnect if there is a connection problem
@@ -44,162 +45,155 @@ fn connect_timeout_failure() {
 fn inital_mqtt_connect_failure() {
     let client_options = MqttOptions::new()
         .set_reconnect(5)
-        .broker("test.mosquitto.org:8883");
-
+        .set_broker("test.mosquitto.org:8883");
 
     // Connects to a broker and returns a `request`
-    let client = MqttClient::start(client_options).expect("Couldn't start");
+    let client = MqttClient::start(client_options, None).expect("Couldn't start");
 }
 
-// #[test]
-// fn basic_publishes_and_subscribes() {
-//     // env_logger::init().unwrap();
-//     let client_options = MqttOptions::new()
-//         .set_reconnect(5)
-//         .broker(BROKER_ADDRESS);
+#[test]
+fn basic_publishes_and_subscribes() {
+    // env_logger::init().unwrap();
+    let client_options = MqttOptions::new()
+        .set_reconnect(5)
+        .set_broker(MOSQUITTO_ADDR);
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
 
+    let counter_cb = move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+    };
 
-//     let count = Arc::new(AtomicUsize::new(0));
-//     let final_count = count.clone();
-//     let count = count.clone();
+    let msg_callback = MqttCallback::new().on_message(counter_cb);
 
-//     // Connects to a broker and returns a `request`
-//     let request = MqttClient::new(client_options)
-//         .message_callback(move |message| {
-//             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("message --> {:?}", message);
-//         })
-//         .start()
-//         .expect("Couldn't start");
+    let mut request = MqttClient::start(client_options, Some(msg_callback)).expect("Coudn't start");
 
-//     let topics = vec![("test/basic", QoS::Level0)];
+    let topics = vec![("test/basic", QoS::Level0)];
+    request.subscribe(topics).expect("Subcription failure");
+    let payload = format!("hello rust");
+    request.publish("test/basic", QoS::Level0,
+    payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic", QoS::Level1,
+    payload.clone().into_bytes()).unwrap();
+    request.publish("test/basic", QoS::Level2,
+    payload.clone().into_bytes()).unwrap();
+    thread::sleep(Duration::new(3, 0));
 
-//     request.subscribe(topics).expect("Subcription failure");
+    assert_eq!(3, final_count.load(Ordering::SeqCst));
+}
 
-//     let payload = format!("hello rust");
-// request.publish("test/basic", QoS::Level0,
-// payload.clone().into_bytes()).unwrap();
-// request.publish("test/basic", QoS::Level1,
-// payload.clone().into_bytes()).unwrap();
-// request.publish("test/basic", QoS::Level2,
-// payload.clone().into_bytes()).unwrap();
+#[test]
+fn simple_reconnection() {
+    // env_logger::init().unwrap();
+    let client_options = MqttOptions::new()
+        .set_keep_alive(5)
+        .set_reconnect(5)
+        .set_client_id("test-reconnect-client")
+        .set_broker(MOSQUITTO_ADDR);
 
-//     thread::sleep(Duration::new(3, 0));
-//     assert!(3 == final_count.load(Ordering::SeqCst));
-// }
+    // Message count
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
 
-// #[test]
-// fn simple_reconnection() {
-//     // env_logger::init().unwrap();
-//     let client_options = MqttOptions::new()
-//         .set_keep_alive(5)
-//         .set_reconnect(5)
-//         .set_client_id("test-reconnect-client")
-//         .broker(BROKER_ADDRESS);
+    let counter_cb = move |message| {
+            count.fetch_add(1, Ordering::SeqCst);
+            // println!("message --> {:?}", message);
+    };
 
-//     // Message count
-//     let count = Arc::new(AtomicUsize::new(0));
-//     let final_count = count.clone();
-//     let count = count.clone();
+    let msg_callback = MqttCallback::new().on_message(counter_cb);
 
-//     // Connects to a broker and returns a `request`
-//     let request = MqttClient::new(client_options)
-//         .message_callback(move |message| {
-//             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("message --> {:?}", message);
-//         })
-//         .start()
-//         .expect("Coudn't start");
+    // Connects to a broker and returns a `request`
+    let mut request = MqttClient::start(client_options, Some(msg_callback))
+        .expect("Coudn't start");
 
-//     // Register message callback and subscribe
-//     let topics = vec![("test/reconnect", QoS::Level2)];
-//     request.subscribe(topics).expect("Subcription failure");
+    // Register message callback and subscribe
+    let topics = vec![("test/reconnect", QoS::Level2)];
+    request.subscribe(topics).expect("Subcription failure");
 
-//     request.disconnect().unwrap();
-//     // Wait for reconnection and publish
-//     thread::sleep(Duration::new(10, 0));
+    request.disconnect().unwrap();
+    // Wait for reconnection and publish
+    thread::sleep(Duration::new(10, 0));
 
-//     let payload = format!("hello rust");
-// request.publish("test/reconnect", QoS::Level1,
-// payload.clone().into_bytes()).unwrap();
+    let payload = format!("hello rust");
+    request.publish("test/reconnect", QoS::Level1,
+    payload.clone().into_bytes()).unwrap();
 
-//     // Wait for count to be incremented by callback
-//     thread::sleep(Duration::new(5, 0));
-//     assert!(1 == final_count.load(Ordering::SeqCst));
-// }
+    // Wait for count to be incremented by callback
+    thread::sleep(Duration::new(5, 0));
+    assert!(1 == final_count.load(Ordering::SeqCst));
+}
 
-// #[test]
-// fn acked_message() {
-//     let client_options = MqttOptions::new()
-//         .set_reconnect(5)
-//         .set_client_id("test-reconnect-client")
-//         .broker(BROKER_ADDRESS);
+#[test]
+fn acked_message() {
+    let client_options = MqttOptions::new()
+        .set_reconnect(5)
+        .set_client_id("test-reconnect-client")
+        .set_broker(MOSQUITTO_ADDR);
 
-//     // Connects to a broker and returns a `request`
-//     let mq_client = MqttClient::new(client_options);
-//     let mq_client = mq_client.publish_callback(|m| {
-//         let ref payload = *m.payload;
-//         let payload = String::from_utf8(payload.clone()).unwrap();
-//         let ref userdata = *m.userdata.unwrap();
-//         let userdata = String::from_utf8(userdata.clone()).unwrap();
-//         assert_eq!("MYUNIQUEMESSAGE".to_string(), payload);
-//         assert_eq!("MYUNIQUEUSERDATA".to_string(), userdata);
-//     });
-//     let request = mq_client.start().expect("Coudn't start");
-//     request.userdata_publish("test/qos1/ack",
-//                           QoS::Level1,
-//                           "MYUNIQUEMESSAGE".to_string().into_bytes(),
-//                           "MYUNIQUEUSERDATA".to_string().into_bytes())
-//         .unwrap();
-//     thread::sleep(Duration::new(1, 0));
-// }
+    let cb = |m: Message| {
+        let ref payload = *m.payload;
+        let ref userdata = *m.userdata.unwrap();
+        let payload = String::from_utf8(payload.clone()).unwrap();
+        let userdata = String::from_utf8(userdata.clone()).unwrap();
+        assert_eq!("MYUNIQUEMESSAGE".to_string(), payload);
+        assert_eq!("MYUNIQUEUSERDATA".to_string(), userdata);
+    };
 
-// #[test]
-// fn will() {
-//     // env_logger::init().unwrap();
-//     let client_options1 = MqttOptions::new()
-//         .set_reconnect(15)
-//         .set_client_id("test-will-c1")
-//         .set_clean_session(false)
-//         .set_will("test/will", "I'm dead")
-//         .broker(BROKER_ADDRESS);
+    let msg_callback = MqttCallback::new().on_message(cb);
+    
+    // Connects to a broker and returns a `request`
+    let mut request = MqttClient::start(client_options, Some(msg_callback)).expect("Couldn't start");
+    request.userdata_publish("test/qos1/ack",
+                          QoS::Level1,
+                          "MYUNIQUEMESSAGE".to_string().into_bytes(),
+                          "MYUNIQUEUSERDATA".to_string().into_bytes()).unwrap();
+    thread::sleep(Duration::new(1, 0));
+}
 
-//     let client_options2 = MqttOptions::new()
-//         .set_keep_alive(5)
-//         .set_reconnect(5)
-//         .set_client_id("test-will-c2")
-//         .broker(BROKER_ADDRESS);
+/*#[test]
+fn will() {
+    // env_logger::init().unwrap();
+    let client_options1 = MqttOptions::new()
+        .set_reconnect(15)
+        .set_client_id("test-will-c1")
+        .set_clean_session(false)
+        .set_will("test/will", "I'm dead")
+        .set_broker(MOSQUITTO_ADDR);
 
-//     let count = Arc::new(AtomicUsize::new(0));
-//     let final_count = count.clone();
-//     let count = count.clone();
+    let client_options2 = MqttOptions::new()
+        .set_keep_alive(5)
+        .set_reconnect(5)
+        .set_client_id("test-will-c2")
+        .set_broker(MOSQUITTO_ADDR);
 
-//     // BUG NOTE: don't use _ for dummy subscriber, request. That implies
-//     // channel ends in struct are invalid
-// let request1 = MqttClient::new(client_options1).start().expect("Coudn't
-// start");
-//     let request2 = MqttClient::new(client_options2)
-//         .message_callback(move |message| {
-//             count.fetch_add(1, Ordering::SeqCst);
-//             // println!("message --> {:?}", message);
-//         })
-//         .start()
-//         .expect("Coudn't start");
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
 
-//     request2.subscribe(vec![("test/will", QoS::Level0)]).unwrap();
+    // BUG NOTE: don't use _ for dummy subscriber, request. That implies
+    // channel ends in struct are invalid
+    let cb = move |message| {
+            count.fetch_add(1, Ordering::SeqCst);
+            // println!("message --> {:?}", message);
+    };
+    let msg_callback = MqttCallback::new().on_message(cb);
+    let request1 = MqttClient::start(client_options1, None).expect("Coudn't start");
+    let mut request2 = MqttClient::start(client_options2, Some(msg_callback)).expect("Coudn't start");
+    request2.subscribe(vec![("test/will", QoS::Level0)]).unwrap();
+    // TODO: Now we are waiting for cli-2 subscriber to finish before
+    // disconnecting
+    // cli-1. Make an sync version of subscribe()
+    thread::sleep(Duration::new(1, 0));
+    // LWT doesn't work on graceful disconnects
+    // request1.disconnect();
+    request1.shutdown().unwrap();
 
-// // TODO: Now we are waiting for cli-2 subscriber to finish before
-// disconnecting
-//     // cli-1. Make an sync version of subscribe()
-//     thread::sleep(Duration::new(1, 0));
-//     // LWT doesn't work on graceful disconnects
-//     // request1.disconnect();
-//     request1.shutdown().unwrap();
-
-//     // Wait for last will publish
-//     thread::sleep(Duration::new(5, 0));
-//     assert!(1 == final_count.load(Ordering::SeqCst));
-// }
+    // Wait for last will publish
+    thread::sleep(Duration::new(5, 0));
+    assert!(1 == final_count.load(Ordering::SeqCst));
+}*/
 
 // /// Broker should retain published message on a topic and
 // /// INSTANTLY publish them to new subscritions
@@ -464,7 +458,7 @@ fn inital_mqtt_connect_failure() {
 //                                     .set_clean_session(false)
 //
 // .set_client_id("qos2-stress-reconnect-publish")
-//                                     .broker(BROKER_ADDRESS);
+//                                     .set_broker(BROKER_ADDRESS);
 
 //     let count = Arc::new(AtomicUsize::new(0));
 //     let final_count = count.clone();

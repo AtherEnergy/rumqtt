@@ -18,40 +18,44 @@
 //!
 //! ```
 //! use rumqtt::{MqttOptions, MqttClient, QoS};
+//! use rumqtt::{MqttCallback};
+//! use std::sync::mpsc;
 //! // Specify client connection options
 //! let client_options = MqttOptions::new()
 //!                                   .set_keep_alive(5)
 //!                                   .set_reconnect(3)
 //!                                   .set_client_id("rumqtt-docs")
-//!                                   .broker("test.mosquitto.org:1883");
-//!
+//!                                   .set_broker("test.mosquitto.org:1883");
 //! // Create a new `MqttClient` object from `MqttOptions`
-//! let mq_client = MqttClient::new(client_options);
 //!
 //! // Set callback for receiving incoming messages.
+//! let callback = |msg| {
+//! 	println!("Received payload: {:?}", msg);
+//! };
+//! let mut mq_cbs = MqttCallback::new().on_message(callback);
+//!
+//!
 //! // This is optional if you don't want to subscribe
 //! // to any topic.
-//! let mq_client = mq_client.message_callback(move |message| {
-//!     println!("message --> {:?}", message);
-//! });
 //!
 //! // Connects to the broker, starts event loop and returns a `Request`
 //! // object for making mqtt requests like `publish`, `subscribe` etc..
-//! let request = mq_client.start().expect("Coudn't start");
+//! let request = MqttClient::start(client_options, Some(mq_cbs)).expect("Coudn't start");
 //! ```
 //!
 //!
 //! # Publishing
 //!
-//! ```ignore
-//! let payload = format!("{}. hello rust", i);
+//! 
+//! // use rumqtt::{MqttOptions, MqttClient, QoS};
+//! let payload = format!("{}. hello rust", 1);
 //! request.publish("hello/rust", QoS::Level1, payload.into_bytes())
 //!          .expect("Publish failure");
-//! ```
+//! 
 //!
 //! # Subscribing
 //!
-//! ```ignore
+//! 
 //! let topics = vec![("hello/+/world", QoS::Level0),
 //!                   ("hello/rust", QoS::Level1)];
 //!
@@ -83,3 +87,4 @@ pub use clientoptions::MqttOptions;
 pub use mqtt::QualityOfService as QoS;
 pub use client::MqttClient;
 pub use message::Message;
+pub use callbacks::MqttCallback;
