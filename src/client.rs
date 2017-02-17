@@ -10,11 +10,13 @@ use mqtt::packet::*;
 use mqtt::topic_name::TopicName;
 
 // TODO: Refactor with quick error
-use error::Result;
+use error::{Result, Error};
 use message::Message;
 use clientoptions::MqttOptions;
 use connection::{Connection, NetworkRequest};
 use callbacks::MqttCallback;
+
+use std::time::Duration;
 
 /// Handles commands from Publisher and Subscriber. Saves MQTT
 /// state and takes care of retransmissions.
@@ -42,7 +44,7 @@ impl MqttClient {
 
         thread::spawn(move || -> Result<()> {
             let _ = nw_request_rx;
-            thread::sleep_ms(1000_000);
+            thread::sleep(Duration::new(1000_000, 0));
             Ok(())
         });
 
@@ -90,11 +92,17 @@ impl MqttClient {
 
     pub fn publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>) -> Result<()> {
         let payload = Arc::new(payload);
+        let mut ret_val;
         loop {
             let payload = payload.clone();
-            let _ = self._publish(topic, false, qos, payload, None);
-            warn!("Request Queue Full !!!!!!!!");
-            thread::sleep_ms(2000);
+            ret_val = self._publish(topic, false, qos, payload, None);
+            if let Err(Error::TrySend(e)) = ret_val {
+                warn!("Request Queue Full !!!!!!!!");
+                thread::sleep(Duration::new(2, 0));
+                continue
+            } else {
+                return ret_val;
+            }
         }
     }
 
@@ -193,7 +201,7 @@ mod test {
 
     #[test]
     fn next_pkid_roll() {
-        let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
+        let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
         match MqttClient::mock_start(client_options) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {
@@ -210,7 +218,7 @@ mod test {
     #[should_panic]
     fn request_queue_blocks_when_buffer_full() {
         env_logger::init().unwrap();
-        let client_options = MqttOptions::new().broker("test.mosquitto.org:1883");
+        let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
         match MqttClient::mock_start(client_options) {
             Ok(mut mq_client) => {
                 for i in 0..65536 {

@@ -203,15 +203,16 @@ impl MqttOptions {
     /// **NOTE**: This should be the final call of `MqttOptions` method
     /// chaining
     ///
-    /// ```ignore
-    /// let client = client_options.set_keep_alive(5)
+    /// ```
+    /// use rumqtt::MqttOptions;
+    /// let client = MqttOptions::new()
+    ///                           .set_keep_alive(5)
     ///                           .set_reconnect(5)
     ///                           .set_client_id("my-client-id")
     ///                           .set_clean_session(true)
-    ///                           .connect("localhost:1883");
+    ///                           .set_broker("localhost:1883");
     ///
-    // TODO: Rename
-    pub fn broker(mut self, addr: &str) -> Self {
+    pub fn set_broker(mut self, addr: &str) -> Self {
         if self.client_id == None {
             self.generate_client_id();
         }

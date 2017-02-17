@@ -18,13 +18,15 @@ impl MqttCallback {
         }
     }
 
-    pub fn on_message(mut self, cb: MessageSendableFn) -> Self {
-        self.on_message = Some(Arc::new(cb));
+    pub fn on_message<F>(mut self, cb: F) -> Self
+    where F: Fn(Message) + Sync + Send + 'static {
+        self.on_message = Some(Arc::new(Box::new(cb)));
         self
     }
 
-     pub fn on_publish(mut self, cb: PublishSendableFn) -> Self {
-        self.on_publish = Some(Arc::new(cb));
+     pub fn on_publish<F>(mut self, cb: F) -> Self
+     where F: Fn(Message) + Sync + Send + 'static {
+        self.on_publish = Some(Arc::new(Box::new(cb)));
         self
     }
 }
