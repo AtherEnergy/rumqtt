@@ -8,7 +8,6 @@ use mqtt::{QualityOfService, TopicFilter};
 use mqtt::packet::*;
 use mqtt::topic_name::TopicName;
 
-// TODO: Refactor with quick error
 use error::{Result, Error};
 use message::Message;
 use clientoptions::MqttOptions;
@@ -33,25 +32,6 @@ impl MqttClient {
         unreachable!("Cannot lookup address");
     }
 
-    fn mock_start(opts: MqttOptions, forever: bool) -> Result<Self> {
-        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
-
-
-        thread::spawn(move || -> Result<()> {
-            let _ = nw_request_rx;
-            if forever {
-                thread::sleep(Duration::new(1000_000, 0));
-            }
-            Ok(())
-        });
-
-        let client = MqttClient {
-            nw_request_tx: nw_request_tx,
-        };
-
-        Ok(client)
-    }
-
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
@@ -67,9 +47,7 @@ impl MqttClient {
             Ok(())
         });
 
-        let client = MqttClient {
-            nw_request_tx: nw_request_tx,
-        };
+        let client = MqttClient { nw_request_tx: nw_request_tx };
 
         Ok(client)
     }
@@ -162,8 +140,9 @@ impl MqttClient {
 
         // TODO: Check message sanity here and return error if not
         match qos {
-            QualityOfService::Level0 | QualityOfService::Level1 |
-            QualityOfService::Level2 => self.nw_request_tx.try_send(NetworkRequest::Publish(message))?
+            QualityOfService::Level0 |
+            QualityOfService::Level1 |
+            QualityOfService::Level2 => self.nw_request_tx.try_send(NetworkRequest::Publish(message))?,
         };
 
         Ok(())
@@ -174,23 +153,43 @@ impl MqttClient {
 
 #[cfg(test)]
 mod test {
-    #![allow(unused_variables)]
     extern crate env_logger;
+
     use mqtt::QualityOfService as QoS;
-    use connection::MqttState;
     use clientoptions::MqttOptions;
-    use mqtt::control::variable_header::PacketIdentifier;
     use super::MqttClient;
+    use error::Result;
+
     use std::sync::Arc;
+    use std::thread;
+    use std::sync::mpsc::sync_channel;
+    use connection::NetworkRequest;
+    use std::time::Duration;
+
+    fn mock_start(_: MqttOptions, forever: bool) -> Result<MqttClient> {
+        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
+
+        thread::spawn(move || -> Result<()> {
+            let _ = nw_request_rx;
+            if forever {
+                thread::sleep(Duration::new(1000_000, 0));
+            }
+            Ok(())
+        });
+
+        let client = MqttClient { nw_request_tx: nw_request_tx };
+
+        Ok(client)
+    }
 
     #[test]
     #[should_panic]
     fn request_queue_blocks_when_buffer_full() {
         env_logger::init().unwrap();
         let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
-        match MqttClient::mock_start(client_options, true) {
+        match mock_start(client_options, true) {
             Ok(mut mq_client) => {
-                for i in 0..65536 {
+                for _ in 0..65536 {
                     mq_client._publish("hello/world", false, QoS::Level1, Arc::new(vec![1u8, 2, 3]), None).unwrap();
                 }
             }
@@ -203,9 +202,9 @@ mod test {
     fn publish_should_not_happen_rxdrop() {
         env_logger::init().unwrap();
         let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
-        match MqttClient::mock_start(client_options, false) {
+        match mock_start(client_options, false) {
             Ok(mut mq_client) => {
-                for i in 0..65536 {
+                for _ in 0..65536 {
                     mq_client._publish("hello/world", false, QoS::Level1, Arc::new(vec![1u8, 2, 3]), None).unwrap();
                 }
             }

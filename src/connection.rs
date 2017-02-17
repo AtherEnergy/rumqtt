@@ -19,9 +19,6 @@ use stream::{NetworkStream, SslContext};
 use genpack;
 use message::Message;
 use callbacks::MqttCallback;
-use std::sync::mpsc::channel;
-use std::net::ToSocketAddrs;
-
 // static mut N: i32 = 0;
 
 enum HandlePacket {
@@ -135,47 +132,6 @@ impl Connection {
         connection.stream.set_write_timeout(Some(Duration::new(10, 0)))?;
         Ok(connection)
     }
-
-    #[cfg(test)]
-    pub fn mock_connect() -> Self {
-        fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
-            let addrs = addr.to_socket_addrs().expect("Conversion Failed");
-            for addr in addrs {
-                if let SocketAddr::V4(_) = addr {
-                    return addr;
-                }
-            }
-            unreachable!("Cannot lookup address");
-        }
-        let addr = lookup_ipv4("test.mosquitto.org:1883");
-        let (tx, rx) = channel();
-        let opts = MqttOptions::new();
-        let mut conn = Connection {
-            addr: addr,
-            opts: opts,
-            stream: NetworkStream::None,
-            nw_request_rx: rx,
-            state: MqttState::Disconnected,
-            initial_connect: true,
-            await_pingresp: false,
-            last_flush: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            callback: None,
-            // Queues
-            incoming_rec: VecDeque::new(),
-            outgoing_pub: VecDeque::new(),
-            outgoing_rec: VecDeque::new(),
-            outgoing_rel: VecDeque::new(),
-            outgoing_comp: VecDeque::new(),
-            // Subscriptions
-            subscriptions: VecDeque::new(),
-            no_of_reconnections: 0,
-            // Threadpool
-            pool: ThreadPool::new(1),
-        };
-        conn
-    }
-
 
     pub fn run(&mut self) -> Result<()> {
         'reconnect: loop {
@@ -783,14 +739,63 @@ impl Connection {
 
 #[cfg(test)]
 mod test {
-    use super::Connection;
+    use super::{Connection, MqttState};
+    use clientoptions::MqttOptions;
     use mqtt::control::variable_header::PacketIdentifier;
+
+    use std::net::{SocketAddr, ToSocketAddrs};
+    use std::collections::VecDeque;
+    use std::time::Instant;
+    use std::sync::mpsc::sync_channel;
+
+    use threadpool::ThreadPool;
+    use stream::NetworkStream;
+
+    pub fn mock_connect() -> Connection {
+        fn lookup_ipv4<A: ToSocketAddrs>(addr: A) -> SocketAddr {
+            let addrs = addr.to_socket_addrs().expect("Conversion Failed");
+            for addr in addrs {
+                if let SocketAddr::V4(_) = addr {
+                    return addr;
+                }
+            }
+            unreachable!("Cannot lookup address");
+        }
+
+        let addr = lookup_ipv4("test.mosquitto.org:1883");
+        let (_, rx) = sync_channel(10);
+        let opts = MqttOptions::new();
+        let conn = Connection {
+            addr: addr,
+            opts: opts,
+            stream: NetworkStream::None,
+            nw_request_rx: rx,
+            state: MqttState::Disconnected,
+            initial_connect: true,
+            await_pingresp: false,
+            last_flush: Instant::now(),
+            last_pkid: PacketIdentifier(0),
+            callback: None,
+            // Queues
+            incoming_rec: VecDeque::new(),
+            outgoing_pub: VecDeque::new(),
+            outgoing_rec: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+            outgoing_comp: VecDeque::new(),
+            // Subscriptions
+            subscriptions: VecDeque::new(),
+            no_of_reconnections: 0,
+            // Threadpool
+            pool: ThreadPool::new(1),
+        };
+        conn
+    }
 
     #[test]
     fn next_pkid_roll() {
-        let mut connection = Connection::mock_connect();
+        let mut connection = mock_connect();
         let mut pkt_id = PacketIdentifier(0);
-        for i in 0..65536 {
+        for _ in 0..65536 {
             pkt_id = connection.next_pkid();
         }
         assert_eq!(PacketIdentifier(1), pkt_id);
