@@ -18,8 +18,6 @@ use callbacks::MqttCallback;
 use std::time::Duration;
 use std::sync::mpsc::TrySendError;
 
-/// Handles commands from Publisher and Subscriber. Saves MQTT
-/// state and takes care of retransmissions.
 pub struct MqttClient {
     pub nw_request_tx: SyncSender<NetworkRequest>,
 }
@@ -99,7 +97,7 @@ impl MqttClient {
                     &TrySendError::Full(_) => {
                         warn!("Request Queue Full !!!!!!!!");
                         thread::sleep(Duration::new(2, 0));
-                        continue
+                        continue;
                     }
                 }
             } else {
