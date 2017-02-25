@@ -175,12 +175,6 @@ impl Connection {
                                             // buffers are full, ping below will error out because of
                                             // PingTimeout when (n * write timeout) > ping timeout
 
-                                            // NOTE: Force pings during Write timeout/ Queue overflow is
-                                            // bad because unlike idle state, publishes might be continous
-                                            // and connection might not go into read mod for detecting
-                                            // pingreps before consequent publishes
-                                            let _ = self.write();
-
                                             // TODO: Test if PINGRESPs are properly recieved before
                                             // next ping incase of high frequency incoming messages
                                             if let Err(e) = self.ping() {
@@ -188,6 +182,13 @@ impl Connection {
                                                 self.unbind();
                                                 continue 'reconnect;
                                             }
+
+                                            // NOTE: Force pings during Write timeout/ Queue overflow is
+                                            // bad because unlike idle state, publishes might be continous
+                                            // and connection might not go into read mod for detecting
+                                            // pingreps before consequent publishes
+                                            let _ = self.write();
+
                                             continue 'receive;
                                         }
                                         _ => {
@@ -196,19 +197,19 @@ impl Connection {
                                             // and socket close at broker [i.e ping req timeout])
                                             // UPDATE: Lot of publishes are being written by the time this notified
                                             // the eventloop thread. Setting disconnect_block = true during write failure
-                                            error!("Error in receiving packet {:?}", err);
+                                            error!("At line {:?} = Error in receiving packet {:?}", line!(), err);
                                             self.unbind();
                                             continue 'reconnect;
                                         }
                                     }
                                 } else {
-                                    error!("Error reading packet = {:?}", err);
+                                    error!("At line {:?} = Error reading packet = {:?}", line!(), err);
                                     self.unbind();
                                     continue 'reconnect;
                                 }
                             }
                             _ => {
-                                error!("Error reading packet = {:?}", err);
+                                error!("At line {:?} = Error reading packet = {:?}", line!(), err);
                                 self.unbind();
                                 continue 'reconnect;
                             }
@@ -217,7 +218,7 @@ impl Connection {
                 };
 
                 if let Err(e) = self.post_handle_packet(&packet) {
-                    error!("Error handling packet = {:?}", e);
+                    error!("At line {:?} = Error handling packet = {:?}", line!(), e);
                     continue 'receive;
                 }
             }
