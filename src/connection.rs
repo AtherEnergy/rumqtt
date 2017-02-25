@@ -243,7 +243,7 @@ impl Connection {
         // @ Helps in case where Tcp connection happened but in MqttState::Handshake
         // state.
         if self.state == MqttState::Connected {
-            for _ in 0..1000 {
+            for _ in 0..100_000 {
                 match self.nw_request_rx.try_recv()? {
                     NetworkRequest::Shutdown => self.stream.shutdown(Shutdown::Both)?,
                     NetworkRequest::Disconnect => self.disconnect()?,
