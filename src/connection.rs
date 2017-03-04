@@ -726,7 +726,10 @@ impl Connection {
 
     #[inline]
     fn write_packet(&mut self, packet: Vec<u8>) -> Result<()> {
-        self.stream.write_all(&packet)?;
+        if let Err(e) = self.stream.write_all(&packet){
+            warn!("{:?}", e);
+            return Err(e.into());
+        }
         self.flush()?;
         Ok(())
     }
