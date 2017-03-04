@@ -36,7 +36,7 @@ impl MqttClient {
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions, callbacks: Option<MqttCallback>) -> Result<Self> {
-        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
+        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(100_000);
         let addr = Self::lookup_ipv4(opts.addr.as_str());
         let mut connection = Connection::connect(addr, opts.clone(), nw_request_rx, callbacks)?;
         // This thread handles network reads (coz they are blocking) and
