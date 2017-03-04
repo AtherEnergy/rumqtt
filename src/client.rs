@@ -36,7 +36,7 @@ impl MqttClient {
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions, callbacks: Option<MqttCallback>) -> Result<Self> {
-        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(100_000);
+        let (nw_request_tx, nw_request_rx) = sync_channel::<NetworkRequest>(50);
         let addr = Self::lookup_ipv4(opts.addr.as_str());
         let mut connection = Connection::connect(addr, opts.clone(), nw_request_rx, callbacks)?;
         // This thread handles network reads (coz they are blocking) and
@@ -92,7 +92,26 @@ impl MqttClient {
 
     pub fn userdata_publish(&mut self, topic: &str, qos: QualityOfService, payload: Vec<u8>, userdata: Vec<u8>) -> Result<()> {
         let payload = Arc::new(payload);
-        self._publish(topic, false, qos, payload, Some(userdata))
+        let userdata = Arc::new(userdata);
+        let mut ret_val;
+        loop {
+            let payload = payload.clone();
+            ret_val = self._publish(topic, false, qos, payload, Some(userdata.clone()));
+            if let Err(Error::TrySend(ref e)) = ret_val {
+                match e {
+                    // break immediately if rx is dropped
+                    &TrySendError::Disconnected(_) => break,
+                    &TrySendError::Full(_) => {
+                        warn!("Request Queue Full !!!!!!!!");
+                        thread::sleep(Duration::new(2, 0));
+                        continue;
+                    }
+                }
+            } else {
+                return ret_val;
+            }
+        }
+        ret_val
     }
 
     pub fn retained_userdata_publish(&mut self,
@@ -102,6 +121,7 @@ impl MqttClient {
                                      userdata: Vec<u8>)
                                      -> Result<()> {
         let payload = Arc::new(payload);
+        let userdata = Arc::new(userdata);
         self._publish(topic, true, qos, payload, Some(userdata))
     }
 
@@ -120,7 +140,7 @@ impl MqttClient {
                 retain: bool,
                 qos: QualityOfService,
                 payload: Arc<Vec<u8>>,
-                userdata: Option<Vec<u8>>)
+                userdata: Option<Arc<Vec<u8>>>)
                 -> Result<()> {
 
         let topic = TopicName::new(topic.to_string())?;
@@ -135,7 +155,7 @@ impl MqttClient {
             retain: retain,
             qos: qos_pkid,
             payload: payload,
-            userdata: userdata.map(Arc::new),
+            userdata: userdata,
         };
 
         // TODO: Check message sanity here and return error if not
