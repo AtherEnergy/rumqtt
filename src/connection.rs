@@ -598,44 +598,61 @@ impl Connection {
         message.set_pkid(pkid);
         let qos = message.qos;
         let message_box = message.to_boxed(Some(qos));
-        let topic = message.topic;
-        let payload = &*message.payload;
-        let retain = message.retain;
-        let publish_packet = genpack::generate_publish_packet(topic, qos, retain, payload.clone())?;
+        let payload_len = message.payload.len();
+
+        let publish_packet = {
+            let payload = &*message.payload;
+            let topic = message.topic;
+            let retain = message.retain;
+            genpack::generate_publish_packet(topic, message.qos, retain, payload.to_vec())?
+        };
+
+        let mut size_exceeded = false;
 
         match message.qos {
             QoSWithPacketIdentifier::Level0 => (),
             QoSWithPacketIdentifier::Level1(_) => {
-                self.outgoing_pub.push_back(message_box.clone());
+                if payload_len > self.opts.storepack_sz {
+                    size_exceeded = true;
+                    warn!("Dropping packets due to size limit exceeded");
+                } else {
+                    self.outgoing_pub.push_back(message_box.clone());
+                }
 
                 if self.outgoing_pub.len() > self.opts.pub_q_len as usize * 50 {
                     warn!(":( :( Outgoing Publish Queue Length growing bad --> {:?}", self.outgoing_pub.len());
                 }
             }
             QoSWithPacketIdentifier::Level2(_) => {
-                self.outgoing_rec.push_back(message_box.clone());
+                if payload_len > self.opts.storepack_sz {
+                    size_exceeded = true;
+                    warn!("Dropping packets due to size limit exceeded");
+                } else {
+                    self.outgoing_rec.push_back(message_box.clone());
+                }
 
                 if self.outgoing_rec.len() > self.opts.pub_q_len as usize * 50 {
                     warn!(":( :( Outgoing Record Queue Length growing bad --> {:?}", self.outgoing_rec.len());
                 }
             }
         }
-        // error!("Queue --> {:?}\n\n", self.outgoing_pub);
-        // debug!("       Publish {:?} {:?} > {} bytes", message.qos,
-        // topic.clone().to_string(), message.payload.len());
-
 
         match message.qos {
-            QoSWithPacketIdentifier::Level0 => self.write_packet(publish_packet)?,
+            QoSWithPacketIdentifier::Level0 if !size_exceeded => self.write_packet(publish_packet)?,
             QoSWithPacketIdentifier::Level1(_) |
-            QoSWithPacketIdentifier::Level2(_) => {
+            QoSWithPacketIdentifier::Level2(_) if !size_exceeded => {
                 if self.state == MqttState::Connected {
                     self.write_packet(publish_packet)?;
                 } else {
                     warn!("State = {:?}. Skip network write", self.state);
                 }
             }
-        };
+            _ => {}
+        }
+
+        // error!("Queue --> {:?}\n\n", self.outgoing_pub);
+        // debug!("       Publish {:?} {:?} > {} bytes", message.qos,
+        // topic.clone().to_string(), message.payload.len());
         Ok(())
     }
 
