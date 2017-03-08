@@ -5,8 +5,6 @@ use mqtt::topic_name::TopicName;
 use mqtt::packet::*;
 use error::Result;
 
-
-
 #[derive(Clone)] //TODO: add Clone here
 pub struct Message {
     pub topic: TopicName,

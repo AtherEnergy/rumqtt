@@ -21,6 +21,7 @@ pub struct MqttOptions {
     pub ca: Option<PathBuf>,
     pub verify_ca: bool,
     pub client_cert: Option<(PathBuf, PathBuf)>,
+    pub storepack_sz: usize
 }
 
 impl Default for MqttOptions {
@@ -42,6 +43,7 @@ impl Default for MqttOptions {
             ca: None,
             verify_ca: true,
             client_cert: None,
+            storepack_sz: 100*1024
         }
     }
 }
@@ -75,6 +77,12 @@ impl MqttOptions {
     /// if you don't set one
     pub fn set_client_id(mut self, client_id: &str) -> Self {
         self.client_id = Some(client_id.to_string());
+        self
+    }
+
+    /// Size limit for packet persistance in queues (in KB's)
+    pub fn set_storepack_sz(mut self, sz: usize) -> Self {
+        self.storepack_sz = sz*1024;
         self
     }
 
