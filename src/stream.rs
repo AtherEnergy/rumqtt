@@ -38,8 +38,8 @@ impl SslContext {
         Ok(SslContext { inner: Arc::new(ctx_builder.build()) })
     }
 
-    pub fn connect(&self, stream: TcpStream) -> Result<SslStream> {
-        let ssl_stream = try!(ssl::SslConnector::danger_connect_without_providing_domain_for_certificate_verification_and_server_name_indication(&*self.inner, stream));
+    pub fn connect(&self, domain: &str, stream: TcpStream) -> Result<SslStream> {
+        let ssl_stream = try!(ssl::SslConnector::connect(&*self.inner, domain, stream));
         Ok(ssl_stream)
     }
 }
