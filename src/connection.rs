@@ -267,10 +267,10 @@ impl Connection {
             Some(ref ca) => {
                 if let Some((ref crt, ref key)) = self.opts.client_cert {
                     let ssl_ctx: SslContext = SslContext::new(ca, Some((crt, key)), self.opts.verify_ca)?;
-                    NetworkStream::Tls(ssl_ctx.connect(stream)?)
+                    NetworkStream::Tls(ssl_ctx.connect(&self.domain, stream)?)
                 } else {
                     let ssl_ctx: SslContext = SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca)?;
-                    NetworkStream::Tls(ssl_ctx.connect(stream)?)
+                    NetworkStream::Tls(ssl_ctx.connect(&self.domain, stream)?)
                 }
             }
             None => NetworkStream::Tcp(stream),
