@@ -51,6 +51,7 @@ pub enum NetworkRequest {
 
 pub struct Connection {
     pub addr: SocketAddr,
+    pub domain: String,
     pub opts: MqttOptions,
     pub stream: NetworkStream,
     pub nw_request_rx: Receiver<NetworkRequest>,
@@ -95,6 +96,7 @@ impl Connection {
 
         let mut connection = Connection {
             addr: addr,
+            domain: opts.addr.split(":").map(str::to_string).next().unwrap_or_default(),
             opts: opts,
             stream: NetworkStream::None,
             nw_request_rx: nw_request_rx,
