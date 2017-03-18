@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
+
 const BROKER_ADDRESS: &'static str = "dev-mqtt-broker.atherengineering.in:1883";
 const MOSQUITTO_ADDR: &'static str = "test.mosquitto.org:1883";
 
@@ -26,6 +27,83 @@ fn inital_tcp_connect_failure() {
 
     // Connects to a broker and returns a `request`
     let request = MqttClient::start(client_options, None).expect("Couldn't start");
+}
+
+#[test]
+#[should_panic]
+fn ssl_invalid_client_auth() {
+    env_logger::init().unwrap();
+    // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
+    let client_options = MqttOptions::new()
+        // .set_reconnect(5)
+        .set_broker("perf-mqtt-broker.atherengineering.in:5000")
+        .set_ca("utils/ca-chain.cert.pem")
+        .set_client_cert("utils/bike.cert.pem", "utils/bike.key.pem");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+
+    let counter_cb = move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+    };
+
+    let msg_callback = MqttCallback::new().on_message(counter_cb);
+
+    let mut request = MqttClient::start(client_options, Some(msg_callback)).expect("Coudn't start");
+
+    let topics = vec![("test/basic", QoS::Level0)];
+    request.subscribe(topics).expect("Subcription failure");
+    let payload = format!("hello rust");
+    request.publish("test/basic", QoS::Level0, payload.clone().into_bytes())
+        .unwrap();
+    request.publish("test/basic", QoS::Level1, payload.clone().into_bytes())
+        .unwrap();
+    request.publish("test/basic", QoS::Level2, payload.clone().into_bytes())
+        .unwrap();
+    thread::sleep(Duration::new(3, 0));
+    assert_eq!(3, final_count.load(Ordering::SeqCst));
+}
+
+#[test]
+#[should_panic]
+fn ssl_invalid_CA() {
+    env_logger::init().unwrap();
+    let client_options = MqttOptions::new()
+        .set_broker("perf-mqtt-broker.atherengineering.in:5000")
+        .set_ca("utils/ca.crt")
+        .set_client_cert("utils/bike_valid.cert.pem", "utils/bike_valid.key.pem");
+    let mut request = MqttClient::start(client_options, None).expect("Coudn't start");
+}
+
+#[test]
+fn ssl_mutual_authentication_pubsub() {
+    env_logger::init().unwrap();
+    // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
+    let client_options = MqttOptions::new()
+        .set_broker("perf-mqtt-broker.atherengineering.in:5000")
+        .set_ca("utils/ca-chain.cert.pem")
+        .set_client_cert("utils/bike_valid.cert.pem", "utils/bike_valid.key.pem");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+    let counter_cb = move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+    };
+    let msg_callback = MqttCallback::new().on_message(counter_cb);
+    let mut request = MqttClient::start(client_options, Some(msg_callback)).expect("Coudn't start");
+    let topics = vec![("test/basic", QoS::Level0)];
+    request.subscribe(topics).expect("Subcription failure");
+    let payload = format!("hello rust");
+    request.publish("test/basic", QoS::Level0, payload.clone().into_bytes())
+        .unwrap();
+    request.publish("test/basic", QoS::Level1, payload.clone().into_bytes())
+        .unwrap();
+    request.publish("test/basic", QoS::Level2, payload.clone().into_bytes())
+        .unwrap();
+    thread::sleep(Duration::new(3, 0));
+    assert_eq!(3, final_count.load(Ordering::SeqCst));
 }
 
 // After connecting to tcp, should timeout error if it didn't receive CONNACK
