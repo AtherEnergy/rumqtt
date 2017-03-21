@@ -11,7 +11,7 @@ pub struct MqttOptions {
     pub username: Option<String>,
     pub password: Option<String>,
     pub reconnect: Option<u16>,
-    pub will: Option<(String, String)>,
+    pub will: Option<(String, Vec<u8>)>,
     pub will_qos: QualityOfService,
     pub will_retain: bool,
     pub pub_q_len: u16,
@@ -154,8 +154,8 @@ impl MqttOptions {
 
     /// Set will for the client so that broker can send `will_message`
     /// on `will_topic` when this client ungracefully dies.
-    pub fn set_will(mut self, will_topic: &str, will_message: &str) -> Self {
-        self.will = Some((will_topic.to_string(), will_message.to_string()));
+    pub fn set_will(mut self, will_topic: &str, will_message: &[u8]) -> Self {
+        self.will = Some((will_topic.to_string(), will_message.to_vec()));
         self
     }
 

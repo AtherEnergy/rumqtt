@@ -1,4 +1,4 @@
-#![allow(unused_variables)] 
+#![allow(unused_variables)]
 extern crate rumqtt;
 
 use rumqtt::{MqttOptions, MqttClient, QoS};
@@ -23,7 +23,7 @@ fn inital_tcp_connect_failure(){
                                     .set_reconnect(5)
                                     .broker("localhost:9999");
 
-    // Connects to a broker and returns a `request` 
+    // Connects to a broker and returns a `request`
     let request = MqttClient::new(client_options)
                                 .start().expect("Couldn't start");
 }
@@ -49,7 +49,7 @@ fn inital_mqtt_connect_failure() {
                                     .broker("test.mosquitto.org:8883");
 
 
-    // Connects to a broker and returns a `request` 
+    // Connects to a broker and returns a `request`
     let request = MqttClient::new(client_options)
                                 .start().expect("Couldn't start");
 }
@@ -66,7 +66,7 @@ fn basic_publishes_and_subscribes() {
     let final_count = count.clone();
     let count = count.clone();
 
-    // Connects to a broker and returns a `request` 
+    // Connects to a broker and returns a `request`
     let request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
@@ -75,8 +75,8 @@ fn basic_publishes_and_subscribes() {
 
     let topics = vec![("test/basic", QoS::Level0)];
 
-    request.subscribe(topics).expect("Subcription failure");  
-    
+    request.subscribe(topics).expect("Subcription failure");
+
     let payload = format!("hello rust");
     request.publish("test/basic",  QoS::Level0, payload.clone().into_bytes()).unwrap();
     request.publish("test/basic",  QoS::Level1, payload.clone().into_bytes()).unwrap();
@@ -100,7 +100,7 @@ fn simple_reconnection() {
     let final_count = count.clone();
     let count = count.clone();
 
-    // Connects to a broker and returns a `request` 
+    // Connects to a broker and returns a `request`
     let request = MqttClient::new(client_options).
     message_callback(move |message| {
         count.fetch_add(1, Ordering::SeqCst);
@@ -108,7 +108,7 @@ fn simple_reconnection() {
     }).start().expect("Coudn't start");
 
     // Register message callback and subscribe
-    let topics = vec![("test/reconnect", QoS::Level2)];  
+    let topics = vec![("test/reconnect", QoS::Level2)];
     request.subscribe(topics).expect("Subcription failure");
 
     request.disconnect().unwrap();
@@ -130,7 +130,7 @@ fn acked_message() {
                                     .set_client_id("test-reconnect-client")
                                     .broker(BROKER_ADDRESS);
 
-    // Connects to a broker and returns a `request` 
+    // Connects to a broker and returns a `request`
     let mq_client = MqttClient::new(client_options);
     let mq_client = mq_client.publish_callback(|m| {
         let ref payload = *m.payload;
@@ -141,8 +141,8 @@ fn acked_message() {
         assert_eq!("MYUNIQUEUSERDATA".to_string(), userdata);
     });
     let request = mq_client.start().expect("Coudn't start");
-    request.userdata_publish("test/qos1/ack",  
-                             QoS::Level1, 
+    request.userdata_publish("test/qos1/ack",
+                             QoS::Level1,
                              "MYUNIQUEMESSAGE".to_string().into_bytes(),
                              "MYUNIQUEUSERDATA".to_string().into_bytes()).unwrap();
     thread::sleep(Duration::new(1, 0));
@@ -155,7 +155,7 @@ fn will() {
                                     .set_reconnect(15)
                                     .set_client_id("test-will-c1")
                                     .set_clean_session(false)
-                                    .set_will("test/will", "I'm dead")
+                                    .set_will("test/will", b"I'm dead")
                                     .broker(BROKER_ADDRESS);
 
     let client_options2 = MqttOptions::new()
@@ -219,7 +219,7 @@ fn retained_messages() {
     request.retained_publish("test/0/retain",  QoS::Level0, payload.clone().into_bytes()).unwrap();
     request.retained_publish("test/1/retain",  QoS::Level1, payload.clone().into_bytes()).unwrap();
     request.retained_publish("test/2/retain",  QoS::Level2, payload.clone().into_bytes()).unwrap();
-    
+
     // NOTE: Request notifications are on different mio channels. We don't know
     // about priority. Wait till all the publishes are recived by connection thread
     // before disconnection
@@ -305,7 +305,7 @@ fn simple_qos1_stress_publish() {
 /// This test tests if all packets are being published after reconnections
 /// NOTE: Previous tests used subscribes to same topic to decide if all the
 /// publishes are successful. When reconnections are involved, some publishes
-/// might happen before subscription is successful. You can verify this by 
+/// might happen before subscription is successful. You can verify this by
 /// keeping prints at CONNACK, SUBACK & _PUBLISH(). After connection is successful
 /// you'll see some publishes before SUBACK.
 fn qos1_stress_publish_with_reconnections() {
@@ -355,7 +355,7 @@ fn simple_qos2_stress_publish() {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
-    
+
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         request.publish("test/qos2/stress",  QoS::Level2, payload.clone().into_bytes()).unwrap();
@@ -383,7 +383,7 @@ fn qos2_stress_publish_with_reconnections() {
         count.fetch_add(1, Ordering::SeqCst);
         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
     }).start().expect("Coudn't start");
-    
+
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         if i == 40 || i == 500 || i == 900 {
@@ -425,7 +425,7 @@ fn qos2_stress_publish_with_reconnections() {
 //         count.fetch_add(1, Ordering::SeqCst);
 //         // println!("{}. message --> {:?}", count.load(Ordering::SeqCst), message);
 //     }).start().expect("Coudn't start");
-    
+
 //     for i in 0..50 {
 //         let payload = format!("{}. hello rust", i);
 //         if i == 40 || i == 500 || i == 900 {

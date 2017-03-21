@@ -7,7 +7,7 @@ use error::Result;
 pub fn generate_connect_packet(client_id: Option<String>,
                                clean_session: bool,
                                keep_alive: Option<u16>,
-                               will: Option<(String, String)>,
+                               will: Option<(String, Vec<u8>)>,
                                will_qos: QualityOfService,
                                will_retain: bool,
                                username: Option<String>,
@@ -22,7 +22,7 @@ pub fn generate_connect_packet(client_id: Option<String>,
         connect_packet.set_keep_alive(keep_alive);
     }
 
-    // Converting (String, String) -> (TopicName, String)
+    // Converting (String, Vec<u8>) -> (TopicName, Vec<u8>)
     let will = match will {
         Some(will) => Some((try!(TopicName::new(will.0)), will.1)),
         None => None,
