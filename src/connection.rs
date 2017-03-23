@@ -64,6 +64,7 @@ pub type PublishSendableFn = Box<Fn(Message) + Send + Sync>;
 
 pub struct Connection {
     pub addr: SocketAddr,
+    pub domain: String,
     pub opts: MqttOptions,
     pub stream: NetworkStream,
     pub nw_request_rx: Receiver<NetworkRequest>,
@@ -111,6 +112,7 @@ impl Connection {
 
         let mut connection = Connection {
             addr: addr,
+            domain: opts.addr.split(":").map(str::to_string).next().unwrap_or_default(),
             opts: opts,
             stream: NetworkStream::None,
             nw_request_rx: nw_request_rx,
@@ -322,10 +324,10 @@ impl Connection {
                     Some(ref ca) => {
                         if let Some((ref crt, ref key)) = self.opts.client_cert {
                             let ssl_ctx: SslContext = try!(SslContext::new(ca, Some((crt, key)), self.opts.verify_ca));
-                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                            NetworkStream::Tls(try!(ssl_ctx.connect(&self.domain, stream)))
                         } else {
                             let ssl_ctx: SslContext = try!(SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca));
-                            NetworkStream::Tls(try!(ssl_ctx.connect(stream)))
+                            NetworkStream::Tls(try!(ssl_ctx.connect(&self.domain, stream)))
                         }
                     }
                     None => NetworkStream::Tcp(stream),
