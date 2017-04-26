@@ -23,7 +23,6 @@ impl SslContext {
               K: AsRef<Path>
     {
         let mut ctx_builder = try!(ssl::SslConnectorBuilder::new(SslMethod::tls()));
-
         try!(ctx_builder.builder_mut().set_ca_file(ca.as_ref()));
         if let Some((cert, key)) = client_pair {
             try!(ctx_builder.builder_mut().set_certificate_file(cert, X509_FILETYPE_PEM));

@@ -10,7 +10,7 @@ pub struct MqttOptions {
     pub client_id: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
-    pub reconnect: Option<u16>,
+    pub reconnect: u16,
     pub will: Option<(String, String)>,
     pub will_qos: QualityOfService,
     pub will_retain: bool,
@@ -21,6 +21,7 @@ pub struct MqttOptions {
     pub ca: Option<PathBuf>,
     pub verify_ca: bool,
     pub client_cert: Option<(PathBuf, PathBuf)>,
+    pub storepack_sz: usize
 }
 
 impl Default for MqttOptions {
@@ -32,7 +33,7 @@ impl Default for MqttOptions {
             client_id: None,
             username: None,
             password: None,
-            reconnect: Some(5),
+            reconnect: 5,
             will: None,
             will_qos: QualityOfService::Level0,
             will_retain: false,
@@ -42,10 +43,10 @@ impl Default for MqttOptions {
             ca: None,
             verify_ca: true,
             client_cert: None,
+            storepack_sz: 100*1024
         }
     }
 }
-
 
 impl MqttOptions {
     /// Creates a new `MqttOptions` object which is used to set connection
@@ -76,6 +77,12 @@ impl MqttOptions {
     /// if you don't set one
     pub fn set_client_id(mut self, client_id: &str) -> Self {
         self.client_id = Some(client_id.to_string());
+        self
+    }
+
+    /// Size limit for packet persistance in queues (in KB's)
+    pub fn set_storepack_sz(mut self, sz: usize) -> Self {
+        self.storepack_sz = sz*1024;
         self
     }
 
@@ -148,7 +155,7 @@ impl MqttOptions {
     /// By default, no retry will happen
     // TODO: Rename
     pub fn set_reconnect(mut self, dur: u16) -> Self {
-        self.reconnect = Some(dur);
+        self.reconnect = dur;
         self
     }
 
@@ -204,15 +211,16 @@ impl MqttOptions {
     /// **NOTE**: This should be the final call of `MqttOptions` method
     /// chaining
     ///
-    /// ```ignore
-    /// let client = client_options.set_keep_alive(5)
+    /// ```
+    /// use rumqtt::MqttOptions;
+    /// let client = MqttOptions::new()
+    ///                           .set_keep_alive(5)
     ///                           .set_reconnect(5)
     ///                           .set_client_id("my-client-id")
     ///                           .set_clean_session(true)
-    ///                           .connect("localhost:1883");
+    ///                           .set_broker("localhost:1883");
     ///
-    // TODO: Rename
-    pub fn broker(mut self, addr: &str) -> Self {
+    pub fn set_broker(mut self, addr: &str) -> Self {
         if self.client_id == None {
             self.generate_client_id();
         }
