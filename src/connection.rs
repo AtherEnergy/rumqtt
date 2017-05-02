@@ -788,9 +788,11 @@ mod test {
         let addr = lookup_ipv4("test.mosquitto.org:1883");
         let (_, rx) = sync_channel(10);
         let opts = MqttOptions::new();
+        let domain = opts.addr.split(":").map(str::to_string).next().unwrap_or_default();
         let conn = Connection {
             addr: addr,
             opts: opts,
+            domain: domain,
             stream: NetworkStream::None,
             nw_request_rx: rx,
             state: MqttState::Disconnected,
