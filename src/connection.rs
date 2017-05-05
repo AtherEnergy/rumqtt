@@ -51,6 +51,7 @@ pub enum NetworkRequest {
 
 pub struct Connection {
     pub addr: SocketAddr,
+    pub domain: String,
     pub opts: MqttOptions,
     pub stream: NetworkStream,
     pub nw_request_rx: Receiver<NetworkRequest>,
@@ -95,6 +96,7 @@ impl Connection {
 
         let mut connection = Connection {
             addr: addr,
+            domain: opts.addr.split(":").map(str::to_string).next().unwrap_or_default(),
             opts: opts,
             stream: NetworkStream::None,
             nw_request_rx: nw_request_rx,
@@ -267,10 +269,10 @@ impl Connection {
             Some(ref ca) => {
                 if let Some((ref crt, ref key)) = self.opts.client_cert {
                     let ssl_ctx: SslContext = SslContext::new(ca, Some((crt, key)), self.opts.verify_ca)?;
-                    NetworkStream::Tls(ssl_ctx.connect(stream)?)
+                    NetworkStream::Tls(ssl_ctx.connect(&self.domain, stream)?)
                 } else {
                     let ssl_ctx: SslContext = SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca)?;
-                    NetworkStream::Tls(ssl_ctx.connect(stream)?)
+                    NetworkStream::Tls(ssl_ctx.connect(&self.domain, stream)?)
                 }
             }
             None => NetworkStream::Tcp(stream),
@@ -786,9 +788,11 @@ mod test {
         let addr = lookup_ipv4("test.mosquitto.org:1883");
         let (_, rx) = sync_channel(10);
         let opts = MqttOptions::new();
+        let domain = opts.addr.split(":").map(str::to_string).next().unwrap_or_default();
         let conn = Connection {
             addr: addr,
             opts: opts,
+            domain: domain,
             stream: NetworkStream::None,
             nw_request_rx: rx,
             state: MqttState::Disconnected,

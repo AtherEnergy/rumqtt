@@ -1,14 +1,52 @@
-// #![allow(unused_variables)]
-// extern crate rumqtt;
+#![allow(unused_variables)]
+extern crate rumqtt;
 
-// use rumqtt::{MqttOptions, MqttClient, QoS};
-// use std::thread;
-// use std::time::Duration;
-// use std::sync::Arc;
-// use std::sync::atomic::{AtomicUsize, Ordering};
+use rumqtt::{MqttOptions, MqttClient, MqttCallback, QoS};
+use std::thread;
+use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 // #[macro_use]
 // extern crate log;
 // extern crate env_logger;
+
+fn ssl_invalid_ca() {
+    // env_logger::init().unwrap();
+    let client_options = MqttOptions::new()
+        .set_broker("perf-mqtt-broker.atherengineering.in:5000")
+        .set_ca("utils/ca_chain_bad.cert.pem")
+        .set_client_cert("utils/bike.cert.pem", "utils/bike.key.pem");
+    let request = MqttClient::start(client_options, None).expect("Coudn't start");
+}
+
+fn ssl_mutual_authentication_pubsub() {
+    // env_logger::init().unwrap();
+    // TODO: Bugfix. Client hanging when connecting to broker.hivemq.com:9999
+    let client_options = MqttOptions::new()
+        .set_broker("perf-mqtt-broker.atherengineering.in:5000")
+        .set_ca("utils/ca-chain.cert.pem")
+        .set_client_cert("utils/s340.cert.pem", "utils/s340.key.pem");
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let final_count = count.clone();
+    let count = count.clone();
+    let counter_cb = move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+    };
+    let msg_callback = MqttCallback::new().on_message(counter_cb);
+    let mut request = MqttClient::start(client_options, Some(msg_callback)).expect("Coudn't start");
+    let topics = vec![("test/basic", QoS::Level0)];
+    request.subscribe(topics).expect("Subcription failure");
+    let payload = format!("hello rust");
+    request.publish("test/basic", QoS::Level0, payload.clone().into_bytes())
+        .unwrap();
+    request.publish("test/basic", QoS::Level1, payload.clone().into_bytes())
+        .unwrap();
+    request.publish("test/basic", QoS::Level2, payload.clone().into_bytes())
+        .unwrap();
+    thread::sleep(Duration::new(3, 0));
+    assert_eq!(3, final_count.load(Ordering::SeqCst));
+}
 
 // // TEST 1: Check if ping requests are going in time in a stable connection.
 // // [working]

@@ -6,15 +6,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE, SSL_VERIFY_PEER};
-use openssl::x509::X509FileType;
+use openssl::x509::X509_FILETYPE_PEM;
 
 pub type SslStream = ssl::SslStream<TcpStream>;
 
 use error::Result;
 
-#[derive(Debug)]
 pub struct SslContext {
-    pub inner: Arc<ssl::SslContext>,
+    pub inner: Arc<ssl::SslConnector>,
 }
 
 impl SslContext {
@@ -23,24 +22,24 @@ impl SslContext {
               C: AsRef<Path>,
               K: AsRef<Path>
     {
-        let mut ctx: ssl::SslContext = ssl::SslContext::new(SslMethod::Tlsv1_2)?;
-        ctx.set_cipher_list("DEFAULT")?;
-        ctx.set_CA_file(ca.as_ref())?;
+        let mut ctx_builder = try!(ssl::SslConnectorBuilder::new(SslMethod::tls()));
 
+        try!(ctx_builder.builder_mut().set_ca_file(ca.as_ref()));
         if let Some((cert, key)) = client_pair {
-            ctx.set_certificate_file(cert, X509FileType::PEM)?;
-            ctx.set_private_key_file(key, X509FileType::PEM)?;
+            try!(ctx_builder.builder_mut().set_certificate_file(cert, X509_FILETYPE_PEM));
+            try!(ctx_builder.builder_mut().set_private_key_file(key, X509_FILETYPE_PEM));
         }
         if should_verify_ca {
-            ctx.set_verify(SSL_VERIFY_PEER);
+            ctx_builder.builder_mut().set_verify(SSL_VERIFY_PEER);
         } else {
-            ctx.set_verify(SSL_VERIFY_NONE);
+            ctx_builder.builder_mut().set_verify(SSL_VERIFY_NONE);
         }
-        Ok(SslContext { inner: Arc::new(ctx) })
+
+        Ok(SslContext { inner: Arc::new(ctx_builder.build()) })
     }
 
-    pub fn connect(&self, stream: TcpStream) -> Result<SslStream> {
-        let ssl_stream = ssl::SslStream::connect(&*self.inner, stream)?;
+    pub fn connect(&self, domain: &str, stream: TcpStream) -> Result<SslStream> {
+        let ssl_stream = try!(ssl::SslConnector::connect(&*self.inner, domain, stream));
         Ok(ssl_stream)
     }
 }
