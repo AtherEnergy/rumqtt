@@ -1,0 +1,15 @@
+[package]
+name = "cloudpubsub"
+version = "0.1.0"
+authors = ["tekjar <k.teza1@gmail.com>"]
+
+[dependencies]
+rand = "0.3"
+quick-error = "1.1"
+log = "0.3"
+mqtt311 = "0.1"
+openssl = { version = "0.9" }
+threadpool = "1"
+
+[dev-dependencies]
+pretty_env_logger = "0.1"

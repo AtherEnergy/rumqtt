@@ -1,0 +1,4 @@
+* Broker dropping packets for high frequency pubishes with default config
+* Broker not closing socket properly while publishing lot of messages and removing the cable at
+  client end. Client isn't able to read EOF after reconnection. Where as with other brokers like
+  broker.hivemq.com, socket closes are proper and EOF is read after reconnection.
