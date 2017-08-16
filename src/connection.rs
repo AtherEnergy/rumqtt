@@ -85,6 +85,9 @@ pub struct Connection {
     pub no_of_reconnections: u32,
 
     pub pool: ThreadPool,
+
+    // Prevent reconnects when not desired
+    pub dont_reconnect: bool,
 }
 
 impl Connection {
@@ -122,6 +125,9 @@ impl Connection {
 
             // Threadpool
             pool: ThreadPool::new(1),
+
+            // Prevent reconnects after disconnect
+            dont_reconnect: false,
         };
 
         connection.state = MqttState::Disconnected;
@@ -142,6 +148,12 @@ impl Connection {
                     self.initial_connect = false;
                     break;
                 } else {
+                    // Don't reconnect if we've explicitly disconnected
+                    if self.dont_reconnect {
+                        info!("$$$ Terminating due to explicit user request");
+                        return Ok(())
+                    }
+
                     self.state = MqttState::Disconnected;
                     match self.try_reconnect() {
                         Ok(_) => {
@@ -247,8 +259,14 @@ impl Connection {
         if self.state == MqttState::Connected {
             for _ in 0..50 {
                 match self.nw_request_rx.try_recv()? {
-                    NetworkRequest::Shutdown => self.stream.shutdown(Shutdown::Both)?,
-                    NetworkRequest::Disconnect => self.disconnect()?,
+                    NetworkRequest::Shutdown => {
+                        self.dont_reconnect = true;
+                        self.stream.shutdown(Shutdown::Both)?
+                    },
+                    NetworkRequest::Disconnect => {
+                        self.dont_reconnect = true;
+                        self.disconnect()?
+                    },
                     NetworkRequest::Publish(m) => self.publish(m)?,
                     NetworkRequest::Subscribe(s) => {
                         self.subscriptions.push_back(s.clone());
