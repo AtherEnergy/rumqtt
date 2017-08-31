@@ -1,5 +1,7 @@
 use mqtt3::*;
 
+use std::sync::Arc;
+
 pub fn gen_connect_packet(id: &str, keep_alive: u16, clean_session: bool,
                           username: Option<String>,
                           password: Option<String>)
@@ -41,22 +43,22 @@ pub fn gen_pingreq_packet() -> Packet {
 //     })
 // }
 
-// pub fn gen_publish_packet(topic_name: String,
-//                           qos: QoS,
-//                           pkid: Option<PacketIdentifier>,
-//                           retain: bool,
-//                           dup: bool,
-//                           payload: Arc<Vec<u8>>)
-//                           -> Packet {
-//     Packet::Publish(Publish {
-//         dup: dup,
-//         qos: qos,
-//         retain: retain,
-//         topic_name: topic_name,
-//         pid: pkid,
-//         payload: payload,
-//     })
-// }
+pub fn gen_publish_packet(topic_name: &str,
+                          qos: QoS,
+                          pkid: Option<PacketIdentifier>,
+                          retain: bool,
+                          dup: bool,
+                          payload: Arc<Vec<u8>>)
+                          -> Publish {
+    Publish {
+        dup: dup,
+        qos: qos,
+        retain: retain,
+        topic_name: topic_name.to_string(),
+        pid: pkid,
+        payload: payload,
+    }
+}
 
 // pub fn gen_puback_packet(pkid: PacketIdentifier) -> Packet {
 //     Packet::Puback(pkid)

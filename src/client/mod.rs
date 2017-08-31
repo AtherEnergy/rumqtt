@@ -1,11 +1,15 @@
 mod connection;
 
 use std::thread;
+use std::sync::mpsc as stdmpsc;
+use std::sync::Arc;
 
 use futures::sync::mpsc::Sender;
-use std::sync::mpsc as stdmpsc;
+use futures::{Future, Sink};
+use mqtt3::*;
 
 use MqttOptions;
+use packet;
 
 use self::connection::NetworkRequest;
 
@@ -34,5 +38,24 @@ impl MqttClient {
         let client = MqttClient { nw_request_tx: command_tx,  rx_command_tx: rx_command_tx};
 
         client
+    }
+
+    pub fn publish(&mut self, topic: &str, qos: QoS, payload: Vec<u8>) {
+        let payload = Arc::new(payload);
+
+        // TODO: Find ways to remove clone to improve perf
+        let mut nw_request_tx = self.nw_request_tx.clone();
+
+        loop {
+            let payload = payload.clone();
+            let publish = packet::gen_publish_packet(topic, qos, None, false, false, payload);
+
+            let r = nw_request_tx.send(NetworkRequest::Publish(publish)).wait();
+
+            nw_request_tx = match r {
+                Ok(tx) => tx,
+                Err(e) => self.rx_command_tx.recv().unwrap()
+            };
+        }
     }
 }

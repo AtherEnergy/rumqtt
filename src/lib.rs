@@ -18,3 +18,4 @@ mod client;
 // expose to other crates
 pub use mqttopts::MqttOptions;
 pub use client::MqttClient;
+pub use mqtt3::QoS;
