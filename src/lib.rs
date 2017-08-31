@@ -11,6 +11,7 @@ extern crate log;
 
 mod codec;
 mod packet;
+mod mqttopts;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::io::{self, ErrorKind};
@@ -30,3 +31,6 @@ use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 use mqtt3::*;
+
+// expose to other crates
+pub use mqttopts::MqttOptions;
