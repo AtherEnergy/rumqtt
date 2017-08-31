@@ -60,13 +60,13 @@ pub enum NetworkRequest {
     Ping,
 }
 
-pub fn start(opts: MqttOptions, new_commands_tx: mpsc::Sender<Sender<NetworkRequest>>) {
+pub fn start(opts: MqttOptions, tx_commands_tx: stdmpsc::SyncSender<Sender<NetworkRequest>>) {
     loop {
         let mut reactor = Core::new().unwrap();
         let handle = reactor.handle();
         // TODO: fix the clone
         let opts = opts.clone();
-        let mut new_commands_tx = new_commands_tx.clone();
+        let tx_commands_tx = tx_commands_tx.clone();
         // config
         // NOTE: make sure that dns resolution happens during reconnection incase 
         //       ip of the server changes
@@ -74,6 +74,7 @@ pub fn start(opts: MqttOptions, new_commands_tx: mpsc::Sender<Sender<NetworkRequ
         let id = opts.client_id;
         let keep_alive = opts.keep_alive.unwrap();
         let clean_session =  opts.clean_session;
+        let reconnect_after = opts.reconnect_after.unwrap();
 
         let client = async_block! {
             let stream = await!(TcpStream::connect(&addr, &handle))?;
@@ -85,11 +86,7 @@ pub fn start(opts: MqttOptions, new_commands_tx: mpsc::Sender<Sender<NetworkRequ
             // so that it can sent network requests to this 'connection' thread
             let (commands_tx, commands_rx) = mpsc::channel::<NetworkRequest>(10);
             let ping_commands_tx = commands_tx.clone();
-            new_commands_tx = await!(
-                new_commands_tx.send(commands_tx).or_else(|err| {
-                    Err(io::Error::new(ErrorKind::Other, err.description()))
-                })
-            )?;
+            tx_commands_tx.try_send(commands_tx).unwrap();
 
 
             let (sender, receiver) = framed.split();
@@ -124,7 +121,7 @@ pub fn start(opts: MqttOptions, new_commands_tx: mpsc::Sender<Sender<NetworkRequ
 
         let response = reactor.run(client);
         println!("{:?}", response);
-        thread::sleep(Duration::new(5, 0));
+        thread::sleep(Duration::new(reconnect_after as u64, 0));
     }
 }
 

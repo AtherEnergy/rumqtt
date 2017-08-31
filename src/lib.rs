@@ -15,11 +15,6 @@ mod packet;
 mod mqttopts;
 mod client;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::io::{self, ErrorKind};
-use std::error::Error;
-use std::time::Duration;
-use std::thread;
-
 // expose to other crates
 pub use mqttopts::MqttOptions;
+pub use client::MqttClient;
