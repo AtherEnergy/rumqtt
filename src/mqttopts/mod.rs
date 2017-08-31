@@ -1,25 +1,27 @@
 use std::path::{Path, PathBuf};
 
+// TODO: Add getters & make fields private
+
 #[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
-    broker_addr: String,
+    pub broker_addr: String,
     /// keep alive time to send pingreq to broker when the connection is idle
-    keep_alive: Option<u16>,
+    pub keep_alive: Option<u16>,
     /// clean (or) persistent session 
-    clean_session: bool,
+    pub clean_session: bool,
     /// sleep time before retrying for connection
-    reconnect_after: Option<u16>,
+    pub reconnect_after: Option<u16>,
     /// try reconnection even if the first connect fails
-    first_reconnection_loop: bool,
+    pub first_reconnection_loop: bool,
     /// client identifier
-    client_id: String,
+    pub client_id: String,
     /// username and password
-    credentials: Option<(String, String)>,
+    pub credentials: Option<(String, String)>,
     /// ca cert and client cert, key (for client auth)
-    certs: Option<(PathBuf, Option<(PathBuf, PathBuf)>)>,
+    pub certs: Option<(PathBuf, Option<(PathBuf, PathBuf)>)>,
     /// maximum packet size
-    max_packet_size: usize,
+    pub max_packet_size: usize,
 }
 
 impl MqttOptions {

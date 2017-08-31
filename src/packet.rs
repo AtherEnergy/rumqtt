@@ -1,6 +1,6 @@
 use mqtt3::*;
 
-fn gen_connect_packet(id: &str, keep_alive: u16, clean_session: bool,
+pub fn gen_connect_packet(id: &str, keep_alive: u16, clean_session: bool,
                           username: Option<String>,
                           password: Option<String>)
                           -> Packet {
@@ -19,7 +19,7 @@ fn gen_connect_packet(id: &str, keep_alive: u16, clean_session: bool,
 //     Packet::Disconnect
 // }
 
-fn gen_pingreq_packet() -> Packet {
+pub fn gen_pingreq_packet() -> Packet {
     Packet::Pingreq
 }
 
