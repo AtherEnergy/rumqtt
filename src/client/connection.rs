@@ -70,6 +70,7 @@ pub fn start(opts: MqttOptions, tx_commands_tx: stdmpsc::SyncSender<Sender<Netwo
         // config
         // NOTE: make sure that dns resolution happens during reconnection incase 
         //       ip of the server changes
+        // TODO: Handle all the unwraps here
         let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
         let id = opts.client_id;
         let keep_alive = opts.keep_alive.unwrap();

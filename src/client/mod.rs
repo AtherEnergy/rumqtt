@@ -3,6 +3,7 @@ mod connection;
 use std::thread;
 use std::sync::mpsc as stdmpsc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::sync::mpsc::Sender;
 use futures::{Future, Sink};
@@ -33,7 +34,19 @@ impl MqttClient {
             }
         );
 
-        let command_tx = rx_command_tx.recv().unwrap();
+        // get 'tx' from connection to be able to send network requests to it
+        let command_tx;
+        loop {
+            command_tx = match rx_command_tx.recv() {
+                Ok(tx) => tx,
+                Err(e) => {
+                    info!("Waiting for connection thread for successful connection");
+                    thread::sleep(Duration::new(1, 0));
+                    continue;
+                }
+            };
+            break
+        }
 
         let client = MqttClient { nw_request_tx: command_tx,  rx_command_tx: rx_command_tx};
 
@@ -43,19 +56,34 @@ impl MqttClient {
     pub fn publish(&mut self, topic: &str, qos: QoS, payload: Vec<u8>) {
         let payload = Arc::new(payload);
 
-        // TODO: Find ways to remove clone to improve perf
-        let mut nw_request_tx = self.nw_request_tx.clone();
-
         loop {
+            // TODO: Find ways to remove clone to improve perf
+            let nw_request_tx = self.nw_request_tx.clone();
+
+            // TODO: Fix clone
             let payload = payload.clone();
             let publish = packet::gen_publish_packet(topic, qos, None, false, false, payload);
-
             let r = nw_request_tx.send(NetworkRequest::Publish(publish)).wait();
 
-            nw_request_tx = match r {
-                Ok(tx) => tx,
-                Err(e) => self.rx_command_tx.recv().unwrap()
-            };
+            // incase of failures, fetch new 'tx' from connection and retry
+            if let Ok(tx) = r {
+                self.nw_request_tx = tx;
+                break;
+            } else {
+                loop {
+                    match self.rx_command_tx.recv() {
+                        Ok(tx) => {
+                            self.nw_request_tx = tx;
+                            break;
+                        }
+                        Err(e) => {
+                            info!("Waiting for connection thread for successful connection");
+                            thread::sleep(Duration::new(1, 0));
+                            continue;
+                        }
+                    };
+                }
+            }
         }
     }
 }
