@@ -34,7 +34,7 @@ struct MqttState {
     opts: MqttOptions,
 
     // --------  State  ----------
-    connection_state: MqttConnectionStatus,
+    connection_status: MqttConnectionStatus,
     initial_connect: bool,
     await_pingresp: bool,
     last_flush: Instant,
@@ -54,11 +54,18 @@ struct MqttState {
     pool: ThreadPool,
 }
 
+/// Design: MqttState methods will just modify the state of the object
+///         but doesn't do any network operations. Methods will do
+///         appropriate returns so that n/w methods or n/w eventloop can
+///         operate on it directly. This abstracts the functionality better
+///         so that it's easy to switch between synchronous code, tokio (or)
+///         async/await
+
 impl MqttState {
     fn new(opts: MqttOptions) -> Self {
         MqttState {
             opts: opts,
-            connection_state: MqttConnectionStatus::Disconnected,
+            connection_status: MqttConnectionStatus::Disconnected,
             initial_connect: true,
             await_pingresp: false,
             last_flush: Instant::now(),
@@ -124,12 +131,12 @@ impl MqttState {
                     return Err(PingError::AwaitPingResp);
                 }
 
-                if self.connection_state == MqttConnectionStatus::Connected {
+                if self.connection_status == MqttConnectionStatus::Connected {
                     self.last_flush = Instant::now();
                     self.await_pingresp = true;
                     return Ok(true)
                 } else {
-                    error!("State = {:?}. Shouldn't ping in this state", self.connection_state);
+                    error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
                     return Err(PingError::InvalidState)
                 }
             }
@@ -140,6 +147,16 @@ impl MqttState {
 
     pub fn handle_incoming_pingresp(&mut self) {
         self.await_pingresp = false;
+    }
+
+    pub fn handle_disconnect(&mut self) {
+        self.await_pingresp = false;
+        self.connection_status = MqttConnectionStatus::Disconnected;
+
+        // remove all the state
+        if self.opts.clean_session {
+            self.outgoing_pub.clear();
+        }
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
@@ -303,7 +320,7 @@ mod test {
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
         mqtt.opts.keep_alive = Some(5);
-        mqtt.connection_state = MqttConnectionStatus::Connected;
+        mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::new(5, 0));
         // should ping
         assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
@@ -316,7 +333,7 @@ mod test {
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
         mqtt.opts.keep_alive = Some(5);
-        mqtt.connection_state = MqttConnectionStatus::Connected;
+        mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::new(7, 0));
         // should ping
         assert_eq!(Err(PingError::Timeout), mqtt.handle_outgoing_ping());
@@ -326,7 +343,7 @@ mod test {
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
         mqtt.opts.keep_alive = Some(5);
-        mqtt.connection_state = MqttConnectionStatus::Connected;
+        mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::new(5, 0));
         // should ping
         assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
@@ -334,5 +351,54 @@ mod test {
         thread::sleep(Duration::new(5, 0));
         // should ping
         assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
+    }
+
+    #[test]
+    fn disconnect_handle_should_reset_everything_in_clean_session() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.await_pingresp = true;
+        // QoS1 Publish
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish);
+
+        mqtt.handle_disconnect();
+        assert_eq!(mqtt.outgoing_pub.len(), 0);
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
+        assert_eq!(mqtt.await_pingresp, false);
+    }
+
+    #[test]
+    fn disconnect_handle_should_reset_everything_except_queues_in_persistent_session() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.await_pingresp = true;
+        mqtt.opts.clean_session = false;
+        // QoS1 Publish
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish);
+
+        mqtt.handle_disconnect();
+        assert_eq!(mqtt.outgoing_pub.len(), 3);
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
+        assert_eq!(mqtt.await_pingresp, false);
     }
 }
