@@ -11,10 +11,10 @@ use mqtt3::*;
 use MqttOptions;
 use packet;
 
-use self::connection::NetworkRequest;
+use self::connection::Request;
 
 pub struct MqttClient {
-    nw_request_tx: Sender<NetworkRequest>,
+    nw_request_tx: Sender<Request>,
 }
 
 impl MqttClient {
@@ -46,6 +46,6 @@ impl MqttClient {
         // TODO: Fix clone
         let payload = payload.clone();
         let publish = packet::gen_publish_packet(topic, qos, None, false, false, payload);
-        let r = nw_request_tx.send(NetworkRequest::Publish(publish)).wait();
+        let r = nw_request_tx.send(Request::Publish(publish)).wait();
     }
 }

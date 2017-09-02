@@ -1,6 +1,6 @@
 A fast, asynchronous, pure rust mqtt client
 
-## Features
+## Mqtt Features
 
 - [ ] Supports QoS 0, QoS 1 and QoS 2
 - [ ] Auto reconnect
@@ -10,3 +10,9 @@ A fast, asynchronous, pure rust mqtt client
 - [ ] Authentication with username and password
 - [ ] Gcloud IOT core authentication support
 - [ ] Passes paho interop testsuite
+
+
+## Other Advantages & Benchmarks
+- [ ] Max packet size customization
+- [ ] Easy to use client object from multiple threads simultaneously
+- [ ] Low memory foot print

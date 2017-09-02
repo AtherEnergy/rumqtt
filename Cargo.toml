@@ -20,4 +20,4 @@ log = "0.3"
 threadpool = "1"
 
 [dev-dependencies]
-env_logger = "0.3"
+loggerv = "0.3"
