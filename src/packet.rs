@@ -5,8 +5,8 @@ use std::sync::Arc;
 pub fn gen_connect_packet(id: &str, keep_alive: u16, clean_session: bool,
                           username: Option<String>,
                           password: Option<String>)
-                          -> Packet {
-    Packet::Connect(Connect {
+                          -> Connect {
+    Connect {
         protocol: Protocol::MQTT(4),
         keep_alive: keep_alive,
         client_id: id.to_string(),
@@ -14,20 +14,8 @@ pub fn gen_connect_packet(id: &str, keep_alive: u16, clean_session: bool,
         last_will: None,
         username: username,
         password: password,
-    })
+    }
 }
-
-// pub fn gen_disconnect_packet() -> Packet {
-//     Packet::Disconnect
-// }
-
-pub fn gen_pingreq_packet() -> Packet {
-    Packet::Pingreq
-}
-
-// pub fn gen_pingresp_packet() -> Packet {
-//     Packet::Pingresp
-// }
 
 // pub fn gen_subscribe_packet(pkid: PacketIdentifier, topics: Vec<SubscribeTopic>) -> Packet {
 //     Packet::Subscribe(Subscribe {

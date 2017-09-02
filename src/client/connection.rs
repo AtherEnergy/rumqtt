@@ -7,9 +7,9 @@ use std::error::Error;
 use std::thread;
 
 use futures::prelude::*;
-use futures::stream::{Stream, SplitSink};
+use futures::stream::{Stream, SplitSink, SplitStream};
 use futures::sync::mpsc::{self, Sender, Receiver};
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Handle};
 use tokio_core::net::TcpStream;
 use tokio_timer::Timer;
 use tokio_io::AsyncRead;
@@ -58,18 +58,23 @@ pub enum NetworkRequest {
     Subscribe(Vec<(TopicPath, QoS)>),
     Publish(Publish),
     Ping,
+    Drain,
 }
 
-pub fn start(opts: MqttOptions, tx_commands_tx: stdmpsc::SyncSender<Sender<NetworkRequest>>) {
+
+pub fn start(opts: MqttOptions, commands_tx: Sender<NetworkRequest>, commands_rx: Receiver<NetworkRequest>) {
+    let mut reactor = Core::new().unwrap();
+    let mut commands_rx = commands_rx.or_else(|_| {
+        Err(io::Error::new(ErrorKind::Other, "Rx Error"))
+    }).boxed();
+
     loop {
-        let mut reactor = Core::new().unwrap();
         let handle = reactor.handle();
+        let commands_tx = commands_tx.clone();
         // TODO: fix the clone
         let opts = opts.clone();
-        let tx_commands_tx = tx_commands_tx.clone();
         // config
-        // NOTE: make sure that dns resolution happens during reconnection incase 
-        //       ip of the server changes
+        // NOTE: make sure that dns resolution happens during reconnection incase  ip of the server changes
         // TODO: Handle all the unwraps here
         let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
         let id = opts.client_id;
@@ -78,19 +83,28 @@ pub fn start(opts: MqttOptions, tx_commands_tx: stdmpsc::SyncSender<Sender<Netwo
         let reconnect_after = opts.reconnect_after.unwrap();
 
         let client = async_block! {
-            let stream = await!(TcpStream::connect(&addr, &handle))?;
             let connect = packet::gen_connect_packet(&id, keep_alive, clean_session, None, None);
-            let framed = stream.framed(MqttCodec);
-            let framed = await!(framed.send(connect)).unwrap();
+            let framed = match await!(mqtt_connect(addr, handle.clone(), connect)) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Connection error = {:?}", e);
+                    return Ok(commands_rx);
+                }
+            };
 
-            // create a 'tx' and send it to client after every succesful connection
-            // so that it can sent network requests to this 'connection' thread
-            let (commands_tx, commands_rx) = mpsc::channel::<NetworkRequest>(10);
+            let (mut sender, receiver) = framed.split();
+
             let ping_commands_tx = commands_tx.clone();
-            tx_commands_tx.try_send(commands_tx).unwrap();
-
-
-            let (sender, receiver) = framed.split();
+            let nw_commands_tx = commands_tx.clone();
+            
+            // incoming network messages
+            handle.spawn(mqtt_recv(receiver, nw_commands_tx).then(|result| {
+                match result {
+                    Ok(_) => println!("N/w receiver done"),
+                    Err(e) => println!("N/w IO error {:?}", e),
+                }
+                Ok(())
+            }));
 
             // ping timer
             handle.spawn(ping_timer(ping_commands_tx, keep_alive).then(|result| {
@@ -100,30 +114,52 @@ pub fn start(opts: MqttOptions, tx_commands_tx: stdmpsc::SyncSender<Sender<Netwo
                 }
                 Ok(())
             }));
+                
+            // execute user requests  
+            loop {
+                let command = match await!(commands_rx.into_future().map_err(|e| e.0))? {
+                    (Some(item), s) => {
+                        commands_rx = s;
+                        item
+                    }
+                    (None, s) => {
+                        commands_rx = s;
+                        break
+                    }
+                };
 
-            // network transmission requests
-            handle.spawn(command_read(commands_rx, sender).then(|result| {
-                match result {
-                    Ok(_) => println!("Command receiver done"),
-                    Err(e) => println!("Command IO error {:?}", e),
-                }
-                Ok(())
-            }));
+                println!("command = {:?}", command);
+                let packet = match command {
+                    NetworkRequest::Publish(publish) => Packet::Publish(publish),
+                    NetworkRequest::Ping => Packet::Pingreq,
+                    NetworkRequest::Drain => break,
+                    _ => unimplemented!()
+                };
 
-            // incoming network messages
-            #[async]
-            for msg in receiver {
-                println!("message = {:?}", msg);
+                sender = await!(sender.send(packet))?
             }
 
             error!("Done with network receiver !!");
-            Ok::<(), io::Error>(())
+            Ok::<_, io::Error>(commands_rx)
         }; // async client
 
+
         let response = reactor.run(client);
-        println!("{:?}", response);
+        commands_rx = response.unwrap();
+        
+        info!("Will retry connection again in {} seconds", reconnect_after);
         thread::sleep(Duration::new(reconnect_after as u64, 0));
     }
+}
+
+#[async]
+fn mqtt_connect(addr: SocketAddr, handle: Handle, connect: Connect) -> io::Result<Framed<TcpStream, MqttCodec>> {
+    let stream = await!(TcpStream::connect(&addr, &handle))?;
+    let connect = Packet::Connect(connect);
+    
+    let framed = stream.framed(MqttCodec);
+    let framed = await!(framed.send(connect))?;
+    Ok(framed)
 }
 
 #[async]
@@ -133,7 +169,7 @@ fn ping_timer(mut commands_tx: Sender<NetworkRequest>, keep_alive: u16) -> io::R
 
     #[async]
     for _t in interval {
-        println!("Ping timer fire");
+        debug!("Ping timer fire");
         commands_tx = await!(
             commands_tx.send(NetworkRequest::Ping).or_else(|e| {
                 Err(io::Error::new(ErrorKind::Other, e.description()))
@@ -145,28 +181,14 @@ fn ping_timer(mut commands_tx: Sender<NetworkRequest>, keep_alive: u16) -> io::R
 }
 
 #[async]
-fn command_read(commands_rx: Receiver<NetworkRequest>, mut sender: SplitSink<Framed<TcpStream, MqttCodec>>) -> io::Result<()> {
-
-    let commands_rx = commands_rx.or_else(|_| {
-            Err(io::Error::new(ErrorKind::Other, "Rx Error"))
-    });
+fn mqtt_recv(receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<NetworkRequest>) -> io::Result<()> {
     
     #[async]
-    for command in commands_rx {
-        println!("command = {:?}", command);
-        let packet = match command {
-            NetworkRequest::Publish(publish) => {
-                Packet::Publish(publish)
-            }
-            NetworkRequest::Ping => {
-                packet::gen_pingreq_packet()
-            }
-            _ => unimplemented!()
-        };
-
-        sender = await!(sender.send(packet))?
+    for message in receiver {
+        println!("incoming n/w message = {:?}", message);
     }
 
+    await!(commands_tx.send(NetworkRequest::Drain));
     Ok(())
 }
 
