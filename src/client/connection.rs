@@ -70,9 +70,9 @@ impl MqttState {
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
-    fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Packet {
+    fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Publish {
         match publish.qos {
-            QoS::AtMostOnce => Packet::Publish(publish),
+            QoS::AtMostOnce => publish,
             QoS::AtLeastOnce => {
                 // add pkid if None
                 let publish = if publish.pid == None {
@@ -84,7 +84,7 @@ impl MqttState {
                 };
 
                 self.outgoing_pub.push_back(publish.clone());
-                Packet::Publish(publish)
+                publish
             }
             _ => unimplemented!()
         }
@@ -136,6 +136,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let mqtt_state = Rc::new(RefCell::new(MqttState::new(opts.clone())));
         let mqtt_state_connect = mqtt_state.clone();
         let mqtt_state_mqtt_recv = mqtt_state.clone();
+        let mqtt_state_ping = mqtt_state.clone();
 
         // config
         // NOTE: make sure that dns resolution happens during reconnection incase  ip of the server changes
@@ -143,117 +144,10 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
         let reconnect_after = opts.reconnect_after.unwrap();
 
-        let client = async_block! {
-            let connect = packet::gen_connect_packet(&opts.client_id, opts.keep_alive.unwrap(), opts.clean_session, None, None);
-            let framed = match await!(mqtt_connect(addr, handle.clone(), connect)) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Connection error = {:?}", e);
-                    return Ok(commands_rx);
-                }
-            };
-
-            let (mut sender, receiver) = framed.split();
-
-            let ping_commands_tx = commands_tx.clone();
-            let nw_commands_tx = commands_tx.clone();
-            
-            // incoming network messages
-            handle.spawn(mqtt_recv(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
-                match result {
-                    Ok(_) => error!("N/w receiver done"),
-                    Err(e) => error!("N/w IO error {:?}", e),
-                }
-                Ok(())
-            }));
-
-            // ping timer
-            handle.spawn(ping_timer(ping_commands_tx, opts.keep_alive.unwrap()).then(|result| {
-                match result {
-                    Ok(_) => error!("Ping timer done"),
-                    Err(e) => error!("Ping timer IO error {:?}", e),
-                }
-                Ok(())
-            }));
-                
-            // execute user requests  
-            loop {
-                let command = match await!(commands_rx.into_future().map_err(|e| e.0))? {
-                    (Some(item), s) => {
-                        commands_rx = s;
-                        item
-                    }
-                    (None, s) => {
-                        commands_rx = s;
-                        break
-
-                    }
-                };
-
-                info!("command = {:?}", command);
-
-                let packet = match command {
-                    Request::Publish(publish) => mqtt_state.borrow_mut().handle_outgoing_publish(publish),
-                    Request::Ping => Packet::Pingreq,
-                    Request::Reconnect => break,
-                    _ => unimplemented!()
-                };
-
-                sender = await!(sender.send(packet))?
-            }
-
-            error!("Done with network receiver !!");
-            Ok::<_, io::Error>(commands_rx)
-        }; // async client
-
-
-        let response = reactor.run(client);
-        commands_rx = response.unwrap();
         
         info!("Will retry connection again in {} seconds", reconnect_after);
         thread::sleep(Duration::new(reconnect_after as u64, 0));
     }
-}
-
-#[async]
-fn mqtt_connect(addr: SocketAddr, handle: Handle, connect: Connect) -> io::Result<Framed<TcpStream, MqttCodec>> {
-    let stream = await!(TcpStream::connect(&addr, &handle))?;
-    let connect = Packet::Connect(connect);
-    
-    let framed = stream.framed(MqttCodec);
-    let framed = await!(framed.send(connect))?;
-    Ok(framed)
-}
-
-#[async]
-fn ping_timer(mut commands_tx: Sender<Request>, keep_alive: u16) -> io::Result<()> {
-    let timer = Timer::default();
-    let interval = timer.interval(Duration::new(keep_alive as u64, 0));
-
-    #[async]
-    for _t in interval {
-        debug!("Ping timer fire");
-        commands_tx = await!(
-            commands_tx.send(Request::Ping).or_else(|e| {
-                Err(io::Error::new(ErrorKind::Other, e.description()))
-            })
-        )?;
-    }
-
-    Ok(())
-}
-
-#[async]
-fn mqtt_recv(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<Request>) -> io::Result<()> {
-    
-    #[async]
-    for message in receiver {
-        info!("incoming n/w message = {:?}", message);
-    }
-
-    error!("Network reciever stopped. Sending reconnect request");
-    await!(commands_tx.send(Request::Reconnect));
-    Ok(())
 }
 
 #[cfg(test)]
@@ -288,15 +182,12 @@ mod test {
             payload: Arc::new(vec![1, 2, 3]),
         };
 
-        let packet = mqtt.handle_outgoing_publish(publish);
-        if let Packet::Publish(publish_out) = packet {
-            // pkid shouldn't be added
-            assert_eq!(publish_out.pid, None);
-            // publish shouldn't added to queue
-            assert_eq!(mqtt.outgoing_pub.len(), 0);
-        } else {
-            panic!("Should have been a publish packet");
-        }
+        let publish_out = mqtt.handle_outgoing_publish(publish);
+        // pkid shouldn't be added
+        assert_eq!(publish_out.pid, None);
+        // publish shouldn't added to queue
+        assert_eq!(mqtt.outgoing_pub.len(), 0);
+        
 
         // QoS1 Publish
         let publish = Publish {
@@ -308,25 +199,46 @@ mod test {
             payload: Arc::new(vec![1, 2, 3]),
         };
 
-        let packet = mqtt.handle_outgoing_publish(publish.clone());
+        let publish_out = mqtt.handle_outgoing_publish(publish.clone());
+        // pkid shouldn't be added
+        assert_eq!(publish_out.pid, Some(PacketIdentifier(1)));
+        // publish shouldn't added to queue
+        assert_eq!(mqtt.outgoing_pub.len(), 1);
 
-        if let Packet::Publish(publish_out) = packet {
-            // pkid shouldn't be added
-            assert_eq!(publish_out.pid, Some(PacketIdentifier(1)));
-            // publish shouldn't added to queue
-            assert_eq!(mqtt.outgoing_pub.len(), 1);
-        } else {
-            panic!("Should have been a publish packet");
-        }
+        let publish_out = mqtt.handle_outgoing_publish(publish.clone());
+        // pkid shouldn't be added
+        assert_eq!(publish_out.pid, Some(PacketIdentifier(2)));
+        // publish shouldn't added to queue
+        assert_eq!(mqtt.outgoing_pub.len(), 2);
+    }
 
-        let packet = mqtt.handle_outgoing_publish(publish.clone());
-        if let Packet::Publish(publish_out) = packet {
-            // pkid shouldn't be added
-            assert_eq!(publish_out.pid, Some(PacketIdentifier(2)));
-            // publish shouldn't added to queue
-            assert_eq!(mqtt.outgoing_pub.len(), 2);
-        } else {
-            panic!("Should have been a publish packet");
-        }
+    #[test]
+    fn incoming_puback_should_remove_correct_publish_from_queue() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        // QoS1 Publish
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let publish_out = mqtt.handle_outgoing_publish(publish.clone());
+        let publish_out = mqtt.handle_outgoing_publish(publish.clone());
+        let publish_out = mqtt.handle_outgoing_publish(publish);
+
+        let publish = mqtt.handle_incoming_puback(PacketIdentifier(1)).unwrap();
+        assert_eq!(publish.pid, Some(PacketIdentifier(1)));
+        assert_eq!(mqtt.outgoing_pub.len(), 2);
+
+        let publish = mqtt.handle_incoming_puback(PacketIdentifier(2)).unwrap();
+        assert_eq!(publish.pid, Some(PacketIdentifier(2)));
+        assert_eq!(mqtt.outgoing_pub.len(), 1);
+
+        let publish = mqtt.handle_incoming_puback(PacketIdentifier(3)).unwrap();
+        assert_eq!(publish.pid, Some(PacketIdentifier(3)));
+        assert_eq!(mqtt.outgoing_pub.len(), 0);
     }
 }
