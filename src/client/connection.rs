@@ -2,10 +2,10 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
-use std::error::Error;
 use std::thread;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::result::Result;
 
 use futures::prelude::*;
 use futures::stream::{Stream, SplitSink, SplitStream};
@@ -19,11 +19,12 @@ use mqtt3::*;
 use threadpool::ThreadPool;
 
 use codec::MqttCodec;
+use error::{PingError};
 use packet;
 use MqttOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttConnectionState {
+enum MqttConnectionStatus {
     Handshake,
     Connected,
     Disconnected,
@@ -33,7 +34,7 @@ struct MqttState {
     opts: MqttOptions,
 
     // --------  State  ----------
-    connection_state: MqttConnectionState,
+    connection_state: MqttConnectionStatus,
     initial_connect: bool,
     await_pingresp: bool,
     last_flush: Instant,
@@ -57,7 +58,7 @@ impl MqttState {
     fn new(opts: MqttOptions) -> Self {
         MqttState {
             opts: opts,
-            connection_state: MqttConnectionState::Disconnected,
+            connection_state: MqttConnectionStatus::Disconnected,
             initial_connect: true,
             await_pingresp: false,
             last_flush: Instant::now(),
@@ -97,6 +98,48 @@ impl MqttState {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
             None
         }
+    }
+
+    // check when the last control packet/pingreq packet
+    // is received and return the status which tells if
+    // keep alive time has exceeded
+    // NOTE: status will be checked for zero keepalive times also
+    pub fn handle_outgoing_ping(&mut self) -> Result<bool, PingError> {
+        if let Some(keep_alive) = self.opts.keep_alive {
+            let elapsed = self.last_flush.elapsed();
+
+            if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+                if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
+                    return Err(PingError::Timeout);
+                }
+                // @ Prevents half open connections. Tcp writes will buffer up
+                // with out throwing any error (till a timeout) when internet
+                // is down. Eventhough broker closes the socket after timeout,
+                // EOF will be known only after reconnection.
+                // We need to unbind the socket if there in no pingresp before next ping
+                // (What about case when pings aren't sent because of constant publishes
+                // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
+                // secs and then error out because of timeout.)
+                if self.await_pingresp {
+                    return Err(PingError::AwaitPingResp);
+                }
+
+                if self.connection_state == MqttConnectionStatus::Connected {
+                    self.last_flush = Instant::now();
+                    self.await_pingresp = true;
+                    return Ok(true)
+                } else {
+                    error!("State = {:?}. Shouldn't ping in this state", self.connection_state);
+                    return Err(PingError::InvalidState)
+                }
+            }
+        }
+        // no need to ping
+        Ok(false)
+    }
+
+    pub fn handle_incoming_pingresp(&mut self) {
+        self.await_pingresp = false;
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
@@ -153,10 +196,13 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
 
-    use super::MqttState;
+    use super::{MqttState, MqttConnectionStatus};
     use mqtt3::*;
     use mqttopts::MqttOptions;
+    use error::PingError;
 
     #[test]
     fn next_pkid_roll() {
@@ -240,5 +286,53 @@ mod test {
         let publish = mqtt.handle_incoming_puback(PacketIdentifier(3)).unwrap();
         assert_eq!(publish.pid, Some(PacketIdentifier(3)));
         assert_eq!(mqtt.outgoing_pub.len(), 0);
+    }
+
+    #[test]
+    fn outgoing_ping_handle_should_throw_errors_during_invalid_state() {
+        // 1. test for invalid state
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.opts.keep_alive = Some(5);
+        // first ping always returns success but with ping false
+        assert_eq!(Ok(false), mqtt.handle_outgoing_ping());
+        thread::sleep(Duration::new(5, 0));
+        assert_eq!(Err(PingError::InvalidState), mqtt.handle_outgoing_ping());
+    }
+
+    #[test]
+    fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.opts.keep_alive = Some(5);
+        mqtt.connection_state = MqttConnectionStatus::Connected;
+        thread::sleep(Duration::new(5, 0));
+        // should ping
+        assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
+        thread::sleep(Duration::new(5, 0));
+        // should throw error because we didn't get pingresp for previous ping
+        assert_eq!(Err(PingError::AwaitPingResp), mqtt.handle_outgoing_ping());
+    }
+
+    #[test]
+    fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.opts.keep_alive = Some(5);
+        mqtt.connection_state = MqttConnectionStatus::Connected;
+        thread::sleep(Duration::new(7, 0));
+        // should ping
+        assert_eq!(Err(PingError::Timeout), mqtt.handle_outgoing_ping());
+    }
+
+    #[test]
+    fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.opts.keep_alive = Some(5);
+        mqtt.connection_state = MqttConnectionStatus::Connected;
+        thread::sleep(Duration::new(5, 0));
+        // should ping
+        assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
+        mqtt.handle_incoming_pingresp();
+        thread::sleep(Duration::new(5, 0));
+        // should ping
+        assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
     }
 }
