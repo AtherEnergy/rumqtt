@@ -83,6 +83,8 @@ impl MqttState {
             180
         };
 
+        self.connection_status = MqttConnectionStatus::Handshake;
+
         let (username, password) = if let Some((ref username, ref password)) = self.opts.credentials {
             (Some(username.to_owned()), Some(password.to_owned()))
         } else {
@@ -95,8 +97,10 @@ impl MqttState {
     fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
         let response = connack.code;
         if response != ConnectReturnCode::Accepted {
+            self.connection_status = MqttConnectionStatus::Disconnected;
             Err(response)?
         } else {
+            self.connection_status = MqttConnectionStatus::Connected;
             Ok(())
         }
     }
@@ -426,5 +430,29 @@ mod test {
         assert_eq!(mqtt.outgoing_pub.len(), 3);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         assert_eq!(mqtt.await_pingresp, false);
+    }
+
+    #[test]
+    fn connection_status_is_valid_while_handling_connect_and_connack_packets() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
+        mqtt.handle_outgoing_connect();
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Handshake);
+
+        let connack = Connack {
+            session_present: false,
+            code: ConnectReturnCode::Accepted
+        };
+
+        mqtt.handle_incoming_connack(connack);
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Connected);
+
+        let connack = Connack {
+            session_present: false,
+            code: ConnectReturnCode::BadUsernamePassword
+        };
+
+        mqtt.handle_incoming_connack(connack);
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
     }
 }
