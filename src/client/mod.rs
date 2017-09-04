@@ -22,7 +22,7 @@ impl MqttClient {
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions) -> Self {
-        let (commands_tx, commands_rx) = mpsc::channel(10);
+        let (mut commands_tx, commands_rx) = mpsc::channel(10);
         let nw_commands_tx = commands_tx.clone();
 
         // This thread handles network reads (coz they are blocking) and
@@ -33,8 +33,8 @@ impl MqttClient {
             }
         );
 
+        commands_tx = commands_tx.send(Request::Connect).wait().unwrap();
         let client = MqttClient { nw_request_tx: commands_tx};
-
         client
     }
 

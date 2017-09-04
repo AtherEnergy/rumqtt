@@ -1,4 +1,5 @@
 use std::io;
+use mqtt3;
 
 quick_error! {
     #[derive(Debug, PartialEq)]
@@ -9,5 +10,14 @@ quick_error! {
         InvalidState
         // did not ping with in time
         Timeout
+    }
+}
+
+quick_error! {
+    #[derive(Debug, PartialEq)]
+    pub enum ConnectError {
+        MqttConnectionRefused(e: mqtt3::ConnectReturnCode) {
+            from()
+        }
     }
 }

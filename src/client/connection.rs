@@ -19,7 +19,7 @@ use mqtt3::*;
 use threadpool::ThreadPool;
 
 use codec::MqttCodec;
-use error::{PingError};
+use error::{PingError, ConnectError};
 use packet;
 use MqttOptions;
 
@@ -73,6 +73,31 @@ impl MqttState {
             outgoing_pub: VecDeque::new(),
             subscriptions: VecDeque::new(),
             pool: ThreadPool::new(1),
+        }
+    }
+
+    fn handle_outgoing_connect(&mut self) -> Connect {
+        let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
+            keep_alive
+        } else {
+            180
+        };
+
+        let (username, password) = if let Some((ref username, ref password)) = self.opts.credentials {
+            (Some(username.to_owned()), Some(password.to_owned()))
+        } else {
+            (None, None)
+        };
+
+        packet::gen_connect_packet(&self.opts.client_id, keep_alive, self.opts.clean_session, username, password)
+    }
+
+    fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
+        let response = connack.code;
+        if response != ConnectReturnCode::Accepted {
+            Err(response)?
+        } else {
+            Ok(())
         }
     }
 
@@ -174,6 +199,7 @@ impl MqttState {
 pub enum Request {
     Subscribe(Vec<(TopicPath, QoS)>),
     Publish(Publish),
+    Connect,
     Ping,
     Reconnect,
 }
