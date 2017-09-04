@@ -20,7 +20,7 @@ use mqtt3::*;
 use threadpool::ThreadPool;
 
 use codec::MqttCodec;
-use error::{PingError, ConnectError};
+use error::{PingError, ConnectError, PublishError, PubackError};
 use packet;
 use MqttOptions;
 
@@ -58,7 +58,7 @@ struct MqttState {
 /// Design: MqttState methods will just modify the state of the object
 ///         but doesn't do any network operations. Methods will do
 ///         appropriate returns so that n/w methods or n/w eventloop can
-///         operate on it directly. This abstracts the functionality better
+///         operate directly. This abstracts the functionality better
 ///         so that it's easy to switch between synchronous code, tokio (or)
 ///         async/await
 
@@ -114,8 +114,15 @@ impl MqttState {
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
-    fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Publish {
-        match publish.qos {
+    fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Result<Publish, PublishError> {
+        let payload_len = publish.payload.len();
+
+        if payload_len > self.opts.max_packet_size {
+            error!("Size limit exceeded. Dropping packet: {:?}", publish);
+            return Err(PublishError::PacketSizeLimitExceeded)
+        }
+
+        let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce => {
                 // add pkid if None
@@ -131,15 +138,22 @@ impl MqttState {
                 publish
             }
             _ => unimplemented!()
+        };
+
+        if self.connection_status == MqttConnectionStatus::Connected {
+            Ok(publish)
+        } else {
+            Err(PublishError::InvalidState)
         }
+
     }
 
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Option<Publish> {
+    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Publish, PubackError> {
         if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
-            self.outgoing_pub.remove(index)
+            Ok(self.outgoing_pub.remove(index).unwrap())
         } else {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
-            None
+            Err(PubackError::Unsolicited)
         }
     }
 
@@ -256,7 +270,7 @@ mod test {
     use super::{MqttState, MqttConnectionStatus};
     use mqtt3::*;
     use mqttopts::MqttOptions;
-    use error::PingError;
+    use error::{PingError, PublishError};
 
     #[test]
     fn next_pkid_roll() {
@@ -271,6 +285,7 @@ mod test {
     #[test]
     fn outgoing_publish_handle_should_set_pkid_correctly_and_add_publish_to_queue_correctly() {
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.connection_status = MqttConnectionStatus::Connected;
 
         // QoS0 Publish
         let publish = Publish {
@@ -284,7 +299,7 @@ mod test {
 
         let publish_out = mqtt.handle_outgoing_publish(publish);
         // pkid shouldn't be added
-        assert_eq!(publish_out.pid, None);
+        assert_eq!(publish_out.unwrap().pid, None);
         // publish shouldn't added to queue
         assert_eq!(mqtt.outgoing_pub.len(), 0);
         
@@ -301,15 +316,49 @@ mod test {
 
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
         // pkid shouldn't be added
-        assert_eq!(publish_out.pid, Some(PacketIdentifier(1)));
+        assert_eq!(publish_out.unwrap().pid, Some(PacketIdentifier(1)));
         // publish shouldn't added to queue
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
         // pkid shouldn't be added
-        assert_eq!(publish_out.pid, Some(PacketIdentifier(2)));
+        assert_eq!(publish_out.unwrap().pid, Some(PacketIdentifier(2)));
         // publish shouldn't added to queue
         assert_eq!(mqtt.outgoing_pub.len(), 2);
+    }
+
+    #[test]
+    fn outgoing_publish_handle_should_throw_error_in_invalid_state() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let publish_out = mqtt.handle_outgoing_publish(publish);
+        assert_eq!(publish_out, Err(PublishError::InvalidState));
+    }
+
+    #[test]
+    fn outgoing_publish_handle_should_throw_error_when_packetsize_exceeds_max() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![0; 101 * 1024]),
+        };
+
+        let publish_out = mqtt.handle_outgoing_publish(publish);
+        assert_eq!(publish_out, Err(PublishError::PacketSizeLimitExceeded));
     }
 
     #[test]

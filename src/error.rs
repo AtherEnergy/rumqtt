@@ -21,3 +21,18 @@ quick_error! {
         }
     }
 }
+
+quick_error! {
+    #[derive(Debug, PartialEq)]
+    pub enum PublishError {
+        PacketSizeLimitExceeded
+        InvalidState
+    }
+}
+
+quick_error! {
+    #[derive(Debug, PartialEq)]
+    pub enum PubackError {
+        Unsolicited
+    }
+}
