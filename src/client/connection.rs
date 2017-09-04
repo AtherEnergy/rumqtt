@@ -6,6 +6,7 @@ use std::thread;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::result::Result;
+use std::mem;
 
 use futures::prelude::*;
 use futures::stream::{Stream, SplitSink, SplitStream};
@@ -94,14 +95,20 @@ impl MqttState {
         packet::gen_connect_packet(&self.opts.client_id, keep_alive, self.opts.clean_session, username, password)
     }
 
-    fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
+    fn handle_incoming_connack(&mut self, connack: Connack) -> Result<Option<VecDeque<Publish>>, ConnectError> {
         let response = connack.code;
         if response != ConnectReturnCode::Accepted {
             self.connection_status = MqttConnectionStatus::Disconnected;
             Err(response)?
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-            Ok(())
+            let publishes = mem::replace(&mut self.outgoing_pub, VecDeque::new());
+
+            if self.opts.clean_session {
+                Ok(None)
+            } else {
+                Ok(Some(publishes))
+            }
         }
     }
 
@@ -435,6 +442,7 @@ mod test {
     #[test]
     fn connection_status_is_valid_while_handling_connect_and_connack_packets() {
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         mqtt.handle_outgoing_connect();
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Handshake);
@@ -454,5 +462,66 @@ mod test {
 
         mqtt.handle_incoming_connack(connack);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
+    }
+
+    #[test]
+    fn connack_handle_should_not_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish);
+
+        let connack = Connack {
+            session_present: false,
+            code: ConnectReturnCode::Accepted
+        };
+
+        if let Ok(p) = mqtt.handle_incoming_connack(connack) {
+            assert_eq!(None, p);
+        }
+    }
+
+    #[test]
+    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
+        let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
+        mqtt.opts.clean_session = false;
+
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish.clone());
+        let _ = mqtt.handle_outgoing_publish(publish);
+
+        let connack = Connack {
+            session_present: false,
+            code: ConnectReturnCode::Accepted
+        };
+
+        if let Ok(v) = mqtt.handle_incoming_connack(connack) {
+            if let Some(v) = v {
+                assert_eq!(v.len(), 3);
+            } else {
+                panic!("Should return list of publishes");
+            }
+        }
+
+        assert_eq!(0, mqtt.outgoing_pub.len());
     }
 }
