@@ -256,7 +256,7 @@ impl Publisher {
         stream.set_read_timeout(Some(Duration::new(10, 0)))?;
         stream.set_write_timeout(Some(Duration::new(60, 0)))?;
 
-        if let Some((ref key, expiry)) = self.opts.googleiotcore_auth {
+        if let Some((ref key, expiry)) = self.opts.gcloud_iotcore_auth {
             let password = gen_password(key, expiry);
             self.opts.credentials = Some(("unused".to_owned(), password));
         }
