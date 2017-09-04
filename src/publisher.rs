@@ -3,18 +3,29 @@ use std::time::{Duration, Instant};
 use std::net::Shutdown;
 use std::collections::VecDeque;
 use std::thread;
-use std::io::{self, Write, ErrorKind};
+use std::io::{self, Write, Read, ErrorKind};
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
+use std::fs::File;
+use std::path::Path;
 
 use mqtt311::{self, MqttWrite, MqttRead, PacketIdentifier, Packet, Connect, Connack, Protocol, ConnectReturnCode};
 use threadpool::ThreadPool;
+use jsonwebtoken::{encode, Header, Algorithm};
+use chrono::{self, Utc};
 
 use error::{Result, PublishError, PingError, IncomingError, AwaitError, RetransmissionError};
 use stream::NetworkStream;
 use clientoptions::MqttOptions;
 use callback::{Message, MqttCallback};
 use super::MqttState;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    iat: i64,
+    exp: i64,
+    aud: String,
+}
 
 #[derive(Debug)]
 pub enum PublishRequest {
@@ -244,6 +255,11 @@ impl Publisher {
         let mut stream = NetworkStream::connect(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone())?;
         stream.set_read_timeout(Some(Duration::new(10, 0)))?;
         stream.set_write_timeout(Some(Duration::new(60, 0)))?;
+
+        if let Some((ref key, expiry)) = self.opts.googleiotcore_auth {
+            let password = gen_password(key, expiry);
+            self.opts.credentials = Some(("unused".to_owned(), password));
+        }
 
         self.stream = stream;
         let connect = self.generate_connect_packet();
@@ -514,6 +530,25 @@ impl Publisher {
         self.last_flush = Instant::now();
         Ok(())
     }
+}
+
+// Generates a new password for mqtt client authentication
+pub fn gen_password<P>(key: P, expiry: i64) -> String
+where P: AsRef<Path> {
+    let time = Utc::now();
+    let jwt_header = Header::new(Algorithm::RS256);
+    let iat = time.timestamp();
+    let exp = time.checked_add_signed(chrono::Duration::minutes(expiry)).unwrap().timestamp();
+    let claims = Claims {
+        iat: iat,
+        exp: exp,
+        aud: "crested-return-122311".to_string(),
+    };
+
+    let mut key_file = File::open(key).expect("Unable to open private keyfile for gcloud iot core auth");
+    let mut key = vec![];
+    key_file.read_to_end(&mut key).expect("Unable to read private key file for gcloud iot core auth till end");
+    encode(&jwt_header, &claims, &key).expect("encode error")
 }
 
 #[cfg(test)]

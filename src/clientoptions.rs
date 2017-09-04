@@ -11,6 +11,9 @@ pub struct MqttOptions {
     pub client_id: Option<String>,
     pub credentials: Option<(String, String)>,
     pub ca: Option<PathBuf>,
+    // root cert for encryption & private key for signing jwt token,
+    // token expiry time
+    pub googleiotcore_auth: Option<(PathBuf, i64)>,
     pub client_certs: Option<(PathBuf, PathBuf)>,
     pub storepack_sz: usize,
     pub await_batch_size: u32,
@@ -27,6 +30,7 @@ impl Default for MqttOptions {
             reconnect: 5,
             first_reconnection_loop: false,
             ca: None,
+            googleiotcore_auth: None,
             client_certs: None,
             storepack_sz: 100 * 1024,
             await_batch_size: 10,
@@ -125,6 +129,12 @@ impl MqttOptions {
         where P: AsRef<Path>
     {
         self.ca = Some(cafile.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn googleiotcore_auth<P>(mut self, key: P, expiry: i64) -> Self
+    where P: AsRef<Path> {
+        self.googleiotcore_auth = Some((key.as_ref().to_path_buf(), expiry));
         self
     }
 

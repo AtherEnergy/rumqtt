@@ -10,6 +10,10 @@ log = "0.3"
 mqtt311 = "0.1"
 openssl = { version = "0.9" }
 threadpool = "1"
+chrono = "0.4"
+jsonwebtoken = "2"
+serde = "1"
+serde_derive = "1"
 
 [dev-dependencies]
 pretty_env_logger = "0.1"
