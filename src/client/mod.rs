@@ -3,6 +3,8 @@ mod connection;
 use std::thread;
 use std::sync::Arc;
 use std::time::Duration;
+use std::result::Result;
+use std::collections::VecDeque;
 
 use futures::sync::mpsc::{self, Sender};
 use futures::{Future, Sink};
@@ -11,7 +13,8 @@ use mqtt3::*;
 use MqttOptions;
 use packet;
 
-use self::connection::Request;
+use error::Error;
+pub use self::connection::Request;
 
 pub struct MqttClient {
     nw_request_tx: Sender<Request>,
@@ -38,14 +41,28 @@ impl MqttClient {
         client
     }
 
-    pub fn publish(&mut self, topic: &str, qos: QoS, payload: Vec<u8>) {
+    pub fn publish(&mut self, topic: &str, qos: QoS, payload: Vec<u8>) -> Result<(), Error>{
         let payload = Arc::new(payload);
 
         // TODO: Find ways to remove clone to improve perf
         let nw_request_tx = self.nw_request_tx.clone();
+
         // TODO: Fix clone
         let payload = payload.clone();
         let publish = packet::gen_publish_packet(topic, qos, None, false, false, payload);
-        let r = nw_request_tx.send(Request::Publish(publish)).wait();
+        nw_request_tx.send(Request::Publish(publish)).wait()?;
+        Ok(())
+    }
+
+    pub fn subscribe(&mut self, topics: Vec<(&str, QoS)>) -> Result<(), Error>{
+        let sub_topics: Vec<_> = topics.iter().map(
+            |t| SubscribeTopic{topic_path: t.0.to_string(), qos: t.1}
+        )
+        .collect();
+
+        // TODO: Find ways to remove clone to improve perf
+        let nw_request_tx = self.nw_request_tx.clone();
+        nw_request_tx.send(Request::Subscribe(sub_topics)).wait()?;
+        Ok(())
     }
 }

@@ -20,7 +20,7 @@ use mqtt3::*;
 use threadpool::ThreadPool;
 
 use codec::MqttCodec;
-use error::{PingError, ConnectError, PublishError, PubackError};
+use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError, SubackError};
 use packet;
 use MqttOptions;
 
@@ -199,6 +199,24 @@ impl MqttState {
         self.await_pingresp = false;
     }
 
+    pub fn handle_outgoing_subscribe(&mut self, topics: Vec<SubscribeTopic>) -> Result<Subscribe, SubscribeError> {
+        let pkid = self.next_pkid();
+
+        Ok(Subscribe {
+            pid: pkid,
+            topics: topics,
+        })
+    }
+
+
+    pub fn handle_incoming_suback(&mut self, ack: Suback) -> Result<(), SubackError> {
+        if ack.return_codes.iter().any(|v| *v == SubscribeReturnCodes::Failure) {
+            Err(SubackError::Rejected)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn handle_disconnect(&mut self) {
         self.await_pingresp = false;
         self.connection_status = MqttConnectionStatus::Disconnected;
@@ -222,7 +240,7 @@ impl MqttState {
 
 #[derive(Debug)]
 pub enum Request {
-    Subscribe(Vec<(TopicPath, QoS)>),
+    Subscribe(Vec<SubscribeTopic>),
     Publish(Publish),
     Connect,
     Ping,
