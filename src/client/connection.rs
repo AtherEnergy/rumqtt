@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::result::Result;
 use std::mem;
+use std::sync::mpsc as stdmpsc;
 
 use futures::prelude::*;
 use futures::stream::{Stream, SplitSink, SplitStream};
@@ -31,9 +32,17 @@ enum MqttConnectionStatus {
     Disconnected,
 }
 
+#[derive(Debug, Clone)]
+pub enum MqttRecv {
+    Publish(Publish),
+    Suback(Suback),
+    Puback(PacketIdentifier),
+}
+
 struct MqttState {
     opts: MqttOptions,
-
+    // tries sends interesting incoming messages back to user
+    notifier: stdmpsc::SyncSender<MqttRecv>,
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
     initial_connect: bool,
@@ -63,9 +72,10 @@ struct MqttState {
 ///         async/await
 
 impl MqttState {
-    fn new(opts: MqttOptions) -> Self {
+    fn new(opts: MqttOptions, notifier_tx: stdmpsc::SyncSender<MqttRecv>) -> Self {
         MqttState {
             opts: opts,
+            notifier: notifier_tx,
             connection_status: MqttConnectionStatus::Disconnected,
             initial_connect: true,
             await_pingresp: false,
@@ -149,12 +159,26 @@ impl MqttState {
     }
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Publish, PubackError> {
+        if let Err(e) = self.notifier.try_send(MqttRecv::Puback(pkid)) {
+            error!("Couldn't notify to user. Error = {:?}", e);
+        }
+
         if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Ok(self.outgoing_pub.remove(index).unwrap())
         } else {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
             Err(PubackError::Unsolicited)
         }
+    }
+
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<Option<PacketIdentifier>, ()> {
+        let pkid = publish.pid;
+
+        if let Err(e) = self.notifier.try_send(MqttRecv::Publish(publish)) {
+            error!("Couldn't notify to user. Error = {:?}", e);
+        }
+
+        Ok(pkid)
     }
 
     // check when the last control packet/pingreq packet
@@ -210,6 +234,10 @@ impl MqttState {
 
 
     pub fn handle_incoming_suback(&mut self, ack: Suback) -> Result<(), SubackError> {
+        if let Err(e) = self.notifier.try_send(MqttRecv::Suback(ack.clone())) {
+            error!("Couldn't notify to user. Error = {:?}", e);
+        }
+
         if ack.return_codes.iter().any(|v| *v == SubscribeReturnCodes::Failure) {
             Err(SubackError::Rejected)
         } else {
@@ -248,7 +276,7 @@ pub enum Request {
 }
 
 
-pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Receiver<Request>) {
+pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Receiver<Request>, notifier_tx: stdmpsc::SyncSender<MqttRecv>) {
 
     let mut commands_rx = commands_rx.or_else(|_| {
         Err(io::Error::new(ErrorKind::Other, "Rx Error"))
@@ -259,10 +287,11 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let mut reactor = Core::new().unwrap();
         let handle = reactor.handle();
         let commands_tx = commands_tx.clone();
+        let notifier_tx = notifier_tx.clone();
         // TODO: fix the clone
         let opts = opts.clone();
 
-        let mqtt_state = Rc::new(RefCell::new(MqttState::new(opts.clone())));
+        let mqtt_state = Rc::new(RefCell::new(MqttState::new(opts.clone(), notifier_tx)));
         let mqtt_state_connect = mqtt_state.clone();
         let mqtt_state_mqtt_recv = mqtt_state.clone();
         let mqtt_state_ping = mqtt_state.clone();

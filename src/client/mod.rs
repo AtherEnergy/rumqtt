@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::result::Result;
 use std::collections::VecDeque;
+use std::sync::mpsc as stdmpsc;
 
 use futures::sync::mpsc::{self, Sender};
 use futures::{Future, Sink};
@@ -14,7 +15,7 @@ use MqttOptions;
 use packet;
 
 use error::Error;
-pub use self::connection::Request;
+pub use self::connection::{Request, MqttRecv};
 
 pub struct MqttClient {
     nw_request_tx: Sender<Request>,
@@ -24,21 +25,23 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> Self {
+    pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<MqttRecv>) {
         let (mut commands_tx, commands_rx) = mpsc::channel(10);
+        // used to receive notifications back from network thread
+        let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(30);
         let nw_commands_tx = commands_tx.clone();
 
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn( move || {
-                connection::start(opts, nw_commands_tx, commands_rx);
+                connection::start(opts, nw_commands_tx, commands_rx, notifier_tx);
                 error!("Network Thread Stopped !!!!!!!!!");
             }
         );
 
         commands_tx = commands_tx.send(Request::Connect).wait().unwrap();
         let client = MqttClient { nw_request_tx: commands_tx};
-        client
+        (client, notifier_rx)
     }
 
     pub fn publish(&mut self, topic: &str, qos: QoS, payload: Vec<u8>) -> Result<(), Error>{
