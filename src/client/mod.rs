@@ -1,10 +1,9 @@
+mod state;
 mod connection;
 
 use std::thread;
 use std::sync::Arc;
-use std::time::Duration;
 use std::result::Result;
-use std::collections::VecDeque;
 use std::sync::mpsc as stdmpsc;
 
 use futures::sync::mpsc::{self, Sender};
