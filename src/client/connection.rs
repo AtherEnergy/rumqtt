@@ -10,13 +10,11 @@ use std::error::Error;
 use codec::MqttCodec;
 use MqttOptions;
 use client::state::MqttState;
-use packet;
 
 use mqtt3::*;
-// use futures::prelude::*;
 use futures::stream::{Stream, SplitSink, SplitStream};
-use futures::sync::mpsc::{self, Sender, Receiver};
-use tokio_core::reactor::{Core, Handle};
+use futures::sync::mpsc::{Sender, Receiver};
+use tokio_core::reactor::Core;
 use futures::prelude::*;
 
 use tokio_core::net::TcpStream;
@@ -55,6 +53,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let handle = reactor.handle();
         let commands_tx = commands_tx.clone();
         let notifier_tx = notifier_tx.clone();
+
         // TODO: fix the clone
         let opts = opts.clone();
 
@@ -64,22 +63,13 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let mqtt_state_ping = mqtt_state.clone();
 
         // config
-        // NOTE: make sure that dns resolution happens during reconnection incase  ip of the server changes
         // TODO: Handle all the unwraps here
-        let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
         let reconnect_after = opts.reconnect_after.unwrap();
 
-        let client = async_block! {
-            let connect = packet::gen_connect_packet(&opts.client_id, opts.keep_alive.unwrap(), opts.clean_session, None, None);
-            let framed = match await!(mqtt_connect(addr, handle.clone(), connect)) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Connection error = {:?}", e);
-                    return Ok(commands_rx);
-                }
-            };
+        let framed = mqtt_connect(mqtt_state_connect, opts.clone(), &mut reactor).unwrap();
 
-            let (mut sender, mut receiver) = framed.split();
+        let client = async_block! {
+            let (mut sender, receiver) = framed.split();
             let ping_commands_tx = commands_tx.clone();
             let nw_commands_tx = commands_tx.clone();
             
@@ -101,7 +91,6 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                 Ok(())
             }));
 
-            // thread::sleep(Duration::new(2, 0));
             // execute user requests  
             loop {
                 let command = match await!(commands_rx.into_future().map_err(|e| e.0))? {
@@ -159,14 +148,33 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
     }
 }
 
-#[async]
-fn mqtt_connect(addr: SocketAddr, handle: Handle, connect: Connect) -> io::Result<Framed<TcpStream, MqttCodec>> {
-    let stream = await!(TcpStream::connect(&addr, &handle))?;
-    let connect = Packet::Connect(connect);
+// DESIGN: Initial connect status should be immediately known.
+//         Intermediate disconnections should be automatically reconnected
+fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: &mut Core) -> io::Result<Framed<TcpStream, MqttCodec>> {
+    // NOTE: make sure that dns resolution happens during reconnection to handle changes in server ip
+    let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
+
+    let f_response = TcpStream::connect(&addr, &reactor.handle()).and_then(|connection| {
+        let framed = connection.framed(MqttCodec);
+        let connect = mqtt_state.borrow_mut().handle_outgoing_connect();
+        let f1 = framed.send(Packet::Connect(connect));
+
+        f1.and_then(|framed| {
+            framed.into_future().and_then(|(res, stream)| Ok((res, stream))).map_err(|(err, _stream)| err)
+        })
+    });
+
+    let response = reactor.run(f_response);
     
-    let framed = stream.framed(MqttCodec);
-    let framed = await!(framed.send(connect))?;
-    Ok(framed)
+    // TODO: Check ConnAck Status and Error out incase of failure
+    let (packet, frame) = response?;
+
+    match packet.unwrap() {
+        Packet::Connack(connack) => mqtt_state.borrow_mut().handle_incoming_connack(connack).unwrap(),
+        _ => unimplemented!(),
+    };
+
+    Ok(frame)
 }
 
 #[async]
@@ -197,6 +205,12 @@ fn mqtt_recv(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<Tc
             Packet::Connack(connack) => {
                 // TODO: Handle result
                 let _ = mqtt_state.borrow_mut().handle_incoming_connack(connack);
+            }
+            Packet::Puback(ack) => {
+                let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
+            }
+            Packet::Pingresp => {
+                let _ = mqtt_state.borrow_mut().handle_incoming_pingresp();
             }
             _ => unimplemented!()
         }
