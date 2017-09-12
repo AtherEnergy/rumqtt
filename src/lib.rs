@@ -10,7 +10,6 @@ extern crate bytes;
 extern crate quick_error;
 #[macro_use]
 extern crate log;
-extern crate threadpool;
 
 mod codec;
 mod packet;

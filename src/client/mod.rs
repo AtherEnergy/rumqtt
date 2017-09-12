@@ -38,7 +38,7 @@ impl MqttClient {
             }
         );
 
-        commands_tx = commands_tx.send(Request::Connect).wait().unwrap();
+        // commands_tx = commands_tx.send(Request::Connect).wait().unwrap();
         let client = MqttClient { nw_request_tx: commands_tx};
         (client, notifier_rx)
     }

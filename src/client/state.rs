@@ -54,7 +54,7 @@ impl MqttState {
         }
     }
 
-    fn handle_outgoing_connect(&mut self) -> Connect {
+    pub fn handle_outgoing_connect(&mut self) -> Connect {
         let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
             keep_alive
         } else {
@@ -72,7 +72,7 @@ impl MqttState {
         packet::gen_connect_packet(&self.opts.client_id, keep_alive, self.opts.clean_session, username, password)
     }
 
-    fn handle_incoming_connack(&mut self, connack: Connack) -> Result<Option<VecDeque<Publish>>, ConnectError> {
+    pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<Option<VecDeque<Publish>>, ConnectError> {
         let response = connack.code;
         if response != ConnectReturnCode::Accepted {
             self.connection_status = MqttConnectionStatus::Disconnected;
@@ -91,7 +91,7 @@ impl MqttState {
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
-    fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Result<Publish, PublishError> {
+    pub fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Result<Publish, PublishError> {
         let payload_len = publish.payload.len();
 
         if payload_len > self.opts.max_packet_size {
