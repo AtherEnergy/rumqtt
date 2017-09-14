@@ -6,6 +6,7 @@ use std::io::{self, ErrorKind};
 use std::sync::mpsc as stdmpsc;
 use std::time::Duration;
 use std::error::Error;
+use std::collections::VecDeque;
 
 use codec::MqttCodec;
 use MqttOptions;
@@ -66,12 +67,33 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         // TODO: Handle all the unwraps here
         let reconnect_after = opts.reconnect_after.unwrap();
 
-        let framed = mqtt_connect(mqtt_state_connect, opts.clone(), &mut reactor).unwrap();
+        let framed = match mqtt_connect(mqtt_state_connect, opts.clone(), &mut reactor) {
+            Ok(framed) => framed,
+            Err(e) => {
+                error!("Connection error = {:?}", e);
+                continue;
+            }
+        };
+
+        let mut last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
 
         let client = async_block! {
             let (mut sender, receiver) = framed.split();
             let ping_commands_tx = commands_tx.clone();
             let nw_commands_tx = commands_tx.clone();
+
+            while let Some(publish) = last_session_publishes.pop_front() {
+                let publish = mqtt_state.borrow_mut().handle_outgoing_publish(publish);
+
+                if let Err(e) = publish {
+                    return Err(io::Error::new(ErrorKind::Other, e.description()));
+                }
+
+                let packet = Packet::Publish(publish.unwrap());
+                // Ok to block event loop during reconnection
+                // TODO: add await when references are supported
+                sender = sender.send(packet).wait().unwrap();
+            }
 
             // incoming network messages
             handle.spawn(
@@ -165,15 +187,21 @@ fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: 
 
     let response = reactor.run(f_response);
     
-    // TODO: Check ConnAck Status and Error out incase of failure
     let (packet, frame) = response?;
 
+    // Return `Framed` and previous session packets that are to be republished
     match packet.unwrap() {
-        Packet::Connack(connack) => mqtt_state.borrow_mut().handle_incoming_connack(connack).unwrap(),
+        Packet::Connack(connack) => {
+            let mqtt_connect_response = mqtt_state.borrow_mut().handle_incoming_connack(connack);
+            if let Err(e) = mqtt_connect_response {
+                Err(io::Error::new(ErrorKind::Other, e.description()))
+            } else {
+                let previous_session_packets = mqtt_connect_response.unwrap();
+                Ok(frame)
+            }
+        }
         _ => unimplemented!(),
-    };
-
-    Ok(frame)
+    }
 }
 
 #[async]

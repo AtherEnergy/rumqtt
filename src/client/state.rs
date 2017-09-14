@@ -75,21 +75,21 @@ impl MqttState {
         packet::gen_connect_packet(&self.opts.client_id, keep_alive, self.opts.clean_session, username, password)
     }
 
-    pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<Option<VecDeque<Publish>>, ConnectError> {
+    pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
         let response = connack.code;
         if response != ConnectReturnCode::Accepted {
             self.connection_status = MqttConnectionStatus::Disconnected;
             Err(response)?
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-            let publishes = mem::replace(&mut self.outgoing_pub, VecDeque::new());
+            
 
-            if self.opts.clean_session {
-                Ok(None)
-            } else {
-                Ok(Some(publishes))
-            }
+            Ok(())
         }
+    }
+
+    pub fn handle_reconnection(&mut self) -> VecDeque<Publish> {
+        mem::replace(&mut self.outgoing_pub, VecDeque::new())
     }
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
