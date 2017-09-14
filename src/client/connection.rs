@@ -29,7 +29,7 @@ pub enum Request {
     Publish(Publish),
     Connect,
     Ping,
-    Reconnect,
+    Disconnect,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +47,8 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
 
     // tries sends interesting incoming messages back to user
     // let notifier = notifier_tx;
+    let mqtt_state = Rc::new(RefCell::new(MqttState::new(opts.clone())));
+
 
     loop {
         // NOTE: If we move this out, what happen's to futures spawned in previous iteration? memory keeps growing?
@@ -58,7 +60,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         // TODO: fix the clone
         let opts = opts.clone();
 
-        let mqtt_state = Rc::new(RefCell::new(MqttState::new(opts.clone())));
+        let mqtt_state_main = mqtt_state.clone();
         let mqtt_state_connect = mqtt_state.clone();
         let mqtt_state_mqtt_recv = mqtt_state.clone();
         let mqtt_state_ping = mqtt_state.clone();
@@ -71,34 +73,20 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
             Ok(framed) => framed,
             Err(e) => {
                 error!("Connection error = {:?}", e);
+                info!("Will retry connection again in {} seconds", reconnect_after);
+                thread::sleep(Duration::new(reconnect_after as u64, 0));
                 continue;
             }
         };
-
-        let mut last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
 
         let client = async_block! {
             let (mut sender, receiver) = framed.split();
             let ping_commands_tx = commands_tx.clone();
             let nw_commands_tx = commands_tx.clone();
 
-            while let Some(publish) = last_session_publishes.pop_front() {
-                let publish = mqtt_state.borrow_mut().handle_outgoing_publish(publish);
-
-                if let Err(e) = publish {
-                    return Err(io::Error::new(ErrorKind::Other, e.description()));
-                }
-
-                let packet = Packet::Publish(publish.unwrap());
-                // Ok to block event loop during reconnection
-                // TODO: add await when references are supported
-                sender = sender.send(packet).wait().unwrap();
-            }
-
             // incoming network messages
             handle.spawn(
-                mqtt_recv(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
-
+                incoming_network_packet_handler(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
                 match result {
                     Ok(_) => error!("N/w receiver done"),
                     Err(e) => error!("N/w IO error {:?}", e),
@@ -115,6 +103,15 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                 }
                 Ok(())
             }));
+
+            let last_session_publishes = mqtt_state_main.borrow_mut().handle_reconnection();
+            // republish last session unacked packets
+            if last_session_publishes.is_some() {
+                for publish in last_session_publishes.unwrap() {
+                    let packet = Packet::Publish(publish);
+                    sender = await!(sender.send(packet))?;
+                }
+            }
 
             // execute user requests  
             loop {
@@ -135,7 +132,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                     Request::Publish(publish) => {
                         // BUG(generators): https://github.com/rust-lang/rust/issues/44184
                         let publish = publish;
-                        let publish = mqtt_state.borrow_mut().handle_outgoing_publish(publish);
+                        let publish = mqtt_state_main.borrow_mut().handle_outgoing_publish(publish);
 
                         if let Err(e) = publish {
                             return Err(io::Error::new(ErrorKind::Other, e.description()));
@@ -144,20 +141,23 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                         Packet::Publish(publish.unwrap())
                     },
                     Request::Ping => {
-                        let ping = mqtt_state.borrow_mut().handle_outgoing_ping();
+                        let ping = mqtt_state_main.borrow_mut().handle_outgoing_ping();
                         if let Err(e) = ping {
                             return Err(io::Error::new(ErrorKind::Other, e.description()));
                         }
                         
                         Packet::Pingreq
                     }
+                    Request::Disconnect => {
+                        mqtt_state_main.borrow_mut().handle_disconnect();
+                        break
+                    },
                     _ => unimplemented!(),
                 };
 
                 sender = await!(sender.send(packet))?
             } // end of command recv loop
 
-            error!("Done with network receiver !!");
             Ok::<_, io::Error>(commands_rx)
         }; // end of async mqtt future
 
@@ -192,11 +192,9 @@ fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: 
     // Return `Framed` and previous session packets that are to be republished
     match packet.unwrap() {
         Packet::Connack(connack) => {
-            let mqtt_connect_response = mqtt_state.borrow_mut().handle_incoming_connack(connack);
-            if let Err(e) = mqtt_connect_response {
+            if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
                 Err(io::Error::new(ErrorKind::Other, e.description()))
             } else {
-                let previous_session_packets = mqtt_connect_response.unwrap();
                 Ok(frame)
             }
         }
@@ -225,8 +223,9 @@ fn ping_timer(mqtt_state: Rc<RefCell<MqttState>>, mut commands_tx: Sender<Reques
 }
 
 #[async]
-fn mqtt_recv(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<Request>) -> io::Result<()> {
+fn incoming_network_packet_handler(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<Request>) -> io::Result<()> {
 
+    //TODO(async-await): How to access receiver error?
     #[async]
     for message in receiver {
         info!("incoming n/w message = {:?}", message);
@@ -245,7 +244,7 @@ fn mqtt_recv(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<Tc
         }
     }
 
-    error!("Network reciever stopped. Sending reconnect request");
-    await!(commands_tx.send(Request::Reconnect));
+    error!("Network reciever stopped. Sending disconnect request");
+    await!(commands_tx.send(Request::Disconnect));
     Ok(())
 }

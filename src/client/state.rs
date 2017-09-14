@@ -82,14 +82,21 @@ impl MqttState {
             Err(response)?
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-            
+
+            if self.opts.clean_session {
+                self.clear_session_info();
+            }
 
             Ok(())
         }
     }
 
-    pub fn handle_reconnection(&mut self) -> VecDeque<Publish> {
-        mem::replace(&mut self.outgoing_pub, VecDeque::new())
+    pub fn handle_reconnection(&mut self) -> Option<VecDeque<Publish>> {
+        if self.opts.clean_session {
+            None
+        } else {
+            Some(self.outgoing_pub.clone())
+        }
     }
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
@@ -232,8 +239,12 @@ impl MqttState {
 
         // remove all the state
         if self.opts.clean_session {
-            self.outgoing_pub.clear();
+            self.clear_session_info();
         }
+    }
+
+    fn clear_session_info(&mut self) {
+        self.outgoing_pub.clear();
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
@@ -382,8 +393,6 @@ mod test {
         // 1. test for invalid state
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
         mqtt.opts.keep_alive = Some(5);
-        // first ping always returns success but with ping false
-        assert_eq!(Ok(false), mqtt.handle_outgoing_ping());
         thread::sleep(Duration::new(5, 0));
         assert_eq!(Err(PingError::InvalidState), mqtt.handle_outgoing_ping());
     }
@@ -395,7 +404,7 @@ mod test {
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::new(5, 0));
         // should ping
-        assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
+        assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
         thread::sleep(Duration::new(5, 0));
         // should throw error because we didn't get pingresp for previous ping
         assert_eq!(Err(PingError::AwaitPingResp), mqtt.handle_outgoing_ping());
@@ -418,11 +427,11 @@ mod test {
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::new(5, 0));
         // should ping
-        assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
+        assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
         mqtt.handle_incoming_pingresp();
         thread::sleep(Duration::new(5, 0));
         // should ping
-        assert_eq!(Ok(true), mqtt.handle_outgoing_ping());
+        assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
     }
 
     #[test]
@@ -500,7 +509,7 @@ mod test {
     }
 
     #[test]
-    fn connack_handle_should_not_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
+    fn connack_handle_should_not_return_list_of_incomplete_messages_to_be_sent_in_clean_session() {
         let mut mqtt = MqttState::new(MqttOptions::new("test-id", "127.0.0.1:1883"));
 
         let publish = Publish {
@@ -521,9 +530,8 @@ mod test {
             code: ConnectReturnCode::Accepted
         };
 
-        if let Ok(p) = mqtt.handle_incoming_connack(connack) {
-            assert_eq!(None, p);
-        }
+        mqtt.handle_incoming_connack(connack).unwrap();
+        assert_eq!(None, mqtt.handle_reconnection());
     }
 
     #[test]
@@ -549,14 +557,12 @@ mod test {
             code: ConnectReturnCode::Accepted
         };
 
-        if let Ok(v) = mqtt.handle_incoming_connack(connack) {
-            if let Some(v) = v {
+        if let Ok(_) = mqtt.handle_incoming_connack(connack) {
+            if let Some(v) = mqtt.handle_reconnection() {
                 assert_eq!(v.len(), 3);
             } else {
-                panic!("Should return list of publishes");
+                panic!("Should return publishes to be retransmitted");
             }
         }
-
-        assert_eq!(0, mqtt.outgoing_pub.len());
     }
 }
