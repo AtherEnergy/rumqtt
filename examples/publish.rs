@@ -14,6 +14,8 @@ fn main() {
 
     for i in 0..100 {
         client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]);
-        thread::sleep(Duration::new(2, 0));
+        thread::sleep(Duration::new(1, 0));
     }
+
+    thread::sleep(Duration::new(60, 0));
 }

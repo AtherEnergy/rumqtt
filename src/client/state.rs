@@ -58,8 +58,11 @@ impl MqttState {
         let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
             keep_alive
         } else {
+            // rumqtt sets keep alive time to 3 minutes if user sets it to none.
+            // (get consensus)
             180
         };
+        self.opts.keep_alive = Some(keep_alive);
 
         self.connection_status = MqttConnectionStatus::Handshake;
 
@@ -118,6 +121,7 @@ impl MqttState {
         };
 
         if self.connection_status == MqttConnectionStatus::Connected {
+            self.reset_last_control_at();
             Ok(publish)
         } else {
             Err(PublishError::InvalidState)
@@ -148,42 +152,52 @@ impl MqttState {
     //     Ok(pkid)
     // }
 
+    // reset the last control packet received time
+    pub fn reset_last_control_at(&mut self) {
+        self.last_flush = Instant::now();
+    }
+
+    // check if pinging is required based on last flush time
+    pub fn is_ping_required(&self) -> bool {
+        if let Some(keep_alive) = self.opts.keep_alive  {
+            let keep_alive = Duration::new(f32::ceil(0.9 * keep_alive as f32) as u64, 0);
+            self.last_flush.elapsed() > keep_alive
+        } else {
+            false
+        }
+    }
+
     // check when the last control packet/pingreq packet
     // is received and return the status which tells if
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<bool, PingError> {
-        if let Some(keep_alive) = self.opts.keep_alive {
-            let elapsed = self.last_flush.elapsed();
+    pub fn handle_outgoing_ping(&mut self) -> Result<(), PingError> {
+        let keep_alive = self.opts.keep_alive.expect("No keep alive");
 
-            if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
-                if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
-                    return Err(PingError::Timeout);
-                }
-                // @ Prevents half open connections. Tcp writes will buffer up
-                // with out throwing any error (till a timeout) when internet
-                // is down. Eventhough broker closes the socket after timeout,
-                // EOF will be known only after reconnection.
-                // We need to unbind the socket if there in no pingresp before next ping
-                // (What about case when pings aren't sent because of constant publishes
-                // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
-                // secs and then error out because of timeout.)
-                if self.await_pingresp {
-                    return Err(PingError::AwaitPingResp);
-                }
-
-                if self.connection_status == MqttConnectionStatus::Connected {
-                    self.last_flush = Instant::now();
-                    self.await_pingresp = true;
-                    return Ok(true)
-                } else {
-                    error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
-                    return Err(PingError::InvalidState)
-                }
-            }
+        let elapsed = self.last_flush.elapsed();
+        if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
+            return Err(PingError::Timeout);
         }
-        // no need to ping
-        Ok(false)
+        // @ Prevents half open connections. Tcp writes will buffer up
+        // with out throwing any error (till a timeout) when internet
+        // is down. Eventhough broker closes the socket after timeout,
+        // EOF will be known only after reconnection.
+        // We need to unbind the socket if there in no pingresp before next ping
+        // (What about case when pings aren't sent because of constant publishes
+        // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
+        // secs and then error out because of timeout.)
+        if self.await_pingresp {
+            return Err(PingError::AwaitPingResp);
+        }
+
+        if self.connection_status == MqttConnectionStatus::Connected {
+            self.last_flush = Instant::now();
+            self.await_pingresp = true;
+            Ok(())
+        } else {
+            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
+            Err(PingError::InvalidState)
+        }
     }
 
     pub fn handle_incoming_pingresp(&mut self) {

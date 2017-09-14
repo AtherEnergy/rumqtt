@@ -72,9 +72,11 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
             let (mut sender, receiver) = framed.split();
             let ping_commands_tx = commands_tx.clone();
             let nw_commands_tx = commands_tx.clone();
-            
+
             // incoming network messages
-            handle.spawn(mqtt_recv(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
+            handle.spawn(
+                mqtt_recv(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
+
                 match result {
                     Ok(_) => error!("N/w receiver done"),
                     Err(e) => error!("N/w IO error {:?}", e),
@@ -83,7 +85,8 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
             }));
 
             // ping timer
-            handle.spawn(ping_timer(ping_commands_tx, opts.keep_alive.unwrap()).then(|result| {
+            handle.spawn(
+                ping_timer(mqtt_state_ping, ping_commands_tx, opts.keep_alive.unwrap()).then(|result| {
                 match result {
                     Ok(_) => error!("Ping timer done"),
                     Err(e) => error!("Ping timer IO error {:?}", e),
@@ -124,18 +127,14 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                             return Err(io::Error::new(ErrorKind::Other, e.description()));
                         }
                         
-                        if ping.unwrap() == true {
-                            Packet::Pingreq
-                        } else {
-                            continue
-                        }
+                        Packet::Pingreq
                     }
                     _ => unimplemented!(),
                 };
 
                 sender = await!(sender.send(packet))?
             } // end of command recv loop
-            
+
             error!("Done with network receiver !!");
             Ok::<_, io::Error>(commands_rx)
         }; // end of async mqtt future
@@ -178,18 +177,20 @@ fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: 
 }
 
 #[async]
-fn ping_timer(mut commands_tx: Sender<Request>, keep_alive: u16) -> io::Result<()> {
+fn ping_timer(mqtt_state: Rc<RefCell<MqttState>>, mut commands_tx: Sender<Request>, keep_alive: u16) -> io::Result<()> {
     let timer = Timer::default();
     let interval = timer.interval(Duration::new(keep_alive as u64, 0));
 
     #[async]
     for _t in interval {
-        debug!("Ping timer fire");
-        commands_tx = await!(
-            commands_tx.send(Request::Ping).or_else(|e| {
-                Err(io::Error::new(ErrorKind::Other, e.description()))
-            })
-        )?;
+        if mqtt_state.borrow().is_ping_required() {
+            debug!("Ping timer fire");
+            commands_tx = await!(
+                commands_tx.send(Request::Ping).or_else(|e| {
+                    Err(io::Error::new(ErrorKind::Other, e.description()))
+                })
+            )?;
+        }
     }
 
     Ok(())
@@ -197,7 +198,7 @@ fn ping_timer(mut commands_tx: Sender<Request>, keep_alive: u16) -> io::Result<(
 
 #[async]
 fn mqtt_recv(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<Request>) -> io::Result<()> {
-    
+
     #[async]
     for message in receiver {
         info!("incoming n/w message = {:?}", message);
