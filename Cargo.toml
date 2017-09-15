@@ -15,9 +15,8 @@ tokio-io = "0.1"
 tokio-timer = "0.1"
 bytes = "0.4"
 mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
-quick-error = "1.2"
+quick-error = "1"
 log = "0.3"
-threadpool = "1"
 
 [dev-dependencies]
 loggerv = "0.3"

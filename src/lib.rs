@@ -7,13 +7,15 @@ extern crate tokio_timer;
 extern crate mqtt3;
 extern crate bytes;
 #[macro_use]
+extern crate quick_error;
+#[macro_use]
 extern crate log;
-extern crate threadpool;
 
 mod codec;
 mod packet;
 mod mqttopts;
 mod client;
+mod error;
 
 // expose to other crates
 pub use mqttopts::MqttOptions;

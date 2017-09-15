@@ -32,7 +32,7 @@ impl MqttOptions {
         MqttOptions {
             broker_addr: addr.to_string(),
             keep_alive: Some(10),
-            clean_session: false,
+            clean_session: true,
             client_id: id.to_string(),
             credentials: None,
             reconnect_after: None,
