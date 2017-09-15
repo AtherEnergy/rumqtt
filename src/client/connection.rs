@@ -6,7 +6,6 @@ use std::io::{self, ErrorKind};
 use std::sync::mpsc as stdmpsc;
 use std::time::Duration;
 use std::error::Error;
-use std::collections::VecDeque;
 
 use codec::MqttCodec;
 use MqttOptions;
@@ -89,7 +88,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                 incoming_network_packet_handler(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
                 match result {
                     Ok(_) => error!("N/w receiver done"),
-                    Err(e) => error!("N/w IO error {:?}", e),
+                    Err(e) => error!("N/w packet handler failed. Error = {:?}", e),
                 }
                 Ok(())
             }));
@@ -130,8 +129,6 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
 
                 let packet = match command {
                     Request::Publish(publish) => {
-                        // BUG(generators): https://github.com/rust-lang/rust/issues/44184
-                        let publish = publish;
                         let publish = mqtt_state_main.borrow_mut().handle_outgoing_publish(publish);
 
                         if let Err(e) = publish {
@@ -225,26 +222,29 @@ fn ping_timer(mqtt_state: Rc<RefCell<MqttState>>, mut commands_tx: Sender<Reques
 #[async]
 fn incoming_network_packet_handler(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<Request>) -> io::Result<()> {
 
-    //TODO(async-await): How to access receiver error?
     #[async]
     for message in receiver {
         info!("incoming n/w message = {:?}", message);
         match message {
             Packet::Connack(connack) => {
-                // TODO: Handle result
-                let _ = mqtt_state.borrow_mut().handle_incoming_connack(connack);
+                if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
+                    return Err(io::Error::new(ErrorKind::Other, e.description()))
+                }
             }
             Packet::Puback(ack) => {
+                // ignore unsolicited ack errors
                 let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
             }
             Packet::Pingresp => {
-                let _ = mqtt_state.borrow_mut().handle_incoming_pingresp();
+                mqtt_state.borrow_mut().handle_incoming_pingresp();
             }
             _ => unimplemented!()
         }
     }
 
     error!("Network reciever stopped. Sending disconnect request");
-    await!(commands_tx.send(Request::Disconnect));
-    Ok(())
+    match await!(commands_tx.send(Request::Disconnect)) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(io::Error::new(ErrorKind::Other, e.description())),
+    }
 }

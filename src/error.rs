@@ -1,4 +1,3 @@
-use std::io;
 use mqtt3;
 use futures::sync::mpsc::SendError;
 use client::Request;

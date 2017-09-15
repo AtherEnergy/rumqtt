@@ -1,7 +1,6 @@
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::result::Result;
-use std::mem;
 use mqtt3::*;
 
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError, SubackError};
@@ -137,10 +136,6 @@ impl MqttState {
     }
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Publish, PubackError> {
-        // if let Err(e) = self.notifier.try_send(MqttRecv::Puback(pkid)) {
-        //     error!("Couldn't notify to user. Error = {:?}", e);
-        // }
-
         if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Ok(self.outgoing_pub.remove(index).unwrap())
         } else {

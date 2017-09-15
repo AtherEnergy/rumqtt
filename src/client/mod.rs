@@ -25,7 +25,7 @@ impl MqttClient {
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<MqttRecv>) {
-        let (mut commands_tx, commands_rx) = mpsc::channel(10);
+        let (commands_tx, commands_rx) = mpsc::channel(10);
         // used to receive notifications back from network thread
         let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(30);
         let nw_commands_tx = commands_tx.clone();
