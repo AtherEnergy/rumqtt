@@ -53,6 +53,10 @@ impl MqttState {
         }
     }
 
+    pub fn initial_connect(&self) -> bool {
+        self.initial_connect
+    }
+
     pub fn handle_outgoing_connect(&mut self) -> Connect {
         let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
             keep_alive
@@ -81,7 +85,8 @@ impl MqttState {
             Err(response)?
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-
+            self.initial_connect = false;
+            
             if self.opts.clean_session {
                 self.clear_session_info();
             }

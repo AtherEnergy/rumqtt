@@ -18,6 +18,6 @@ mod client;
 mod error;
 
 // expose to other crates
-pub use mqttopts::MqttOptions;
+pub use mqttopts::{MqttOptions, ReconnectOptions};
 pub use client::MqttClient;
 pub use mqtt3::QoS;

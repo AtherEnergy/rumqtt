@@ -1,5 +1,13 @@
 use std::path::{Path, PathBuf};
 
+#[derive(Copy, Clone)]
+pub enum ReconnectOptions {
+    Never,
+    AfterFirstSuccess(u16),
+    Always(u16),
+}
+
+
 // TODO: Add getters & make fields private
 
 #[derive(Clone)]
@@ -10,10 +18,8 @@ pub struct MqttOptions {
     pub keep_alive: Option<u16>,
     /// clean (or) persistent session 
     pub clean_session: bool,
-    /// sleep time before retrying for connection
-    pub reconnect_after: Option<u16>,
-    /// try reconnection even if the first connect fails
-    pub first_reconnection_loop: bool,
+    /// reconnection options
+    pub reconnect: ReconnectOptions,
     /// client identifier
     pub client_id: String,
     /// username and password
@@ -35,8 +41,7 @@ impl MqttOptions {
             clean_session: true,
             client_id: id.to_string(),
             credentials: None,
-            reconnect_after: None,
-            first_reconnection_loop: false,
+            reconnect: ReconnectOptions::AfterFirstSuccess(10),
             certs: None,
             max_packet_size: 100 * 1024,
         }
@@ -82,13 +87,8 @@ impl MqttOptions {
 
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections. By default, no retry will happen
-    pub fn set_reconnect_after(mut self, dur: u16) -> Self {
-        self.reconnect_after = Some(dur);
-        self
-    }
-
-    pub fn set_first_reconnection_loop(mut self, reconnect: bool) -> Self {
-        self.first_reconnection_loop = reconnect;
+    pub fn set_reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
+        self.reconnect = opts;
         self
     }
 

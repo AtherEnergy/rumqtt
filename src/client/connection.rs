@@ -10,6 +10,7 @@ use std::error::Error;
 use codec::MqttCodec;
 use MqttOptions;
 use client::state::MqttState;
+use ReconnectOptions;
 
 use mqtt3::*;
 use futures::stream::{Stream, SplitSink, SplitStream};
@@ -49,7 +50,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
     let mqtt_state = Rc::new(RefCell::new(MqttState::new(opts.clone())));
 
 
-    loop {
+    'reconnect: loop {
         // NOTE: If we move this out, what happen's to futures spawned in previous iteration? memory keeps growing?
         let mut reactor = Core::new().unwrap();
         let handle = reactor.handle();
@@ -58,23 +59,34 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
 
         // TODO: fix the clone
         let opts = opts.clone();
+        let reconnect_opts = opts.reconnect;
 
         let mqtt_state_main = mqtt_state.clone();
         let mqtt_state_connect = mqtt_state.clone();
         let mqtt_state_mqtt_recv = mqtt_state.clone();
         let mqtt_state_ping = mqtt_state.clone();
 
-        // config
-        // TODO: Handle all the unwraps here
-        let reconnect_after = opts.reconnect_after.unwrap();
+        let initial_connect = mqtt_state_main.borrow().initial_connect();
+        
 
         let framed = match mqtt_connect(mqtt_state_connect, opts.clone(), &mut reactor) {
             Ok(framed) => framed,
             Err(e) => {
                 error!("Connection error = {:?}", e);
-                info!("Will retry connection again in {} seconds", reconnect_after);
-                thread::sleep(Duration::new(reconnect_after as u64, 0));
-                continue;
+                match reconnect_opts {
+                    ReconnectOptions::Never => break 'reconnect,
+                    ReconnectOptions::AfterFirstSuccess(d) if !initial_connect => {
+                        info!("Will retry connecting again in {} seconds", d);
+                        thread::sleep(Duration::new(d as u64, 0));
+                        continue 'reconnect;
+                    }
+                    ReconnectOptions::AfterFirstSuccess(d) => break 'reconnect,
+                    ReconnectOptions::Always(d) => {
+                        info!("Will retry connecting again in {} seconds", d);
+                        thread::sleep(Duration::new(d as u64, 0));
+                        continue 'reconnect;
+                    }
+                }
             }
         };
 
@@ -152,7 +164,13 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                     _ => unimplemented!(),
                 };
 
-                sender = await!(sender.send(packet))?
+                sender = match await!(sender.send(packet)) {
+                    Ok(sender) => sender,
+                    Err(e) => {
+                        error!("Failed n/w transmission. Error = {:?}", e);
+                        return Ok(commands_rx)
+                    }
+                }
             } // end of command recv loop
 
             Ok::<_, io::Error>(commands_rx)
@@ -161,8 +179,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let response = reactor.run(client);
         commands_rx = response.unwrap();
 
-        info!("Will retry connection again in {} seconds", reconnect_after);
-        thread::sleep(Duration::new(reconnect_after as u64, 0));
+        error!("Done with eventloop");
     }
 }
 
