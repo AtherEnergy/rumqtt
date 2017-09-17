@@ -14,7 +14,7 @@ use MqttOptions;
 use packet;
 
 use error::Error;
-pub use self::connection::{Request, MqttRecv};
+pub use self::connection::Request;
 
 pub struct MqttClient {
     nw_request_tx: Sender<Request>,
@@ -24,7 +24,7 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<MqttRecv>) {
+    pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<Packet>) {
         let (commands_tx, commands_rx) = mpsc::channel(10);
         // used to receive notifications back from network thread
         let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(30);

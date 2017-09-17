@@ -144,15 +144,18 @@ impl MqttState {
         }
     }
 
-    // pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<Option<PacketIdentifier>, ()> {
-    //     let pkid = publish.pid;
+    // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
+    // should be sent back on network as ack
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> (Option<Publish>, Option<Packet>) {
+        let pkid = publish.pid;
+        let qos = publish.qos;
 
-    //     if let Err(e) = self.notifier.try_send(MqttRecv::Publish(publish)) {
-    //         error!("Couldn't notify to user. Error = {:?}", e);
-    //     }
-
-    //     Ok(pkid)
-    // }
+        match qos {
+            QoS::AtMostOnce => (Some(publish), None),
+            QoS::AtLeastOnce => (Some(publish), Some(Packet::Puback(pkid.unwrap()))),
+            QoS::ExactlyOnce => unimplemented!()
+        }
+    }
 
     // reset the last control packet received time
     pub fn reset_last_control_at(&mut self) {
@@ -217,10 +220,6 @@ impl MqttState {
 
 
     // pub fn handle_incoming_suback(&mut self, ack: Suback) -> Result<(), SubackError> {
-    //     if let Err(e) = self.notifier.try_send(MqttRecv::Suback(ack.clone())) {
-    //         error!("Couldn't notify to user. Error = {:?}", e);
-    //     }
-
     //     if ack.return_codes.iter().any(|v| *v == SubscribeReturnCodes::Failure) {
     //         Err(SubackError::Rejected)
     //     } else {
