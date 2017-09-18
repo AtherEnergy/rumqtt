@@ -56,10 +56,10 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         let opts = opts.clone();
         let reconnect_opts = opts.reconnect;
 
-        let mqtt_state_main = mqtt_state.clone();
-        let mqtt_state_connect = mqtt_state.clone();
-        let mqtt_state_mqtt_recv = mqtt_state.clone();
-        let mqtt_state_ping = mqtt_state.clone();
+        let mqtt_state_main         = Rc::clone(&mqtt_state);
+        let mqtt_state_connect      = Rc::clone(&mqtt_state);
+        let mqtt_state_mqtt_recv    = Rc::clone(&mqtt_state);
+        let mqtt_state_ping         = Rc::clone(&mqtt_state);
 
         let initial_connect = mqtt_state_main.borrow().initial_connect();
         
@@ -72,13 +72,13 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                     ReconnectOptions::Never => break 'reconnect,
                     ReconnectOptions::AfterFirstSuccess(d) if !initial_connect => {
                         info!("Will retry connecting again in {} seconds", d);
-                        thread::sleep(Duration::new(d as u64, 0));
+                        thread::sleep(Duration::new(u64::from(d), 0));
                         continue 'reconnect;
                     }
                     ReconnectOptions::AfterFirstSuccess(_) => break 'reconnect,
                     ReconnectOptions::Always(d) => {
                         info!("Will retry connecting again in {} seconds", d);
-                        thread::sleep(Duration::new(d as u64, 0));
+                        thread::sleep(Duration::new(u64::from(d), 0));
                         continue 'reconnect;
                     }
                 }
@@ -224,7 +224,7 @@ fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: 
 #[async]
 fn ping_timer(mqtt_state: Rc<RefCell<MqttState>>, mut commands_tx: Sender<Request>, keep_alive: u16) -> io::Result<()> {
     let timer = Timer::default();
-    let interval = timer.interval(Duration::new(keep_alive as u64, 0));
+    let interval = timer.interval(Duration::new(u64::from(keep_alive), 0));
 
     #[async]
     for _t in interval {

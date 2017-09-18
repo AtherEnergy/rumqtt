@@ -49,8 +49,6 @@ impl MqttClient {
         // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
         let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
         
-        // TODO: Fix clone
-        let payload = payload.clone();
         let publish = packet::gen_publish_packet(topic, qos, None, false, false, payload);
         nw_request_tx = nw_request_tx.send(Request::Publish(publish)).wait()?;
 

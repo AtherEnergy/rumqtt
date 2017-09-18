@@ -34,7 +34,7 @@ pub struct MqttState {
     // subscriptions: VecDeque<SubscribeTopic>,
 }
 
-/// Design: MqttState methods will just modify the state of the object
+/// Design: `MqttState` methods will just modify the state of the object
 ///         but doesn't do any network operations. Methods will do
 ///         appropriate returns so that n/w methods or n/w eventloop can
 ///         operate directly. This abstracts the functionality better
@@ -172,7 +172,7 @@ impl MqttState {
     // check if pinging is required based on last flush time
     pub fn is_ping_required(&self) -> bool {
         if let Some(keep_alive) = self.opts.keep_alive  {
-            let keep_alive = Duration::new(f32::ceil(0.9 * keep_alive as f32) as u64, 0);
+            let keep_alive = Duration::new(f32::ceil(0.9 * f32::from(keep_alive)) as u64, 0);
             self.last_flush.elapsed() > keep_alive
         } else {
             false
@@ -187,7 +187,7 @@ impl MqttState {
         let keep_alive = self.opts.keep_alive.expect("No keep alive");
 
         let elapsed = self.last_flush.elapsed();
-        if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
+        if elapsed >= Duration::new(u64::from(keep_alive + 1), 0) {
             return Err(PingError::Timeout);
         }
         // @ Prevents half open connections. Tcp writes will buffer up
@@ -251,7 +251,7 @@ impl MqttState {
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
     fn next_pkid(&mut self) -> PacketIdentifier {
         let PacketIdentifier(mut pkid) = self.last_pkid;
-        if pkid == 65535 {
+        if pkid == 65_535 {
             pkid = 0;
         }
         self.last_pkid = PacketIdentifier(pkid + 1);

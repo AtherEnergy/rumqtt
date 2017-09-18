@@ -28,8 +28,7 @@ impl Decoder for MqttCodec {
                 Err(e) => {
                     if let mqtt3::Error::Io(e) = e {
                         match e.kind() {
-                            ErrorKind::TimedOut | ErrorKind::WouldBlock => return Ok(None),
-                            ErrorKind::UnexpectedEof => return Ok(None),
+                            ErrorKind::TimedOut | ErrorKind::WouldBlock | ErrorKind::UnexpectedEof => return Ok(None),
                             _ => {
                                 error!("mqtt3 io error = {:?}", e);
                                 return Err(io::Error::new(e.kind(), e.description()))
