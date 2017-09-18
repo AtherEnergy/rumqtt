@@ -58,6 +58,8 @@ impl MqttClient {
         Ok(())
     }
 
+    // TODO: Add userdata publish
+
     pub fn subscribe(&mut self, topics: Vec<(&str, QoS)>) -> Result<(), Error>{
         let sub_topics: Vec<_> = topics.iter().map(
             |t| SubscribeTopic{topic_path: t.0.to_string(), qos: t.1}

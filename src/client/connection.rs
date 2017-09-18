@@ -14,7 +14,7 @@ use ReconnectOptions;
 use error::PublishError;
 
 use mqtt3::*;
-use futures::stream::{Stream, SplitSink, SplitStream};
+use futures::stream::{Stream, SplitStream};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Core;
 use futures::prelude::*;
@@ -75,7 +75,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                         thread::sleep(Duration::new(d as u64, 0));
                         continue 'reconnect;
                     }
-                    ReconnectOptions::AfterFirstSuccess(d) => break 'reconnect,
+                    ReconnectOptions::AfterFirstSuccess(_) => break 'reconnect,
                     ReconnectOptions::Always(d) => {
                         info!("Will retry connecting again in {} seconds", d);
                         thread::sleep(Duration::new(d as u64, 0));
@@ -189,8 +189,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
     }
 }
 
-// DESIGN: Initial connect status should be immediately known.
-//         Intermediate disconnections should be automatically reconnected
+
 fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: &mut Core) -> io::Result<Framed<TcpStream, MqttCodec>> {
     // NOTE: make sure that dns resolution happens during reconnection to handle changes in server ip
     let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();

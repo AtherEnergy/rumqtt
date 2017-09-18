@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::result::Result;
 use mqtt3::*;
 
-use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError, SubackError};
+use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
 use packet;
 use MqttOptions;
 
@@ -27,9 +27,11 @@ pub struct MqttState {
     // For QoS 1. Stores outgoing publishes
     outgoing_pub: VecDeque<Publish>,
     // clean_session=false will remember subscriptions only till lives.
-    // If broker crashes, all its state will be lost (most brokers).
-    // client wouldn't want to loose messages after it comes back up again
-    subscriptions: VecDeque<SubscribeTopic>,
+    // Even so, if broker crashes, all its state will be lost (most brokers).
+    // client should resubscribe it comes back up again or else the data will
+    // be lost
+    // TODO: Enable this
+    // subscriptions: VecDeque<SubscribeTopic>,
 }
 
 /// Design: MqttState methods will just modify the state of the object
@@ -49,7 +51,7 @@ impl MqttState {
             last_flush: Instant::now(),
             last_pkid: PacketIdentifier(0),
             outgoing_pub: VecDeque::new(),
-            subscriptions: VecDeque::new(),
+            // subscriptions: VecDeque::new(),
         }
     }
 

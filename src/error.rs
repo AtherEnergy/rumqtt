@@ -53,10 +53,10 @@ quick_error! {
     }
 }
 
-quick_error! {
-    #[derive(Debug, PartialEq)]
-    pub enum SubackError {
-        // TODO: Add semi rejected error is some of the subscriptions are accepted
-        Rejected
-    }
-}
+// quick_error! {
+//     #[derive(Debug, PartialEq)]
+//     pub enum SubackError {
+//         // TODO: Add semi rejected error is some of the subscriptions are accepted
+//         Rejected
+//     }
+// }
