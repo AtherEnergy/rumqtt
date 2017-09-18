@@ -11,6 +11,7 @@ use codec::MqttCodec;
 use MqttOptions;
 use client::state::MqttState;
 use ReconnectOptions;
+use error::PublishError;
 
 use mqtt3::*;
 use futures::stream::{Stream, SplitSink, SplitStream};
@@ -27,19 +28,13 @@ use tokio_io::codec::Framed;
 pub enum Request {
     Subscribe(Vec<SubscribeTopic>),
     Publish(Publish),
+    Puback(PacketIdentifier),
     Connect,
     Ping,
     Disconnect,
 }
 
-#[derive(Debug, Clone)]
-pub enum MqttRecv {
-    Publish(Publish),
-    Suback(Suback),
-    Puback(PacketIdentifier),
-}
-
-pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Receiver<Request>, notifier_tx: stdmpsc::SyncSender<MqttRecv>) {
+pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Receiver<Request>, notifier_tx: stdmpsc::SyncSender<Packet>) {
 
     let mut commands_rx = commands_rx.or_else(|_| {
         Err(io::Error::new(ErrorKind::Other, "Rx Error"))
@@ -97,7 +92,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
 
             // incoming network messages
             handle.spawn(
-                incoming_network_packet_handler(mqtt_state_mqtt_recv, receiver, nw_commands_tx).then(|result| {
+                incoming_network_packet_handler(mqtt_state_mqtt_recv, receiver, nw_commands_tx, notifier_tx).then(|result| {
                 match result {
                     Ok(_) => error!("N/w receiver done"),
                     Err(e) => error!("N/w packet handler failed. Error = {:?}", e),
@@ -125,7 +120,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
             }
 
             // execute user requests  
-            loop {
+            'user_requests: loop {
                 let command = match await!(commands_rx.into_future().map_err(|e| e.0))? {
                     (Some(item), s) => {
                         commands_rx = s;
@@ -133,7 +128,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                     }
                     (None, s) => {
                         commands_rx = s;
-                        break
+                        break 'user_requests
                     }
                 };
 
@@ -144,7 +139,13 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                         let publish = mqtt_state_main.borrow_mut().handle_outgoing_publish(publish);
 
                         if let Err(e) = publish {
-                            return Err(io::Error::new(ErrorKind::Other, e.description()));
+                            match e {
+                                PublishError::PacketSizeLimitExceeded => {
+                                    error!("Publish failed. Continuing next message in queue. Error = {:?}", e);
+                                    continue 'user_requests
+                                }
+                                PublishError::InvalidState => return Err(io::Error::new(ErrorKind::Other, e.description()))
+                            }
                         }
 
                         Packet::Publish(publish.unwrap())
@@ -157,10 +158,15 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                         
                         Packet::Pingreq
                     }
+                    Request::Subscribe(subs) => {
+                        let subscription = mqtt_state_main.borrow_mut().handle_outgoing_subscribe(subs).unwrap();
+                        Packet::Subscribe(subscription)
+                    }
                     Request::Disconnect => {
                         mqtt_state_main.borrow_mut().handle_disconnect();
-                        break
+                        break 'user_requests
                     },
+                    Request::Puback(pkid) => Packet::Puback(pkid),
                     _ => unimplemented!(),
                 };
 
@@ -237,7 +243,8 @@ fn ping_timer(mqtt_state: Rc<RefCell<MqttState>>, mut commands_tx: Sender<Reques
 }
 
 #[async]
-fn incoming_network_packet_handler(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, commands_tx: Sender<Request>) -> io::Result<()> {
+fn incoming_network_packet_handler(mqtt_state: Rc<RefCell<MqttState>>, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, 
+                                   mut commands_tx: Sender<Request>, notifier: stdmpsc::SyncSender<Packet>) -> io::Result<()> {
 
     #[async]
     for message in receiver {
@@ -249,11 +256,37 @@ fn incoming_network_packet_handler(mqtt_state: Rc<RefCell<MqttState>>, receiver:
                 }
             }
             Packet::Puback(ack) => {
+                if let Err(e) = notifier.try_send(Packet::Puback(ack)) {
+                    error!("Puback notification send failed. Error = {:?}", e);
+                }
                 // ignore unsolicited ack errors
                 let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
             }
             Packet::Pingresp => {
                 mqtt_state.borrow_mut().handle_incoming_pingresp();
+            }
+            Packet::Publish(publish) => {
+                let (publish, ack) = mqtt_state.borrow_mut().handle_incoming_publish(publish);
+
+                if let Some(publish) = publish {
+                    if let Err(e) = notifier.try_send(Packet::Publish(publish)) {
+                        error!("Publish notification send failed. Error = {:?}", e);
+                    }
+                }
+
+                if let Some(ack) = ack {
+                    match ack {
+                        Packet::Puback(pkid) => {
+                            commands_tx = await!(commands_tx.send(Request::Puback(pkid))).unwrap();
+                        }
+                        _ => unimplemented!()
+                    };
+                }
+            }
+            Packet::Suback(suback) => {
+                if let Err(e) = notifier.try_send(Packet::Suback(suback)) {
+                    error!("Suback notification send failed. Error = {:?}", e);
+                }
             }
             _ => unimplemented!()
         }
