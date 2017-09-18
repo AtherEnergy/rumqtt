@@ -58,15 +58,16 @@ impl MqttClient {
         Ok(())
     }
 
-    // pub fn subscribe(&mut self, topics: Vec<(&str, QoS)>) -> Result<(), Error>{
-    //     let sub_topics: Vec<_> = topics.iter().map(
-    //         |t| SubscribeTopic{topic_path: t.0.to_string(), qos: t.1}
-    //     )
-    //     .collect();
+    pub fn subscribe(&mut self, topics: Vec<(&str, QoS)>) -> Result<(), Error>{
+        let sub_topics: Vec<_> = topics.iter().map(
+            |t| SubscribeTopic{topic_path: t.0.to_string(), qos: t.1}
+        )
+        .collect();
 
-    //     // TODO: Find ways to remove clone to improve perf
-    //     let nw_request_tx = self.nw_request_tx.clone();
-    //     nw_request_tx.send(Request::Subscribe(sub_topics)).wait()?;
-    //     Ok(())
-    // }
+        // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
+        let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
+        nw_request_tx = nw_request_tx.send(Request::Subscribe(sub_topics)).wait()?;
+        let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
+        Ok(())
+    }
 }
