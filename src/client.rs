@@ -53,6 +53,11 @@ impl MqttClient {
     }
 
     pub fn subscribe(&mut self, topics: Vec<(&str, QualityOfService)>) -> Result<()> {
+        if topics.len() == 0 {
+            error!("It is invaild to send a subscribe message with zero topics");
+            return Err(Error::InvalidPacket);
+        }
+
         let mut sub_topics = Vec::with_capacity(topics.len());
         for topic in topics {
             let topic = (TopicFilter::new_checked(topic.0)?, topic.1);
