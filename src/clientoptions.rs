@@ -73,10 +73,9 @@ impl MqttOptions {
     }
 
     /// Client id of the client. A random client id will be selected
-
     /// if you don't set one
-    pub fn set_client_id(mut self, client_id: &str) -> Self {
-        self.client_id = Some(client_id.to_string());
+    pub fn set_client_id<S: Into<String>>(mut self, client_id: S) -> Self {
+        self.client_id = Some(client_id.into());
         self
     }
 
