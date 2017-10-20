@@ -70,7 +70,6 @@ extern crate log;
 #[macro_use]
 extern crate quick_error;
 extern crate mqtt;
-extern crate time;
 extern crate openssl;
 extern crate threadpool;
 
