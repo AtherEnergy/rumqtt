@@ -1,17 +1,31 @@
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::result::Result;
+use std::fs::File;
+use std::path::Path;
+use std::io::Read;
+
 use mqtt3::*;
+use jwt::{encode, Header, Algorithm};
+use chrono::{self, Utc};
 
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
 use packet;
 use MqttOptions;
+use SecurityOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
     Handshake,
     Connected,
     Disconnected,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    iat: i64,
+    exp: i64,
+    aud: String,
 }
 
 pub struct MqttState {
@@ -68,13 +82,12 @@ impl MqttState {
             180
         };
         self.opts.keep_alive = Some(keep_alive);
-
         self.connection_status = MqttConnectionStatus::Handshake;
 
-        let (username, password) = if let Some((ref username, ref password)) = self.opts.credentials {
-            (Some(username.to_owned()), Some(password.to_owned()))
-        } else {
-            (None, None)
+        let (username, password) = match self.opts.security {
+            SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
+            SecurityOptions::GcloudIotCore((_, ref key, expiry)) => (Some("unuded".to_owned()), Some(gen_iotcore_password(key, expiry))),
+            _ => (None, None),
         };
 
         packet::gen_connect_packet(&self.opts.client_id, keep_alive, self.opts.clean_session, username, password)
@@ -257,6 +270,25 @@ impl MqttState {
         self.last_pkid = PacketIdentifier(pkid + 1);
         self.last_pkid
     }
+}
+
+// Generates a new password for mqtt client authentication
+pub fn gen_iotcore_password<P>(key: P, expiry: i64) -> String
+where P: AsRef<Path> {
+    let time = Utc::now();
+    let jwt_header = Header::new(Algorithm::RS256);
+    let iat = time.timestamp();
+    let exp = time.checked_add_signed(chrono::Duration::minutes(expiry)).unwrap().timestamp();
+    let claims = Claims {
+        iat: iat,
+        exp: exp,
+        aud: "crested-return-122311".to_string(),
+    };
+
+    let mut key_file = File::open(key).expect("Unable to open private keyfile for gcloud iot core auth");
+    let mut key = vec![];
+    key_file.read_to_end(&mut key).expect("Unable to read private key file for gcloud iot core auth till end");
+    encode(&jwt_header, &claims, &key).expect("encode error")
 }
 
 #[cfg(test)]

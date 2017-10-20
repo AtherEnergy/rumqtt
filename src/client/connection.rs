@@ -194,6 +194,8 @@ fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: 
     // NOTE: make sure that dns resolution happens during reconnection to handle changes in server ip
     let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
 
+    // TODO: Add TLS support with client authentication (ca = roots.pem for iotcore)
+
     let f_response = TcpStream::connect(&addr, &reactor.handle()).and_then(|connection| {
         let framed = connection.framed(MqttCodec);
         let connect = mqtt_state.borrow_mut().handle_outgoing_connect();

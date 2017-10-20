@@ -1,10 +1,19 @@
-use std::path::{Path, PathBuf};
-
 #[derive(Copy, Clone)]
 pub enum ReconnectOptions {
     Never,
     AfterFirstSuccess(u16),
     Always(u16),
+}
+
+#[derive(Clone)]
+pub enum SecurityOptions {
+    None,
+    /// username, password
+    UsernamePassword((String, String)),
+    /// ca, client cert, client key
+    Tls((String, String, String)),
+    /// roots.pem, private_key.der to sign jwt, expiry in seconds
+    GcloudIotCore((String, String, i64))
 }
 
 
@@ -18,14 +27,12 @@ pub struct MqttOptions {
     pub keep_alive: Option<u16>,
     /// clean (or) persistent session 
     pub clean_session: bool,
-    /// reconnection options
-    pub reconnect: ReconnectOptions,
     /// client identifier
     pub client_id: String,
-    /// username and password
-    pub credentials: Option<(String, String)>,
-    /// ca cert and client cert, key (for client auth)
-    pub certs: Option<(PathBuf, Option<(PathBuf, PathBuf)>)>,
+    /// reconnection options
+    pub reconnect: ReconnectOptions,
+    /// security options
+    pub security: SecurityOptions,
     /// maximum packet size
     pub max_packet_size: usize,
 }
@@ -40,9 +47,8 @@ impl MqttOptions {
             keep_alive: Some(10),
             clean_session: true,
             client_id: id.to_string(),
-            credentials: None,
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
-            certs: None,
+            security: SecurityOptions::None,
             max_packet_size: 100 * 1024,
         }
     }
@@ -77,14 +83,6 @@ impl MqttOptions {
         self
     }
 
-
-    /// Set `username` for broker to perform client authentication
-    /// via `username` and `password`
-    pub fn set_credentials(mut self, username: &str, password: &str) -> Self {
-        self.credentials = Some((username.to_string(), password.to_string()));
-        self
-    }
-
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections. By default, no retry will happen
     pub fn set_reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
@@ -92,16 +90,10 @@ impl MqttOptions {
         self
     }
 
-    /// Set ca, client cert and key for server to do client authentication
-    pub fn set_certs<P>(mut self, ca: P, client_certs: Option<(P, P)>) -> Self
-    where P: AsRef<Path>,
-    {
-        let client_certs = match client_certs {
-            Some((cert, key)) => Some((cert.as_ref().to_path_buf(), key.as_ref().to_path_buf())),
-            None => None,
-        };
-        
-        self.certs = Some((ca.as_ref().to_path_buf(), client_certs));
+    /// Set security option
+    /// Supports username-password auth, tls client cert auth, gcloud iotcore jwt auth
+    pub fn set_security_opts(mut self, opts: SecurityOptions) -> Self {
+        self.security = opts;
         self
     }
 }
