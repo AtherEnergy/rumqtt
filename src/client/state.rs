@@ -81,16 +81,17 @@ impl MqttState {
             // (get consensus)
             180
         };
+
         self.opts.keep_alive = Some(keep_alive);
         self.connection_status = MqttConnectionStatus::Handshake;
 
         let (username, password) = match self.opts.security {
             SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
-            SecurityOptions::GcloudIotCore((_, ref key, expiry)) => (Some("unuded".to_owned()), Some(gen_iotcore_password(key, expiry))),
+            SecurityOptions::GcloudIotCore((_, ref key, expiry)) => (Some("unused".to_owned()), Some(gen_iotcore_password(key, expiry))),
             _ => (None, None),
         };
 
-        packet::gen_connect_packet(&self.opts.client_id, keep_alive, self.opts.clean_session, username, password)
+        packet::gen_connect_packet(self.opts.client_id.clone(), keep_alive, self.opts.clean_session, username, password)
     }
 
     pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {

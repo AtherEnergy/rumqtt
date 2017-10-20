@@ -43,13 +43,13 @@ impl MqttClient {
         (client, notifier_rx)
     }
 
-    pub fn publish(&mut self, topic: &str, qos: QoS, payload: Vec<u8>) -> Result<(), Error>{
+    pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), Error>{
         let payload = Arc::new(payload);
 
         // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
         let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
         
-        let publish = packet::gen_publish_packet(topic, qos, None, false, false, payload);
+        let publish = packet::gen_publish_packet(topic.into(), qos, None, false, false, payload);
         nw_request_tx = nw_request_tx.send(Request::Publish(publish)).wait()?;
 
         let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
@@ -58,11 +58,15 @@ impl MqttClient {
 
     // TODO: Add userdata publish
 
-    pub fn subscribe(&mut self, topics: Vec<(&str, QoS)>) -> Result<(), Error>{
-        let sub_topics: Vec<_> = topics.iter().map(
-            |t| SubscribeTopic{topic_path: t.0.to_string(), qos: t.1}
-        )
-        .collect();
+    pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), Error>{
+        if topics.len() == 0 {
+            error!("It is invaild to send a subscribe message with zero topics");
+            return Err(Error::ZeroSubscriptions);
+        }
+
+        let sub_topics: Vec<_> = topics.into_iter().map(
+            |t| SubscribeTopic{topic_path: t.0.into(), qos: t.1}
+        ).collect();
 
         // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
         let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();

@@ -39,14 +39,14 @@ pub struct MqttOptions {
 
 impl MqttOptions {
     
-    pub fn new(id: &str, addr: &str) -> MqttOptions {
+    pub fn new<S: Into<String>>(id: S, addr: S) -> MqttOptions {
         // TODO: Validate client id. Shouldn't be empty or start with spaces
         // TODO: Validate if addr is proper address type
         MqttOptions {
-            broker_addr: addr.to_string(),
+            broker_addr: addr.into(),
             keep_alive: Some(10),
             clean_session: true,
-            client_id: id.to_string(),
+            client_id: id.into(),
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
             max_packet_size: 100 * 1024,

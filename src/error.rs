@@ -8,6 +8,7 @@ quick_error! {
         MpscSend(e: SendError<Request>) {
             from()
         }
+        ZeroSubscriptions
     }
 }
 
