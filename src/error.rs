@@ -9,6 +9,28 @@ quick_error! {
             from()
         }
         ZeroSubscriptions
+        PacketSizeLimitExceeded
+    }
+}
+
+quick_error! {
+    #[derive(Debug, PartialEq)]
+    pub enum StateError {
+        ConnectError(e: ConnectError) {
+            from()
+        }
+        PingError(e: PingError) {
+            from()
+        }
+        Publish(e: PublishError) {
+            from()
+        }
+        SubscribeError(e: SubscribeError) {
+            from()
+        }
+        PubackError(e: PubackError) {
+            from()
+        }
     }
 }
 
@@ -36,7 +58,6 @@ quick_error! {
 quick_error! {
     #[derive(Debug, PartialEq)]
     pub enum PublishError {
-        PacketSizeLimitExceeded
         InvalidState
     }
 }
@@ -51,6 +72,7 @@ quick_error! {
 quick_error! {
     #[derive(Debug, PartialEq)]
     pub enum SubscribeError {
+        InvalidState
     }
 }
 

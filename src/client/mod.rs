@@ -19,6 +19,7 @@ pub use self::connection::Request;
 
 pub struct MqttClient {
     nw_request_tx: Option<Sender<Request>>,
+    max_packet_size: usize,
 }
 
 impl MqttClient {
@@ -30,7 +31,7 @@ impl MqttClient {
         // used to receive notifications back from network thread
         let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(30);
         let nw_commands_tx = commands_tx.clone();
-
+        let max_packet_size = opts.max_packet_size;
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
         thread::spawn( move || {
@@ -39,11 +40,17 @@ impl MqttClient {
             }
         );
 
-        let client = MqttClient { nw_request_tx: Some(commands_tx)};
+        let client = MqttClient { nw_request_tx: Some(commands_tx), max_packet_size: max_packet_size};
         (client, notifier_rx)
     }
 
     pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), Error>{
+        let payload_len = payload.len();
+
+        if payload_len > self.max_packet_size {
+            return Err(Error::PacketSizeLimitExceeded)
+        }
+
         let payload = Arc::new(payload);
 
         // NOTE: Don't clone 'tx' as it doubles the queue size for every clone

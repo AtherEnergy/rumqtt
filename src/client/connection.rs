@@ -6,12 +6,13 @@ use std::io::{self, ErrorKind};
 use std::sync::mpsc as stdmpsc;
 use std::time::Duration;
 use std::error::Error;
+use std::result::Result;
 
 use codec::MqttCodec;
 use MqttOptions;
 use client::state::MqttState;
 use ReconnectOptions;
-use error::PublishError;
+use error::*;
 
 use mqtt3::*;
 use futures::stream::{Stream, SplitStream};
@@ -121,7 +122,7 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
 
             // execute user requests  
             'user_requests: loop {
-                let command = match await!(commands_rx.into_future().map_err(|e| e.0))? {
+                let client_request = match await!(commands_rx.into_future().map_err(|e| e.0))? {
                     (Some(item), s) => {
                         commands_rx = s;
                         item
@@ -132,42 +133,11 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
                     }
                 };
 
-                info!("command = {:?}", command);
+                info!("command = {:?}", client_request);
 
-                let packet = match command {
-                    Request::Publish(publish) => {
-                        let publish = mqtt_state_main.borrow_mut().handle_outgoing_publish(publish);
-
-                        if let Err(e) = publish {
-                            match e {
-                                PublishError::PacketSizeLimitExceeded => {
-                                    error!("Publish failed. Continuing next message in queue. Error = {:?}", e);
-                                    continue 'user_requests
-                                }
-                                PublishError::InvalidState => return Err(io::Error::new(ErrorKind::Other, e.description()))
-                            }
-                        }
-
-                        Packet::Publish(publish.unwrap())
-                    },
-                    Request::Ping => {
-                        let ping = mqtt_state_main.borrow_mut().handle_outgoing_ping();
-                        if let Err(e) = ping {
-                            return Err(io::Error::new(ErrorKind::Other, e.description()));
-                        }
-                        
-                        Packet::Pingreq
-                    }
-                    Request::Subscribe(subs) => {
-                        let subscription = mqtt_state_main.borrow_mut().handle_outgoing_subscribe(subs).unwrap();
-                        Packet::Subscribe(subscription)
-                    }
-                    Request::Disconnect => {
-                        mqtt_state_main.borrow_mut().handle_disconnect();
-                        break 'user_requests
-                    },
-                    Request::Puback(pkid) => Packet::Puback(pkid),
-                    _ => unimplemented!(),
+                let packet = match handle_client_requests(mqtt_state_main.clone(), client_request) {
+                    Ok(p) => p,
+                    Err(e) => return Err(io::Error::new(ErrorKind::Other, e.description()))
                 };
 
                 sender = match await!(sender.send(packet)) {
@@ -186,6 +156,29 @@ pub fn start(opts: MqttOptions, commands_tx: Sender<Request>, commands_rx: Recei
         commands_rx = response.unwrap();
 
         error!("Done with eventloop");
+    }
+}
+
+fn handle_client_requests(mqtt_state: Rc<RefCell<MqttState>>, client_request: Request) -> Result<Packet, StateError> {
+    match client_request {
+        Request::Publish(publish) => {
+            let publish = mqtt_state.borrow_mut().handle_outgoing_publish(publish)?;
+            Ok(Packet::Publish(publish))
+        },
+        Request::Ping => {
+            let _ping = mqtt_state.borrow_mut().handle_outgoing_ping()?;
+            Ok(Packet::Pingreq)
+        }
+        Request::Subscribe(subs) => {
+            let subscription = mqtt_state.borrow_mut().handle_outgoing_subscribe(subs)?;
+            Ok(Packet::Subscribe(subscription))
+        }
+        Request::Disconnect => {
+            mqtt_state.borrow_mut().handle_disconnect();
+            Ok(Packet::Disconnect)
+        },
+        Request::Puback(pkid) => Ok(Packet::Puback(pkid)),
+        _ => unimplemented!(),
     }
 }
 

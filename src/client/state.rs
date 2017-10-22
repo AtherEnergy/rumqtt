@@ -122,13 +122,6 @@ impl MqttState {
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
     pub fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Result<Publish, PublishError> {
-        let payload_len = publish.payload.len();
-
-        if payload_len > self.opts.max_packet_size {
-            error!("Size limit exceeded. Dropping packet: {:?}", publish);
-            return Err(PublishError::PacketSizeLimitExceeded)
-        }
-
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce => {
@@ -233,10 +226,18 @@ impl MqttState {
     pub fn handle_outgoing_subscribe(&mut self, topics: Vec<SubscribeTopic>) -> Result<Subscribe, SubscribeError> {
         let pkid = self.next_pkid();
 
-        Ok(Subscribe {
-            pid: pkid,
-            topics: topics,
-        })
+        if self.connection_status == MqttConnectionStatus::Connected {
+            self.last_flush = Instant::now();
+            self.await_pingresp = true;
+
+            Ok(Subscribe {
+                pid: pkid,
+                topics: topics,
+            })
+        } else {
+            error!("State = {:?}. Shouldn't subscribe in this state", self.connection_status);
+            Err(SubscribeError::InvalidState)
+        }
     }
 
 
