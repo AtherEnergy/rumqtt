@@ -1,6 +1,7 @@
 use mqtt3;
 use futures::sync::mpsc::SendError;
 use client::Request;
+use std::io::Error as IoError;
 
 quick_error! {
     #[derive(Debug)]
@@ -16,9 +17,6 @@ quick_error! {
 quick_error! {
     #[derive(Debug, PartialEq)]
     pub enum StateError {
-        ConnectError(e: ConnectError) {
-            from()
-        }
         PingError(e: PingError) {
             from()
         }
@@ -47,9 +45,12 @@ quick_error! {
 }
 
 quick_error! {
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug)]
     pub enum ConnectError {
         MqttConnectionRefused(e: mqtt3::ConnectReturnCode) {
+            from()
+        }
+        Io(e: IoError) {
             from()
         }
     }

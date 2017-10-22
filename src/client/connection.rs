@@ -183,7 +183,7 @@ fn handle_client_requests(mqtt_state: Rc<RefCell<MqttState>>, client_request: Re
 }
 
 
-fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: &mut Core) -> io::Result<Framed<TcpStream, MqttCodec>> {
+fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: &mut Core) -> Result<Framed<TcpStream, MqttCodec>, ConnectError> {
     // NOTE: make sure that dns resolution happens during reconnection to handle changes in server ip
     let addr: SocketAddr = opts.broker_addr.as_str().parse().unwrap();
 
@@ -200,17 +200,13 @@ fn mqtt_connect(mqtt_state: Rc<RefCell<MqttState>>, opts: MqttOptions, reactor: 
     });
 
     let response = reactor.run(f_response);
-    
     let (packet, frame) = response?;
 
     // Return `Framed` and previous session packets that are to be republished
     match packet.unwrap() {
         Packet::Connack(connack) => {
-            if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
-                Err(io::Error::new(ErrorKind::Other, e.description()))
-            } else {
-                Ok(frame)
-            }
+            mqtt_state.borrow_mut().handle_incoming_connack(connack)?;
+            Ok(frame)
         }
         _ => unimplemented!(),
     }
