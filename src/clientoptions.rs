@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 #[derive(Clone)]
 pub struct MqttOptions {
     pub addr: String,
+    pub host_name_verification: bool,
     pub keep_alive: Option<u16>,
     pub clean_session: bool,
     pub reconnect: u16,
@@ -23,6 +24,7 @@ impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
             addr: "localhost:1883".to_string(),
+            host_name_verification: true,
             keep_alive: Some(10),
             clean_session: false,
             client_id: None,
@@ -55,6 +57,11 @@ impl MqttOptions {
     ///
     pub fn new() -> MqttOptions {
         MqttOptions { ..Default::default() }
+    }
+
+    pub fn set_host_name_verification(mut self, verify: bool) -> Self {
+        self.host_name_verification = verify;
+        self
     }
 
     /// Number of seconds after which client should ping the broker

@@ -252,7 +252,8 @@ impl Publisher {
         }
 
         self.initial_connect = false;
-        let mut stream = NetworkStream::connect(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone())?;
+        let host_name_verification = self.opts.host_name_verification;
+        let mut stream = NetworkStream::connect(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification)?;
         stream.set_read_timeout(Some(Duration::new(10, 0)))?;
         stream.set_write_timeout(Some(Duration::new(60, 0)))?;
 

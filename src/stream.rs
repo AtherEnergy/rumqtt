@@ -41,7 +41,13 @@ impl SslContext {
     }
 
     pub fn connect(&self, domain: &str, stream: TcpStream) -> Result<SslStream> {
-        let ssl_stream = ssl::SslConnector::connect(&*self.inner, domain, stream)?;
+        let ssl_stream = if domain == "" {
+            warn!("Running without hostname verification. Your connection might not be secure");
+            ssl::SslConnector::danger_connect_without_providing_domain_for_certificate_verification_and_server_name_indication(&*self.inner, stream)?
+        } else {
+            ssl::SslConnector::connect(&*self.inner, domain, stream)?
+        };
+
         Ok(ssl_stream)
     }
 }
@@ -53,7 +59,7 @@ pub enum NetworkStream {
 }
 
 impl NetworkStream {
-    pub fn connect(addr: &str, ca: Option<PathBuf>, certs: Option<(PathBuf, PathBuf)>) -> Result<NetworkStream> {
+    pub fn connect(addr: &str, ca: Option<PathBuf>, certs: Option<(PathBuf, PathBuf)>, host_name_verification: bool) -> Result<NetworkStream> {
         let domain = addr.split(":")
                          .map(str::to_string)
                          .next()
@@ -61,12 +67,16 @@ impl NetworkStream {
         let stream = TcpStream::connect(addr)?;
 
         if let Some(ca) = ca {
-            if let Some((ref crt, ref key)) = certs {
-                let ssl_ctx: SslContext = SslContext::new(ca, Some((crt, key)), true)?;
+            let ssl_ctx = if let Some((ref crt, ref key)) = certs {
+                SslContext::new(ca, Some((crt, key)), true)?
+            } else {
+                SslContext::new(ca, None::<(String, String)>, true)?
+            };
+
+            if host_name_verification {
                 Ok(NetworkStream::Tls(ssl_ctx.connect(&domain, stream)?))
             } else {
-                let ssl_ctx: SslContext = SslContext::new(ca, None::<(String, String)>, true)?;
-                Ok(NetworkStream::Tls(ssl_ctx.connect(&domain, stream)?))
+                Ok(NetworkStream::Tls(ssl_ctx.connect("", stream)?))
             }
         } else {
             Ok(NetworkStream::Tcp(stream))

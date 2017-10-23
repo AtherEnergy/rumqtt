@@ -8,7 +8,6 @@ extern crate openssl;
 extern crate threadpool;
 extern crate jsonwebtoken;
 extern crate chrono;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
