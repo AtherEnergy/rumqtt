@@ -140,25 +140,32 @@ impl Publisher {
                 let pr = match self.nw_request_rx.recv_timeout(timeout) {
                     Ok(v) => v,
                     Err(RecvTimeoutError::Timeout) => {
-                        // if publish requests stop before batch count is full, they
-                        // are awaited during ping
-                        if let Err(e) = self.batch_await() {
-                            match e {
-                                AwaitError::Reconnect => break 'publisher,
-                                AwaitError::Io(_) => break 'publisher,
-                            }
-                        }
-
+                        // Always ping when there are no publish requests. Not relying on last_flush_time
                         if let Err(e) = self.ping() {
                             error!("Ping error. Error = {:?}", e);
                             break 'publisher
                         }
+
+                        // if publish requests stop before batch count is full, they
+                        // are awaited during ping
+                        if self.publish_batch_count > 0 {
+                            info!("Awaiting for publishes in timeout. Publish batch count = {}", self.publish_batch_count);
+                            if let Err(e) = self.batch_await() {
+                                match e {
+                                    AwaitError::Reconnect => break 'publisher,
+                                    AwaitError::Io(_) => break 'publisher,
+                                }
+                            }
+                        }
+
+                        // await for ping
                         if let Err(e) = self.await() {
                             match e {
                                 AwaitError::Reconnect => break 'publisher,
                                 AwaitError::Io(_) => break 'publisher,
                             }
                         }
+
                         continue 'publisher
                     }
                     Err(e) => {
@@ -221,7 +228,8 @@ impl Publisher {
         } else if let Err(mqtt311::Error::Io(e)) = packet {
             match e.kind() {
                 ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                    error!("Timeout waiting for ack. Error = {:?}", e);
+                    error!("Timeout waiting for incoming ack. Error = {:?}", e);
+                    error!("Publish batch count = {:?}", self.publish_batch_count);
                     Err(AwaitError::Io(e))
                 }
                 _ => {
@@ -254,8 +262,11 @@ impl Publisher {
         self.initial_connect = false;
         let host_name_verification = self.opts.host_name_verification;
         let mut stream = NetworkStream::connect(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification)?;
+
+        //NOTE: Should be less than default keep alive time to make sure that server doesn't 
+        //      disconnect while waiting for read.
         stream.set_read_timeout(Some(Duration::new(10, 0)))?;
-        stream.set_write_timeout(Some(Duration::new(60, 0)))?;
+        stream.set_write_timeout(Some(Duration::new(30, 0)))?;
 
         if let Some((ref key, expiry)) = self.opts.gcloud_iotcore_auth {
             let password = gen_password(key, expiry);
@@ -304,6 +315,7 @@ impl Publisher {
                 match packet {
                     Packet::Pingresp => {
                         self.await_pingresp = false;
+                        info!("Received ping resp");
                         Ok(())
                     }
                     Packet::Disconnect => Ok(()),
@@ -428,37 +440,32 @@ impl Publisher {
     }
 
     fn ping(&mut self) -> StdResult<(), PingError> {
-        // debug!("client state --> {:?}, await_ping --> {}", self.state,
-        // self.await_ping);
+        if let Some(_) = self.opts.keep_alive {
 
-        if let Some(keep_alive) = self.opts.keep_alive {
-            let elapsed = self.last_flush.elapsed();
-            if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
-                if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
-                    return Err(PingError::PingTimeout);
-                }
-                // @ Prevents half open connections. Tcp writes will buffer up
-                // with out throwing any error (till a timeout) when internet
-                // is down. Eventhough broker closes the socket, EOF will be
-                // known only after reconnection.
-                // We just unbind the socket if there in no pingresp before next ping
-                // (What about case when pings aren't sent because of constant publishes
-                // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
-                // secs and then error out because of timeout.)
-                if self.await_pingresp {
-                    return Err(PingError::AwaitPingResp);
-                }
+            // @ Prevents half open connections. Tcp writes will buffer up
+            // with out throwing any error (till a timeout) when internet
+            // is down. Eventhough broker closes the socket, EOF will be
+            // known only after reconnection.
+            // We just unbind the socket if there in no pingresp before next ping
+            // (What about case when pings aren't sent because of constant publishes
+            // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
+            // secs and then error out because of timeout.)
+            if self.await_pingresp {
+                return Err(PingError::AwaitPingResp);
+            }
+            let ping = Packet::Pingreq;
+            self.await_pingresp = true;
 
-                let ping = Packet::Pingreq;
-                self.await_pingresp = true;
-                if self.state == MqttState::Connected {
-                    self.write_packet(ping)?;
-                } else {
-                    error!("State = {:?}. Shouldn't ping in this state", self.state);
-                    return Err(PingError::InvalidState)
-                }
+            info!("Rumqtt ping!! await_ping = {}", self.await_pingresp);
+
+            if self.state == MqttState::Connected {
+                self.write_packet(ping)?;
+            } else {
+                error!("State = {:?}. Shouldn't ping in this state", self.state);
+                return Err(PingError::InvalidState)
             }
         }
+
         Ok(())
     }
 

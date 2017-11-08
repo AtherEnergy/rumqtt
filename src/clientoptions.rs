@@ -25,7 +25,7 @@ impl Default for MqttOptions {
         MqttOptions {
             addr: "localhost:1883".to_string(),
             host_name_verification: true,
-            keep_alive: Some(10),
+            keep_alive: Some(30),
             clean_session: false,
             client_id: None,
             credentials: None,
