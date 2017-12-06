@@ -1,5 +1,4 @@
 mod state;
-mod connection;
 
 use std::thread;
 use std::sync::Arc;
@@ -15,7 +14,16 @@ use MqttOptions;
 use packet;
 
 use error::Error;
-pub use self::connection::Request;
+
+#[derive(Debug)]
+pub enum Request {
+    Subscribe(Vec<SubscribeTopic>),
+    Publish(Publish),
+    Puback(PacketIdentifier),
+    Connect,
+    Ping,
+    Disconnect,
+}
 
 pub struct MqttClient {
     nw_request_tx: Option<Sender<Request>>,
@@ -34,11 +42,11 @@ impl MqttClient {
         let max_packet_size = opts.max_packet_size;
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
-        thread::spawn( move || {
-                connection::start(opts, nw_commands_tx, commands_rx, notifier_tx);
-                error!("Network Thread Stopped !!!!!!!!!");
-            }
-        );
+        // thread::spawn( move || {
+        //         connection::start(opts, nw_commands_tx, commands_rx, notifier_tx);
+        //         error!("Network Thread Stopped !!!!!!!!!");
+        //     }
+        // );
 
         let client = MqttClient { nw_request_tx: Some(commands_tx), max_packet_size: max_packet_size};
         (client, notifier_rx)
