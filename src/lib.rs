@@ -5,11 +5,11 @@ extern crate tokio_timer;
 extern crate mqtt3;
 extern crate bytes;
 extern crate chrono;
+#[macro_use]
+extern crate failure;
 extern crate jsonwebtoken as jwt;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
-extern crate quick_error;
 #[macro_use]
 extern crate log;
 

@@ -19,7 +19,7 @@ chrono = "0.4"
 jsonwebtoken = "3"
 serde = "1"
 serde_derive = "1"
-quick-error = "1"
+failure = "0.1"
 log = "0.3"
 
 [dev-dependencies]

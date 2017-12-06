@@ -1,86 +1,69 @@
-use mqtt3;
 use futures::sync::mpsc::SendError;
 use client::Request;
 use std::io::Error as IoError;
 
-quick_error! {
-    #[derive(Debug)]
-    pub enum Error {
-        MpscSend(e: SendError<Request>) {
-            from()
-        }
-        ZeroSubscriptions
-        PacketSizeLimitExceeded
-    }
+#[derive(Debug, Fail)]
+pub enum ClientError {
+    #[fail(display = "No subscriptions")]
+    ZeroSubscriptions,
+    #[fail(display = "Packet size limit has crossed maximum")]
+    PacketSizeLimitExceeded,
+    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
+    MpscSend(SendError<Request>)
 }
 
-quick_error! {
-    #[derive(Debug, PartialEq)]
-    pub enum StateError {
-        PingError(e: PingError) {
-            from()
-        }
-        Publish(e: PublishError) {
-            from()
-        }
-        SubscribeError(e: SubscribeError) {
-            from()
-        }
-        PubackError(e: PubackError) {
-            from()
-        }
-    }
+#[derive(Debug, Fail)]
+pub enum StateError {
+    #[fail(display = "Ping failed. Error = {}", error)]
+    Ping {error: PingError},
+    #[fail(display = "Publish failed. Error = {}", error)]
+    Publish {error: PublishError},
+    #[fail(display = "Subscribe failed. Error = {}", error)]
+    Subscribe {error: SubscribeError},
+    #[fail(display = "Puback failed. Error = {}", error)]
+    Puback {error: PubackError},
 }
 
-quick_error! {
-    #[derive(Debug, PartialEq)]
-    pub enum PingError {
-        // when last ping response isn't received
-        AwaitPingResp
-        // client not in connected state
-        InvalidState
-        // did not ping with in time
-        Timeout
-    }
+#[derive(Debug, Fail)]
+pub enum PingError {
+    #[fail(display = "Last ping response not received")]
+    AwaitPingResp,
+    #[fail(display = "Client not in connected state")]
+    InvalidState,
+    #[fail(display = "Couldn't ping in time")]
+    Timeout
 }
 
-quick_error! {
-    #[derive(Debug)]
-    pub enum ConnectError {
-        MqttConnectionRefused(e: mqtt3::ConnectReturnCode) {
-            from()
-        }
-        Io(e: IoError) {
-            from()
-        }
-    }
+#[derive(Debug, Fail)]
+pub enum ConnectError {
+    #[fail(display = "Mqtt connection failed. Error = {}", _0)]
+    MqttConnectionRefused(u8),
+    #[fail(display = "Io failed. Error = {}", _0)]
+    IoError(IoError)
 }
 
-quick_error! {
-    #[derive(Debug, PartialEq)]
-    pub enum PublishError {
-        InvalidState
-    }
+#[derive(Debug, Fail)]
+pub enum PublishError {
+    #[fail(display = "Client not in connected state")]
+    InvalidState
 }
 
-quick_error! {
-    #[derive(Debug, PartialEq)]
-    pub enum PubackError {
-        Unsolicited
-    }
+#[derive(Debug, Fail)]
+pub enum PubackError {
+    #[fail(display = "Client not in connected state")]
+    InvalidState,
+    #[fail(display = "Received unsolicited acknowledgment")]
+    Unsolicited
 }
 
-quick_error! {
-    #[derive(Debug, PartialEq)]
-    pub enum SubscribeError {
-        InvalidState
-    }
+#[derive(Debug, Fail)]
+pub enum SubscribeError {
+    #[fail(display = "Client not in connected state")]
+    InvalidState
 }
 
-// quick_error! {
-//     #[derive(Debug, PartialEq)]
-//     pub enum SubackError {
-//         // TODO: Add semi rejected error is some of the subscriptions are accepted
-//         Rejected
-//     }
-// }
+impl From<SendError<Request>> for ClientError {
+    fn from(err: SendError<Request>) -> ClientError {
+        ClientError::MpscSend(err)
+    }
+}

@@ -13,7 +13,7 @@ use mqtt3::*;
 use MqttOptions;
 use packet;
 
-use error::Error;
+use error::ClientError;
 
 #[derive(Debug)]
 pub enum Request {
@@ -52,11 +52,11 @@ impl MqttClient {
         (client, notifier_rx)
     }
 
-    pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), Error>{
+    pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), ClientError>{
         let payload_len = payload.len();
 
         if payload_len > self.max_packet_size {
-            return Err(Error::PacketSizeLimitExceeded)
+            return Err(ClientError::PacketSizeLimitExceeded)
         }
 
         let payload = Arc::new(payload);
@@ -73,10 +73,10 @@ impl MqttClient {
 
     // TODO: Add userdata publish
 
-    pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), Error>{
+    pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), ClientError>{
         if topics.len() == 0 {
             error!("It is invaild to send a subscribe message with zero topics");
-            return Err(Error::ZeroSubscriptions);
+            return Err(ClientError::ZeroSubscriptions);
         }
 
         let sub_topics: Vec<_> = topics.into_iter().map(

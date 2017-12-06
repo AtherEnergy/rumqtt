@@ -98,7 +98,7 @@ impl MqttState {
         let response = connack.code;
         if response != ConnectReturnCode::Accepted {
             self.connection_status = MqttConnectionStatus::Disconnected;
-            Err(response)?
+            Err(ConnectError::MqttConnectionRefused(response.to_u8()))
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
             self.initial_connect = false;
