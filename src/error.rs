@@ -39,7 +39,7 @@ pub enum ConnectError {
     #[fail(display = "Mqtt connection failed. Error = {}", _0)]
     MqttConnectionRefused(u8),
     #[fail(display = "Io failed. Error = {}", _0)]
-    IoError(IoError)
+    Io(IoError)
 }
 
 #[derive(Debug, Fail)]
@@ -65,5 +65,11 @@ pub enum SubscribeError {
 impl From<SendError<Request>> for ClientError {
     fn from(err: SendError<Request>) -> ClientError {
         ClientError::MpscSend(err)
+    }
+}
+
+impl From<IoError> for ConnectError {
+    fn from(err: IoError) -> ConnectError {
+        ConnectError::Io(err)
     }
 }
