@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::net::SocketAddr;
+use std::time::Duration;
 
-use futures::{Future, Sink};
+use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Core;
@@ -11,6 +12,7 @@ use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 
+use failure::Error;
 use mqtt3::Packet;
 
 use error::*;
@@ -64,5 +66,59 @@ impl Connection {
             }
             _ => unimplemented!(),
         }
+    }
+
+    fn handle_client_requests(&self, client_request: Request) -> Result<Packet, Error> {
+        match client_request {
+            Request::Publish(publish) => {
+                let publish = self.mqtt_state.borrow_mut().handle_outgoing_publish(publish)?;
+                Ok(Packet::Publish(publish))
+            },
+            Request::Ping => {
+                let _ping = self.mqtt_state.borrow_mut().handle_outgoing_ping()?;
+                Ok(Packet::Pingreq)
+            }
+            Request::Subscribe(subs) => {
+                let subscription = self.mqtt_state.borrow_mut().handle_outgoing_subscribe(subs)?;
+                Ok(Packet::Subscribe(subscription))
+            }
+            Request::Disconnect => {
+                self.mqtt_state.borrow_mut().handle_disconnect();
+                Ok(Packet::Disconnect)
+            },
+            Request::Puback(pkid) => Ok(Packet::Puback(pkid)),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn spawn_ping_timer(&self, keep_alive: u16) -> Result<(), Error> {
+        let timer = Timer::default();
+        let interval = timer.interval(Duration::new(u64::from(keep_alive), 0));
+        let mqtt_state = self.mqtt_state.clone();
+        let mut commands_tx = self.commands_tx.clone();
+        let handle = self.reactor.handle();
+
+        let timer_future = interval.for_each(move |t| {
+            let ref mut commands_tx = commands_tx;
+            if mqtt_state.borrow().is_ping_required() {
+                debug!("Ping timer fire");
+                commands_tx.send(Request::Ping).wait().unwrap();
+            }
+            future::ok(())
+        });
+
+        handle.spawn(
+            timer_future.then(move |result| {
+                    match result {
+                        Ok(_) => error!("Ping timer done"),
+                        Err(e) => error!("Ping timer IO error {:?}", e),
+                    }
+
+                    future::ok(())
+                }
+            )
+        );
+
+        Ok(())
     }
 }
