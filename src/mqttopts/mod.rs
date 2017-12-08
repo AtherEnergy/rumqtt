@@ -1,11 +1,11 @@
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum ReconnectOptions {
     Never,
     AfterFirstSuccess(u16),
     Always(u16),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SecurityOptions {
     None,
     /// username, password
@@ -19,7 +19,7 @@ pub enum SecurityOptions {
 
 // TODO: Add getters & make fields private
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
     pub broker_addr: String,

@@ -31,6 +31,7 @@ struct Claims {
     aud: String,
 }
 
+#[derive(Debug)]
 pub struct MqttState {
     opts: MqttOptions,
     

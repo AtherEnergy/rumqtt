@@ -33,11 +33,9 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(commands_tx: Sender<Request>, opts: MqttOptions) -> Self {
-        let (tx, _rx) = stdmpsc::sync_channel(10);
-
+    pub fn new(opts: MqttOptions, commands_tx: Sender<Request>, notifier_tx: stdmpsc::SyncSender<Packet>) -> Self {
         Connection {
-            notifier_tx: tx,
+            notifier_tx: notifier_tx,
             commands_tx: commands_tx,
             mqtt_state: Rc::new(RefCell::new(MqttState::new(opts.clone()))),
             opts: opts,
@@ -131,6 +129,7 @@ impl Connection {
         match packet.unwrap() {
             Packet::Connack(connack) => {
                 self.mqtt_state.borrow_mut().handle_incoming_connack(connack)?;
+                println!("{:?}", self.mqtt_state);
                 Ok(frame)
             }
             _ => unimplemented!(),
@@ -174,9 +173,17 @@ impl Connection {
         let notifier = self.notifier_tx.clone();
         let handle = self.reactor.handle();
 
-        let receiver = receiver.for_each(move |message| {
-                let ref mut commands_tx = commands_tx;
-                match message {
+        let receiver = receiver.then(move |result| {
+            let ref mut commands_tx = commands_tx;
+            let message = match result {
+                Ok(m) => m,
+                Err(e) => {
+                    commands_tx.send(Request::Disconnect).wait().unwrap();
+                    return future::err(())
+                }
+            };
+
+            match message {
                 Packet::Connack(connack) => {
                     if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
                         error!("Connack failed. Error = {:?}", e);
@@ -216,16 +223,15 @@ impl Connection {
                 _ => unimplemented!()
             }
 
-            commands_tx.send(Request::Disconnect).wait().unwrap();
             future::ok(())
         });
 
         handle.spawn(
             receiver.then(move |result| {
-                match result {
-                    Ok(_) => error!("Network receiver done!!"),
-                    Err(e) => error!("N/w receiver failed. Error = {:?}", e),
-                }
+                // match result {
+                //     Ok(_) => error!("Network receiver done!!"),
+                //     Err(e) => error!("N/w receiver failed. Error = {:?}", e),
+                // }
 
                 future::ok(())
             })

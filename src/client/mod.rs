@@ -5,6 +5,7 @@ use std::thread;
 use std::sync::Arc;
 use std::result::Result;
 use std::mem;
+use std::sync::mpsc as stdmpsc;
 
 use futures::sync::mpsc::{self, Sender};
 use futures::{Future, Sink};
@@ -34,21 +35,22 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> Self {
+    pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<Packet>) {
         let (commands_tx, commands_rx) = mpsc::channel(10);
+        let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(50);
 
         let nw_commands_tx = commands_tx.clone();
         let max_packet_size = opts.max_packet_size;
 
         thread::spawn( move || {
-                let mut connection = connection::Connection::new(nw_commands_tx, opts);
+                let mut connection = connection::Connection::new(opts, nw_commands_tx, notifier_tx);
                 connection.start(commands_rx);
                 error!("Network Thread Stopped !!!!!!!!!");
             }
         );
 
         let client = MqttClient { nw_request_tx: Some(commands_tx), max_packet_size: max_packet_size};
-        client
+        (client, notifier_rx)
     }
 
     pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), ClientError>{
