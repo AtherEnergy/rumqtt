@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::thread;
+use std::sync::mpsc as stdmpsc;
 
 use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
@@ -23,9 +24,8 @@ use client::state::MqttState;
 use codec::MqttCodec;
 
 pub struct Connection {
-    notifier_tx: ::std::sync::mpsc::SyncSender<Packet>,
+    notifier_tx: stdmpsc::SyncSender<Packet>,
     commands_tx: Sender<Request>,
-    commands_rx: Receiver<Request>,
 
     mqtt_state: Rc<RefCell<MqttState>>,
     opts: MqttOptions,
@@ -33,7 +33,20 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn start(&mut self) {
+    pub fn new(commands_tx: Sender<Request>, opts: MqttOptions) -> Self {
+        let (tx, _rx) = stdmpsc::sync_channel(10);
+
+        Connection {
+            notifier_tx: tx,
+            commands_tx: commands_tx,
+            mqtt_state: Rc::new(RefCell::new(MqttState::new(opts.clone()))),
+            opts: opts,
+            reactor: Core::new().unwrap()
+        }
+    }
+
+
+    pub fn start(&mut self, mut commands_rx: Receiver<Request>) {
         let initial_connect = self.mqtt_state.borrow().initial_connect();
         let reconnect_opts = self.opts.reconnect;
 
@@ -63,11 +76,11 @@ impl Connection {
 
             // spawn ping timer
             if let Some(keep_alive) = self.opts.keep_alive {
-                self.spawn_ping_timer(keep_alive);
+                let _ = self.spawn_ping_timer(keep_alive);
             }
 
             // handle incoming n/w packets
-            self.spawn_incoming_network_packet_handler(receiver);
+            let _ = self.spawn_incoming_network_packet_handler(receiver);
 
             // republish last session unacked packets
             let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
@@ -79,10 +92,10 @@ impl Connection {
             }
 
             // execute user requests
-            let commands_rx = self.commands_rx.by_ref();
-            let user_requests = commands_rx.for_each(|command| {
+            let commands_rx = commands_rx.by_ref();
+            let user_requests = commands_rx.fold(sender, |sender, command| {
                 let packet = self.handle_client_requests(command).unwrap();
-                future::ok(())
+                sender.send(packet).map_err(|e| ())
             });
         }
     }
@@ -149,7 +162,7 @@ impl Connection {
         let mut commands_tx = self.commands_tx.clone();
         let handle = self.reactor.handle();
 
-        let timer_future = interval.for_each(move |t| {
+        let timer_future = interval.for_each(move |_t| {
             let ref mut commands_tx = commands_tx;
             if mqtt_state.borrow().is_ping_required() {
                 debug!("Ping timer fire");
