@@ -5,11 +5,14 @@ use std::fs::File;
 use std::path::Path;
 use std::io::Read;
 
-use mqtt3::*;
+use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe, SubscribeTopic};
 use jwt::{encode, Header, Algorithm};
 use chrono::{self, Utc};
+use failure::Error;
 
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
+
+use client::Request;
 use packet;
 use MqttOptions;
 use SecurityOptions;
@@ -71,6 +74,29 @@ impl MqttState {
 
     pub fn initial_connect(&self) -> bool {
         self.initial_connect
+    }
+
+    pub fn handle_client_requests(&mut self, client_request: Request) -> Result<Packet, Error> {
+        match client_request {
+            Request::Publish(publish) => {
+                let publish = self.handle_outgoing_publish(publish)?;
+                Ok(Packet::Publish(publish))
+            },
+            Request::Ping => {
+                let _ping = self.handle_outgoing_ping()?;
+                Ok(Packet::Pingreq)
+            }
+            Request::Subscribe(subs) => {
+                let subscription = self.handle_outgoing_subscribe(subs)?;
+                Ok(Packet::Subscribe(subscription))
+            }
+            Request::Disconnect => {
+                self.handle_disconnect();
+                Ok(Packet::Disconnect)
+            },
+            Request::Puback(pkid) => Ok(Packet::Puback(pkid)),
+            _ => unimplemented!(),
+        }
     }
 
     pub fn handle_outgoing_connect(&mut self) -> Connect {

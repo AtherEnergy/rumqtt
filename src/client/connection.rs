@@ -92,11 +92,16 @@ impl Connection {
             }
 
             // execute user requests
+            let mqtt_state = self.mqtt_state.clone();
             let commands_rx = commands_rx.by_ref();
             let user_requests = commands_rx.fold(sender, |sender, command| {
-                let packet = self.handle_client_requests(command).unwrap();
-                sender.send(packet).map_err(|e| ())
+                let packet = mqtt_state.borrow_mut().handle_client_requests(command).unwrap();
+                sender.send(packet).map_err(|e| error!("Send failed. Error = {}", e))
             });
+
+            if let Err(e) = self.reactor.run(user_requests) {
+                error!("Reactor halted. Error = {:?}", e)
+            }
         }
     }
 
@@ -128,29 +133,6 @@ impl Connection {
                 self.mqtt_state.borrow_mut().handle_incoming_connack(connack)?;
                 Ok(frame)
             }
-            _ => unimplemented!(),
-        }
-    }
-
-    fn handle_client_requests(&self, client_request: Request) -> Result<Packet, Error> {
-        match client_request {
-            Request::Publish(publish) => {
-                let publish = self.mqtt_state.borrow_mut().handle_outgoing_publish(publish)?;
-                Ok(Packet::Publish(publish))
-            },
-            Request::Ping => {
-                let _ping = self.mqtt_state.borrow_mut().handle_outgoing_ping()?;
-                Ok(Packet::Pingreq)
-            }
-            Request::Subscribe(subs) => {
-                let subscription = self.mqtt_state.borrow_mut().handle_outgoing_subscribe(subs)?;
-                Ok(Packet::Subscribe(subscription))
-            }
-            Request::Disconnect => {
-                self.mqtt_state.borrow_mut().handle_disconnect();
-                Ok(Packet::Disconnect)
-            },
-            Request::Puback(pkid) => Ok(Packet::Puback(pkid)),
             _ => unimplemented!(),
         }
     }

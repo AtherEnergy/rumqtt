@@ -12,17 +12,17 @@ pub enum ClientError {
     MpscSend(SendError<Request>)
 }
 
-#[derive(Debug, Fail)]
-pub enum StateError {
-    #[fail(display = "Ping failed. Error = {}", error)]
-    Ping {error: PingError},
-    #[fail(display = "Publish failed. Error = {}", error)]
-    Publish {error: PublishError},
-    #[fail(display = "Subscribe failed. Error = {}", error)]
-    Subscribe {error: SubscribeError},
-    #[fail(display = "Puback failed. Error = {}", error)]
-    Puback {error: PubackError},
-}
+// #[derive(Debug, Fail)]
+// pub enum StateError {
+//     #[fail(display = "Ping failed. Error = {}", error)]
+//     Ping {error: PingError},
+//     #[fail(display = "Publish failed. Error = {}", error)]
+//     Publish {error: PublishError},
+//     #[fail(display = "Subscribe failed. Error = {}", error)]
+//     Subscribe {error: SubscribeError},
+//     #[fail(display = "Puback failed. Error = {}", error)]
+//     Puback {error: PubackError},
+// }
 
 #[derive(Debug, Fail)]
 pub enum PingError {
@@ -50,8 +50,8 @@ pub enum PublishError {
 
 #[derive(Debug, Fail)]
 pub enum PubackError {
-    #[fail(display = "Client not in connected state")]
-    InvalidState,
+    // #[fail(display = "Client not in connected state")]
+    // InvalidState,
     #[fail(display = "Received unsolicited acknowledgment")]
     Unsolicited
 }
