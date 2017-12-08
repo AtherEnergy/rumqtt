@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::net::SocketAddr;
 use std::time::Duration;
+use std::thread;
 
 use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
@@ -16,7 +17,7 @@ use failure::Error;
 use mqtt3::Packet;
 
 use error::*;
-use mqttopts::MqttOptions;
+use mqttopts::{MqttOptions, ReconnectOptions};
 use client::Request;
 use client::state::MqttState;
 use codec::MqttCodec;
@@ -32,8 +33,58 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn start() {
+    pub fn start(&mut self) {
+        let initial_connect = self.mqtt_state.borrow().initial_connect();
+        let reconnect_opts = self.opts.reconnect;
 
+        'reconnect: loop {
+            let framed = match self.mqtt_connect() {
+                Ok(framed) => framed,
+                Err(e) => {
+                    error!("Connection error = {:?}", e);
+                    match reconnect_opts {
+                        ReconnectOptions::Never => break 'reconnect,
+                        ReconnectOptions::AfterFirstSuccess(d) if !initial_connect => {
+                            info!("Will retry connecting again in {} seconds", d);
+                            thread::sleep(Duration::new(u64::from(d), 0));
+                            continue 'reconnect;
+                        }
+                        ReconnectOptions::AfterFirstSuccess(_) => break 'reconnect,
+                        ReconnectOptions::Always(d) => {
+                            info!("Will retry connecting again in {} seconds", d);
+                            thread::sleep(Duration::new(u64::from(d), 0));
+                            continue 'reconnect;
+                        }
+                    }
+                }
+            };
+
+            let (mut sender, receiver) = framed.split();
+
+            // spawn ping timer
+            if let Some(keep_alive) = self.opts.keep_alive {
+                self.spawn_ping_timer(keep_alive);
+            }
+
+            // handle incoming n/w packets
+            self.spawn_incoming_network_packet_handler(receiver);
+
+            // republish last session unacked packets
+            let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
+            if last_session_publishes.is_some() {
+                for publish in last_session_publishes.unwrap() {
+                    let packet = Packet::Publish(publish);
+                    sender = sender.send(packet).wait().unwrap();
+                }
+            }
+
+            // execute user requests
+            let commands_rx = self.commands_rx.by_ref();
+            let user_requests = commands_rx.for_each(|command| {
+                let packet = self.handle_client_requests(command).unwrap();
+                future::ok(())
+            });
+        }
     }
 
 
