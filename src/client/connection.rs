@@ -121,4 +121,69 @@ impl Connection {
 
         Ok(())
     }
+
+    fn spawn_incoming_network_packet_handler(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> Result<(), Error> {
+        let mqtt_state = self.mqtt_state.clone();
+        let mut commands_tx = self.commands_tx.clone();
+        let notifier = self.notifier_tx.clone();
+        let handle = self.reactor.handle();
+
+        handle.spawn( |_| {
+            receiver.for_each(move |message| {
+                    let ref mut commands_tx = commands_tx;
+                    match message {
+                    Packet::Connack(connack) => {
+                        if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
+                            return future::ok(());
+                        }
+                    }
+                    Packet::Puback(ack) => {
+                        if let Err(e) = notifier.try_send(Packet::Puback(ack)) {
+                            error!("Puback notification send failed. Error = {:?}", e);
+                        }
+                        // ignore unsolicited ack errors
+                        let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
+                    }
+                    Packet::Pingresp => {
+                        mqtt_state.borrow_mut().handle_incoming_pingresp();
+                    }
+                    Packet::Publish(publish) => {
+                        let (publish, ack) = mqtt_state.borrow_mut().handle_incoming_publish(publish);
+
+                        if let Some(publish) = publish {
+                            if let Err(e) = notifier.try_send(Packet::Publish(publish)) {
+                                error!("Publish notification send failed. Error = {:?}", e);
+                            }
+                        }
+
+                        if let Some(ack) = ack {
+                            match ack {
+                                Packet::Puback(pkid) => {
+                                    commands_tx.send(Request::Puback(pkid)).wait().unwrap();
+                                }
+                                _ => unimplemented!()
+                            };
+                        }
+                    }
+                    Packet::Suback(suback) => {
+                        if let Err(e) = notifier.try_send(Packet::Suback(suback)) {
+                            error!("Suback notification send failed. Error = {:?}", e);
+                        }
+                    }
+                    _ => unimplemented!()
+                }
+                future::ok(())
+            })
+            .map_err(|e| {
+                commands_tx.send(Request::Disconnect).wait().unwrap();
+                future::ok(())
+            });
+
+            future::ok(())
+        });
+
+        let commands_tx = self.commands_tx.clone();
+        
+        Ok(())
+    }
 }
