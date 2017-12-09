@@ -74,11 +74,11 @@ impl Connection {
 
             // spawn ping timer
             if let Some(keep_alive) = self.opts.keep_alive {
-                let _ = self.spawn_ping_timer(keep_alive);
+                self.spawn_ping_timer(keep_alive);
             }
 
             // handle incoming n/w packets
-            let _ = self.spawn_incoming_network_packet_handler(receiver);
+            self.spawn_incoming_network_packet_handler(receiver);
 
             // republish last session unacked packets
             let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
@@ -135,7 +135,7 @@ impl Connection {
         }
     }
 
-    fn spawn_ping_timer(&self, keep_alive: u16) -> Result<(), Error> {
+    fn spawn_ping_timer(&self, keep_alive: u16) {
         let timer = Timer::default();
         let interval = timer.interval(Duration::new(u64::from(keep_alive), 0));
         let mqtt_state = self.mqtt_state.clone();
@@ -161,12 +161,10 @@ impl Connection {
                     future::ok(())
                 }
             )
-        );
-
-        Ok(())
+        )
     }
 
-    fn spawn_incoming_network_packet_handler(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> Result<(), Error> {
+    fn spawn_incoming_network_packet_handler(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) {
         let mqtt_state = self.mqtt_state.clone();
         let mut commands_tx = self.commands_tx.clone();
         let notifier = self.notifier_tx.clone();
@@ -234,8 +232,6 @@ impl Connection {
                 }
                 future::ok(())
             })
-        );
-        
-        Ok(())
+        )
     }
 }
