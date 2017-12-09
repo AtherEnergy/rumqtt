@@ -129,7 +129,6 @@ impl Connection {
         match packet.unwrap() {
             Packet::Connack(connack) => {
                 self.mqtt_state.borrow_mut().handle_incoming_connack(connack)?;
-                println!("{:?}", self.mqtt_state);
                 Ok(frame)
             }
             _ => unimplemented!(),
@@ -178,6 +177,7 @@ impl Connection {
             let message = match result {
                 Ok(m) => m,
                 Err(e) => {
+                    error!("Network receiver error = {:?}", e);
                     commands_tx.send(Request::Disconnect).wait().unwrap();
                     return future::err(())
                 }
@@ -224,15 +224,14 @@ impl Connection {
             }
 
             future::ok(())
-        });
+        }).for_each(|_| future::ok(()));
 
         handle.spawn(
             receiver.then(move |result| {
-                // match result {
-                //     Ok(_) => error!("Network receiver done!!"),
-                //     Err(e) => error!("N/w receiver failed. Error = {:?}", e),
-                // }
-
+                match result {
+                    Ok(_) => error!("Network receiver done!!"),
+                    Err(e) => error!("N/w receiver failed. Error = {:?}", e),
+                }
                 future::ok(())
             })
         );
