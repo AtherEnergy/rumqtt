@@ -14,7 +14,9 @@ fn main() {
     let (mut client, receiver) = MqttClient::start(mqtt_opts);
 
     for i in 0..100 {
-        client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]);
+        if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]) {
+            println!("{:?}", e);
+        }
         thread::sleep(Duration::new(1, 0));
     }
 

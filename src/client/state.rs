@@ -232,6 +232,8 @@ impl MqttState {
         // (What about case when pings aren't sent because of constant publishes
         // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
         // secs and then error out because of timeout.)
+
+        // raise error if last ping didn't receive ack
         if self.await_pingresp {
             return Err(PingError::AwaitPingResp);
         }

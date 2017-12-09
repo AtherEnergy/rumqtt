@@ -14,7 +14,6 @@ use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 
-use failure::Error;
 use mqtt3::Packet;
 
 use error::*;
@@ -89,12 +88,14 @@ impl Connection {
                 }
             }
 
-            // execute user requests
+            // receive incoming user request and write to network
             let mqtt_state = self.mqtt_state.clone();
             let commands_rx = commands_rx.by_ref();
             let user_requests = commands_rx.fold(sender, |sender, command| {
                 let packet = mqtt_state.borrow_mut().handle_client_requests(command).unwrap();
-                sender.send(packet).map_err(|e| error!("Send failed. Error = {}", e))
+                sender.send(packet).map_err(|e| {
+                    error!("Network send failed. Error = {}", e)
+                })
             });
 
             if let Err(e) = self.reactor.run(user_requests) {
@@ -177,7 +178,7 @@ impl Connection {
                 Err(e) => {
                     error!("Network receiver error = {:?}", e);
                     commands_tx.send(Request::Disconnect).wait().unwrap();
-                    return future::err(())
+                    return future::err(e)
                 }
             };
 
@@ -194,9 +195,7 @@ impl Connection {
                     // ignore unsolicited ack errors
                     let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
                 }
-                Packet::Pingresp => {
-                    mqtt_state.borrow_mut().handle_incoming_pingresp();
-                }
+                Packet::Pingresp => mqtt_state.borrow_mut().handle_incoming_pingresp(),
                 Packet::Publish(publish) => {
                     let (publish, ack) = mqtt_state.borrow_mut().handle_incoming_publish(publish);
                     if let Some(publish) = publish {
@@ -227,7 +226,7 @@ impl Connection {
         handle.spawn(
             receiver.then(move |result| {
                 match result {
-                    Ok(_) => error!("Network receiver done!!"),
+                    Ok(v) => error!("Network receiver done!!. Result = {:?}", v),
                     Err(e) => error!("N/w receiver failed. Error = {:?}", e),
                 }
                 future::ok(())
