@@ -26,13 +26,14 @@ impl MqttClient {
 
         // This thread handles network reads (coz they are blocking) and
         // and sends them to event loop thread to handle mqtt state.
-        thread::spawn(
+        let network_thread = thread::Builder::new().name("rumqtt network".into());
+        network_thread.spawn(
             move || -> Result<()> {
-                let _ = connection.run();
-                error!("Network Thread Stopped !!!!!!!!!");
+                let o = connection.run();
+                error!("Network Thread Stopped !!!!!!!!!. Result = {:?}", o);
                 Ok(())
             }
-        );
+        ).expect("Network thread spawn failed");
 
         let client = MqttClient { nw_request_tx: nw_request_tx };
 

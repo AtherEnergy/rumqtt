@@ -1,4 +1,4 @@
-use std::net::{TcpStream, Shutdown};
+use std::net::{TcpStream, Shutdown, SocketAddr, ToSocketAddrs};
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use openssl::x509::X509_FILETYPE_PEM;
 use mqtt311::{MqttWrite, MqttRead};
 pub type SslStream = ssl::SslStream<TcpStream>;
 
-use error::Result;
+use error::{Result, Error};
 
 pub struct SslContext {
     pub inner: Arc<ssl::SslConnector>,
@@ -24,17 +24,17 @@ impl SslContext {
         K: AsRef<Path>,
     {
         let mut ctx_builder = ssl::SslConnectorBuilder::new(SslMethod::tls())?;
-        ctx_builder.builder_mut().set_ca_file(ca.as_ref())?;
+        ctx_builder.set_ca_file(ca.as_ref())?;
 
         if let Some((cert, key)) = client_pair {
-            ctx_builder.builder_mut().set_certificate_file(cert, X509_FILETYPE_PEM)?;
-            ctx_builder.builder_mut().set_private_key_file(key, X509_FILETYPE_PEM)?;
+            ctx_builder.set_certificate_file(cert, X509_FILETYPE_PEM)?;
+            ctx_builder.set_private_key_file(key, X509_FILETYPE_PEM)?;
         }
 
         if should_verify_ca {
-            ctx_builder.builder_mut().set_verify(SSL_VERIFY_PEER);
+            ctx_builder.set_verify(SSL_VERIFY_PEER);
         } else {
-            ctx_builder.builder_mut().set_verify(SSL_VERIFY_NONE);
+            ctx_builder.set_verify(SSL_VERIFY_NONE);
         }
 
         Ok(SslContext { inner: Arc::new(ctx_builder.build()) })
@@ -59,12 +59,22 @@ pub enum NetworkStream {
 }
 
 impl NetworkStream {
-    pub fn connect(addr: &str, ca: Option<PathBuf>, certs: Option<(PathBuf, PathBuf)>, host_name_verification: bool) -> Result<NetworkStream> {
+    pub fn connect_timeout(addr: &str, ca: Option<PathBuf>, certs: Option<(PathBuf, PathBuf)>, host_name_verification: bool, timeout: Duration) -> Result<NetworkStream> {
         let domain = addr.split(":")
                          .map(str::to_string)
                          .next()
                          .unwrap_or_default();
-        let stream = TcpStream::connect(addr)?;
+
+        let addrs: Vec<SocketAddr> = addr.to_socket_addrs()?.collect();
+        let addr = match addrs.get(0) {
+            Some(a) => a,
+            None => {
+                error!("Dns resolve array empty");
+                return Err(Error::DnsListEmpty)
+            }
+        };
+
+        let stream = TcpStream::connect_timeout(&addr, timeout)?;
 
         if let Some(ca) = ca {
             let ssl_ctx = if let Some((ref crt, ref key)) = certs {

@@ -261,7 +261,8 @@ impl Publisher {
 
         self.initial_connect = false;
         let host_name_verification = self.opts.host_name_verification;
-        let mut stream = NetworkStream::connect(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification)?;
+        let connect_timeout = Duration::new(20, 0);
+        let mut stream = NetworkStream::connect_timeout(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification, connect_timeout)?;
 
         //NOTE: Should be less than default keep alive time to make sure that server doesn't 
         //      disconnect while waiting for read.

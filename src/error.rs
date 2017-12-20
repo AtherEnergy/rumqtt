@@ -1,6 +1,6 @@
 use std::io;
 use std::result;
-use std::net::TcpStream;
+use std::net::{TcpStream, AddrParseError};
 use std::sync::mpsc::{RecvError, TrySendError, RecvTimeoutError};
 
 use mqtt311::{self, ConnectReturnCode};
@@ -43,6 +43,11 @@ quick_error! {
             from()
             display("handshake error: {:?}", err)
         }
+        AddressParse(err: AddrParseError) {
+            from()
+            display("Address parse failed: {:?}", err)
+        }
+        DnsListEmpty
         NoConnectionThread
     }
 }
