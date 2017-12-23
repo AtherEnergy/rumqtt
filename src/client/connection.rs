@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::thread;
 use std::io::{Error, ErrorKind};
 
+
 use futures::{future, Future, Sink};
 use futures::stream::{self, Stream, SplitStream};
 use futures::sync::mpsc::{Sender, Receiver};
@@ -101,6 +102,7 @@ impl Connection {
 
             // receive incoming user request and write to network
             let mqtt_state = self.mqtt_state.clone();
+
             let client_cmd_rx = commands_rx.by_ref();
             let process_client_msg = client_cmd_rx.map(|msg| mqtt_state.borrow_mut().handle_client_requests(msg).unwrap())
                                              .map_err(|_| Error::new(ErrorKind::Other, "Error receiving client msg"))
