@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use std::thread;
 use std::sync::mpsc as stdmpsc;
+use std::io::{self, ErrorKind, Cursor};
 
 use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
@@ -91,15 +92,17 @@ impl Connection {
             // receive incoming user request and write to network
             let mqtt_state = self.mqtt_state.clone();
             let commands_rx = commands_rx.by_ref();
-            let user_requests = commands_rx.fold(sender, |sender, command| {
-                let packet = mqtt_state.borrow_mut().handle_client_requests(command).unwrap();
-                sender.send(packet).map_err(|e| {
-                    error!("Network send failed. Error = {}", e)
-                })
-            });
 
-            if let Err(e) = self.reactor.run(user_requests) {
-                error!("Reactor halted. Error = {:?}", e)
+            let user_requests = commands_rx.map(|command| {
+                let packet = mqtt_state.borrow_mut().handle_client_requests(command).unwrap();
+                packet
+            })
+            .map_err(|_| io::Error::new(ErrorKind::Other, "user requests error"))
+            .forward(sender);
+
+            match self.reactor.run(user_requests) {
+                Ok(_) => error!("Reactor halted"),
+                Err(e) => error!("Reactor halted. Error = {:?}", e),
             }
         }
     }
@@ -177,7 +180,7 @@ impl Connection {
                 Ok(m) => m,
                 Err(e) => {
                     error!("Network receiver error = {:?}", e);
-                    commands_tx.send(Request::Disconnect).wait().unwrap();
+                    // commands_tx.send(Request::Disconnect).wait().unwrap();
                     return future::err(e)
                 }
             };
@@ -216,6 +219,10 @@ impl Connection {
                     if let Err(e) = notifier.try_send(Packet::Suback(suback)) {
                         error!("Suback notification send failed. Error = {:?}", e);
                     }
+                }
+                Packet::Disconnect => {
+                    warn!("Sending disconnect packet");
+                    commands_tx.send(Request::Disconnect).wait().unwrap();
                 }
                 _ => unimplemented!()
             }
