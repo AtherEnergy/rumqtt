@@ -92,6 +92,7 @@ impl MqttState {
                 Ok(Packet::Subscribe(subscription))
             }
             Request::Disconnect => {
+                println!("Disconnected received");
                 self.handle_disconnect();
                 Ok(Packet::Disconnect)
             },
@@ -243,7 +244,7 @@ impl MqttState {
             self.await_pingresp = true;
             Ok(())
         } else {
-            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
+            // error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
             Err(PingError::InvalidState)
         }
     }
@@ -279,6 +280,7 @@ impl MqttState {
     // }
 
     pub fn handle_disconnect(&mut self) {
+        println!("Handling disconnect");
         self.await_pingresp = false;
         self.connection_status = MqttConnectionStatus::Disconnected;
 
