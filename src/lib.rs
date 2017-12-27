@@ -12,6 +12,7 @@ extern crate jsonwebtoken as jwt;
 extern crate serde_derive;
 #[macro_use]
 extern crate log;
+extern crate crossbeam_channel;
 
 mod codec;
 mod packet;

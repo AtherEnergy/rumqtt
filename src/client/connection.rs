@@ -23,9 +23,10 @@ use mqttopts::{MqttOptions, ReconnectOptions};
 use client::Request;
 use client::state::MqttState;
 use codec::MqttCodec;
+use crossbeam_channel::Sender as CrossSender;
 
 pub struct Connection {
-    notifier_tx: stdmpsc::SyncSender<Packet>,
+    notifier_tx: CrossSender<Packet>,
     commands_tx: Sender<Request>,
 
     mqtt_state: Rc<RefCell<MqttState>>,
@@ -34,7 +35,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(opts: MqttOptions, commands_tx: Sender<Request>, notifier_tx: stdmpsc::SyncSender<Packet>) -> Self {
+    pub fn new(opts: MqttOptions, commands_tx: Sender<Request>, notifier_tx: CrossSender<Packet>) -> Self {
         Connection {
             notifier_tx: notifier_tx,
             commands_tx: commands_tx,
@@ -72,12 +73,13 @@ impl Connection {
 
             let (mut sender, receiver) = framed.split();
             let mut commands_tx = self.commands_tx.clone();
-            let mut disconnect_tx = self.commands_tx.clone();
+            let mqtt_state = self.mqtt_state.clone();
+            let notifier = self.notifier_tx.clone();
             let receiver = receiver.then(|result| {
                 let commands_tx = &mut commands_tx;
                 let message = match result {
                     Ok(m) => {
-                        println!("Received {:?}", m);
+                        info!("Received {:?}", m);
                         m
                     },
                     Err(e) => {
@@ -86,6 +88,50 @@ impl Connection {
                         return future::err(e)
                     }
                 };
+
+
+                match message {
+                    Packet::Connack(connack) => {
+                        if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
+                            error!("Connack failed. Error = {:?}", e);
+                        }
+                    }
+                    Packet::Puback(ack) => {
+                        if let Err(e) = notifier.try_send(Packet::Puback(ack)) {
+                            error!("Puback notification send failed. Error = {:?}", e);
+                        }
+                        // ignore unsolicited ack errors
+                        let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
+                    }
+                    Packet::Pingresp => mqtt_state.borrow_mut().handle_incoming_pingresp(),
+                    Packet::Publish(publish) => {
+                        let (publish, ack) = mqtt_state.borrow_mut().handle_incoming_publish(publish);
+                        if let Some(publish) = publish {
+                            if let Err(e) = notifier.try_send(Packet::Publish(publish)) {
+                                error!("Publish notification send failed. Error = {:?}", e);
+                            }
+                        }
+                        if let Some(ack) = ack {
+                            match ack {
+                                Packet::Puback(pkid) => {
+                                    commands_tx.send(Request::Puback(pkid)).wait().unwrap();
+                                }
+                                _ => unimplemented!()
+                            };
+                        }
+                    }
+                    Packet::Suback(suback) => {
+                        if let Err(e) = notifier.try_send(Packet::Suback(suback)) {
+                            error!("Suback notification send failed. Error = {:?}", e);
+                        }
+                    }
+                    Packet::Disconnect => {
+                        warn!("Sending disconnect packet");
+                        commands_tx.send(Request::Disconnect).wait().unwrap();
+                    }
+                    _ => unimplemented!()
+            }
+
                 future::ok(())
             }).for_each(|_| future::ok(()));
 
@@ -144,7 +190,6 @@ impl Connection {
             }
         }
     }
-
 
     fn mqtt_connect(&mut self) -> Result<Framed<TcpStream, MqttCodec>, ConnectError> {
         // NOTE: make sure that dns resolution happens during reconnection to handle changes in server ip

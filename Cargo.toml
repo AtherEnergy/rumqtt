@@ -21,6 +21,7 @@ serde = "1"
 serde_derive = "1"
 failure = "0.1"
 log = "0.3"
+crossbeam-channel = "0.1"
 
 [dev-dependencies]
 loggerv = "0.3"

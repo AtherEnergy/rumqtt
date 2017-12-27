@@ -15,6 +15,7 @@ use MqttOptions;
 use packet;
 
 use error::ClientError;
+use crossbeam_channel::{bounded, Sender as CrossSender, Receiver as CrossReceiver};
 
 #[derive(Debug)]
 pub enum Request {
@@ -35,9 +36,9 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<Packet>) {
+    pub fn start(opts: MqttOptions) -> (Self, CrossReceiver<Packet>) {
         let (commands_tx, commands_rx) = mpsc::channel(10);
-        let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(50);
+        let (notifier_tx, notifier_rx) = bounded(50);
 
         let nw_commands_tx = commands_tx.clone();
         let max_packet_size = opts.max_packet_size;
