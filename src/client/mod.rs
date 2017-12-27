@@ -5,7 +5,6 @@ use std::thread;
 use std::sync::Arc;
 use std::result::Result;
 use std::mem;
-use std::sync::mpsc as stdmpsc;
 
 use futures::sync::mpsc::{self, Sender};
 use futures::{Future, Sink};
@@ -15,7 +14,10 @@ use MqttOptions;
 use packet;
 
 use error::ClientError;
-use crossbeam_channel::{bounded, Sender as CrossSender, Receiver as CrossReceiver};
+use crossbeam_channel::{bounded, self};
+
+/// Interface on which clients can receive messages
+pub type Notification<T> = crossbeam_channel::Receiver<T>;
 
 #[derive(Debug)]
 pub enum Request {
@@ -36,7 +38,7 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> (Self, CrossReceiver<Packet>) {
+    pub fn start(opts: MqttOptions) -> (Self, Notification<Packet>) {
         let (commands_tx, commands_rx) = mpsc::channel(10);
         let (notifier_tx, notifier_rx) = bounded(50);
 

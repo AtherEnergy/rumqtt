@@ -24,3 +24,4 @@ mod error;
 pub use mqttopts::{MqttOptions, ReconnectOptions, SecurityOptions};
 pub use client::MqttClient;
 pub use mqtt3::QoS;
+pub use client::Notification;

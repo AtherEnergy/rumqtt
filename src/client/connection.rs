@@ -3,10 +3,9 @@ use std::rc::Rc;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::thread;
-use std::sync::mpsc as stdmpsc;
 
 use futures::{future, Future, Sink};
-use futures::stream::{Stream, SplitStream};
+use futures::stream::Stream;
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
@@ -23,10 +22,10 @@ use mqttopts::{MqttOptions, ReconnectOptions};
 use client::Request;
 use client::state::MqttState;
 use codec::MqttCodec;
-use crossbeam_channel::Sender as CrossSender;
+use crossbeam_channel;
 
 pub struct Connection {
-    notifier_tx: CrossSender<Packet>,
+    notifier_tx: crossbeam_channel::Sender<Packet>,
     commands_tx: Sender<Request>,
 
     mqtt_state: Rc<RefCell<MqttState>>,
@@ -35,7 +34,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(opts: MqttOptions, commands_tx: Sender<Request>, notifier_tx: CrossSender<Packet>) -> Self {
+    pub fn new(opts: MqttOptions, commands_tx: Sender<Request>, notifier_tx: crossbeam_channel::Sender<Packet>) -> Self {
         Connection {
             notifier_tx: notifier_tx,
             commands_tx: commands_tx,
@@ -185,8 +184,8 @@ impl Connection {
 
             let fused_future = receiver.select(client_to_tcp_sender);
 
-            if let Err(e) = self.reactor.run(fused_future) {
-                error!("Reactor halted. Error")
+            if let Err(_) = self.reactor.run(fused_future) {
+                error!("Reactor halted. Error");
             }
         }
     }
