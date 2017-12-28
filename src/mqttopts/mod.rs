@@ -1,3 +1,5 @@
+use error::ClientError;
+
 #[derive(Copy, Clone, Debug)]
 pub enum ReconnectOptions {
     Never,
@@ -39,11 +41,14 @@ pub struct MqttOptions {
 }
 
 impl MqttOptions {
-    
-    pub fn new<S: Into<String>>(id: S, addr: S) -> MqttOptions {
+    pub fn new<S: Into<String>>(id: S, addr: S) -> Result<MqttOptions, ClientError> {
         // TODO: Validate client id. Shouldn't be empty or start with spaces
         // TODO: Validate if addr is proper address type
-        MqttOptions {
+        let id = id.into();
+        if id.starts_with(" ") || id.is_empty() {
+            return Err(ClientError::EmptyClientId)
+        }
+        Ok(MqttOptions {
             broker_addr: addr.into(),
             keep_alive: Some(10),
             clean_session: true,
@@ -51,7 +56,7 @@ impl MqttOptions {
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
             max_packet_size: 100 * 1024,
-        }
+        })
     }
 
     /// Set number of seconds after which client should ping the broker

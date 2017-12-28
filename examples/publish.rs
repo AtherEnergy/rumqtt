@@ -8,9 +8,8 @@ use rumqtt::{MqttOptions, ReconnectOptions, MqttClient, QoS};
 
 fn main() {
     loggerv::init_with_verbosity(1).unwrap();
-    let mqtt_opts = MqttOptions::new("rumqtt-core", "127.0.0.1:1889")
+    let mqtt_opts = MqttOptions::new("rumqtt-core", "127.0.0.1:1889").unwrap()
                                 .set_reconnect_opts(ReconnectOptions::Always(10));
-
     
 
     let (mut client, receiver) = MqttClient::start(mqtt_opts);

@@ -77,7 +77,7 @@ impl MqttClient {
 
     // TODO: Add userdata publish
 
-    pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), ClientError>{
+    pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), ClientError> {
         if topics.len() == 0 {
             error!("It is invaild to send a subscribe message with zero topics");
             return Err(ClientError::ZeroSubscriptions);
@@ -93,4 +93,12 @@ impl MqttClient {
         let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
         Ok(())
     }
+
+    pub fn disconnect(&mut self) -> Result<(), ClientError> {
+        let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
+        nw_request_tx = nw_request_tx.send(Request::Disconnect).wait()?;
+        Ok(())
+        // unimplemented!();
+    }
+
 }

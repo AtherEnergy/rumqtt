@@ -9,7 +9,10 @@ pub enum ClientError {
     #[fail(display = "Packet size limit has crossed maximum")]
     PacketSizeLimitExceeded,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<Request>)
+    MpscSend(SendError<Request>),
+    #[fail(display = "Client id should not be empty")]
+    EmptyClientId
+
 }
 
 // #[derive(Debug, Fail)]
@@ -24,7 +27,7 @@ pub enum ClientError {
 //     Puback {error: PubackError},
 // }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, PartialEq)]
 pub enum PingError {
     #[fail(display = "Last ping response not received")]
     AwaitPingResp,
@@ -42,10 +45,12 @@ pub enum ConnectError {
     Io(IoError)
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, PartialEq)]
 pub enum PublishError {
     #[fail(display = "Client not in connected state")]
-    InvalidState
+    InvalidState,
+    #[fail(display = "Packet limit size exceeded")]
+    PacketSizeLimitExceeded
 }
 
 #[derive(Debug, Fail)]
