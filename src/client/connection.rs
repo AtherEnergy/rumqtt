@@ -3,10 +3,10 @@ use std::rc::Rc;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::thread;
-use std::io::{Error, ErrorKind};
+use std::io::{self, ErrorKind};
 
 use futures::{future, Future, Sink};
-use futures::stream::{self, Stream, SplitStream};
+use futures::stream::{Stream, SplitStream, SplitSink};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
@@ -16,17 +16,15 @@ use tokio_io::codec::Framed;
 
 use mqtt3::Packet;
 
-
-use error::*;
+use error::ConnectError;
 use mqttopts::{MqttOptions, ReconnectOptions};
-use client::Request;
 use client::state::MqttState;
 use codec::MqttCodec;
 use crossbeam_channel;
 
 pub struct Connection {
     notifier_tx: crossbeam_channel::Sender<Packet>,
-    commands_tx: Sender<Request>,
+    commands_tx: Sender<Packet>,
 
     mqtt_state: Rc<RefCell<MqttState>>,
     opts: MqttOptions,
@@ -34,7 +32,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(opts: MqttOptions, commands_tx: Sender<Request>, notifier_tx: crossbeam_channel::Sender<Packet>) -> Self {
+    pub fn new(opts: MqttOptions, commands_tx: Sender<Packet>, notifier_tx: crossbeam_channel::Sender<Packet>) -> Self {
         Connection {
             notifier_tx: notifier_tx,
             commands_tx: commands_tx,
@@ -44,7 +42,7 @@ impl Connection {
         }
     }
 
-    pub fn start(&mut self, mut commands_rx: Receiver<Request>) {
+    pub fn start(&mut self, mut commands_rx: Receiver<Packet>) {
         let initial_connect = self.mqtt_state.borrow().initial_connect();
         let reconnect_opts = self.opts.reconnect;
 
@@ -71,19 +69,7 @@ impl Connection {
             };
 
             let (mut sender, receiver) = framed.split();
-            let process_network_msg = self.mqtt_network_recv_future(receiver).then(|result| {
-                // This returns when the stream is done or has errored out
-                match result {
-                    Ok(v) => {
-                        error!("Network receiver done!!. Result = {:?}", v);
-                        // its the end of stream or either an error, so we return an error
-                        // to jump back to reconnect loop
-                        return future::err(())
-                    }
-                    Err(e) => error!("N/w receiver failed. Error = {:?}", e),
-                }
-                future::ok(())
-            });
+            let mqtt_recv = self.mqtt_network_recv_future(receiver);
 
             // spawn ping timer
             if let Some(keep_alive) = self.opts.keep_alive {
@@ -101,82 +87,53 @@ impl Connection {
 
             // receive incoming user request and write to network
             let mqtt_state = self.mqtt_state.clone();
-            let client_cmd_rx = commands_rx.by_ref();
-            let process_client_msg = client_cmd_rx.map(|msg| mqtt_state.borrow_mut().handle_client_requests(msg).unwrap())
-                                             .map_err(|_| Error::new(ErrorKind::Other, "Error receiving client msg"))
-                                             .forward(sender)
-                                             .map(|_| ())
-                                             .or_else(|_| { error!("Client send error"); future::ok(())});
+            let commands_rx = commands_rx.by_ref();
+            let mqtt_send = commands_rx.map(move |msg| {
+                mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(msg).unwrap()
+            }).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"))
+              .forward(sender)
+              .map(|_| ())
+              .or_else(|_| { error!("Client send error"); future::ok(())});
 
-            let fused_future = process_network_msg.select(process_client_msg);
-            if let Err(_) = self.reactor.run(fused_future) {
-                error!("Reactor halted. Error");
+            
+            let mqtt_send_and_recv = mqtt_recv.select(mqtt_send);
+            if let Err((err, _)) = self.reactor.run(mqtt_send_and_recv) {
+                error!("Reactor halted. Error = {:?}", err);
             }
         }
     }
+    
 
-    fn mqtt_network_recv_future(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> Box<Future<Item=(), Error=Error>> {
+    fn mqtt_network_recv_future(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> Box<Future<Item=(), Error=io::Error>> {
         let mqtt_state = self.mqtt_state.clone();
         let mut commands_tx = self.commands_tx.clone();
         let notifier = self.notifier_tx.clone();
-        let receiver = receiver.then(move |result| {
+        
+        let receiver = receiver.for_each(move |packet| {
             let commands_tx = &mut commands_tx;
-            let message = match result {
-                Ok(m) => {
-                    info!("Received {:?}", m);
-                    m
-                },
+            let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
+                Ok((notification, reply)) => (notification, reply),
                 Err(e) => {
-                    error!("Network receiver error = {:?}", e);
-                    commands_tx.send(Request::Disconnect).wait().unwrap();
-                    return future::err(e)
+                    error!("{:?}", e);
+                    (None, None)
                 }
             };
 
-            match message {
-                Packet::Connack(connack) => {
-                    if let Err(e) = mqtt_state.borrow_mut().handle_incoming_connack(connack) {
-                        error!("Connack failed. Error = {:?}", e);
-                    }
+            // send reply back to network
+            if let Some(reply) = reply {
+                let _ = commands_tx.send(reply).wait().unwrap();
+            } 
+            
+            // send notification to user
+            if let Some(notification) = notification {
+                if let Err(e) = notifier.try_send(notification) {
+                    error!("Publish notification send failed. Error = {:?}", e);
                 }
-                Packet::Puback(ack) => {
-                    if let Err(e) = notifier.try_send(Packet::Puback(ack)) {
-                        error!("Puback notification send failed. Error = {:?}", e);
-                    }
-                    // ignore unsolicited ack errors
-                    let _ = mqtt_state.borrow_mut().handle_incoming_puback(ack);
-                }
-                Packet::Pingresp => mqtt_state.borrow_mut().handle_incoming_pingresp(),
-                Packet::Publish(publish) => {
-                    let (publish, ack) = mqtt_state.borrow_mut().handle_incoming_publish(publish);
-                    if let Some(publish) = publish {
-                        if let Err(e) = notifier.try_send(Packet::Publish(publish)) {
-                            error!("Publish notification send failed. Error = {:?}", e);
-                        }
-                    }
-                    if let Some(ack) = ack {
-                        match ack {
-                            Packet::Puback(pkid) => {
-                                commands_tx.send(Request::Puback(pkid)).wait().unwrap();
-                            }
-                            _ => unimplemented!()
-                        };
-                    }
-                }
-                Packet::Suback(suback) => {
-                    if let Err(e) = notifier.try_send(Packet::Suback(suback)) {
-                        error!("Suback notification send failed. Error = {:?}", e);
-                    }
-                }
-                Packet::Disconnect => {
-                    warn!("Sending disconnect packet");
-                    commands_tx.send(Request::Disconnect).wait().unwrap();
-                }
-                _ => unimplemented!()
             }
-
+            
             future::ok(())
-        }).for_each(|_| future::ok(()));
+        });
+        
         Box::new(receiver)
     }
 
@@ -217,11 +174,12 @@ impl Connection {
         let mqtt_state = self.mqtt_state.clone();
         let mut commands_tx = self.commands_tx.clone();
         let handle = self.reactor.handle();
+        
         let timer_future = interval.for_each(move |_t| {
             let ref mut commands_tx = commands_tx;
             if mqtt_state.borrow().is_ping_required() {
                 debug!("Ping timer fire");
-                commands_tx.send(Request::Ping).wait().unwrap();
+                commands_tx.send(Packet::Pingreq).wait().unwrap();
             }
             future::ok(())
         });
