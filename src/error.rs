@@ -1,5 +1,5 @@
 use futures::sync::mpsc::SendError;
-use client::Request;
+use mqtt3::Packet;
 use std::io::Error as IoError;
 
 #[derive(Debug, Fail)]
@@ -9,10 +9,9 @@ pub enum ClientError {
     #[fail(display = "Packet size limit has crossed maximum")]
     PacketSizeLimitExceeded,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<Request>),
+    MpscSend(SendError<Packet>),
     #[fail(display = "Client id should not be empty")]
     EmptyClientId
-
 }
 
 // #[derive(Debug, Fail)]
@@ -67,8 +66,8 @@ pub enum SubscribeError {
     InvalidState
 }
 
-impl From<SendError<Request>> for ClientError {
-    fn from(err: SendError<Request>) -> ClientError {
+impl From<SendError<Packet>> for ClientError {
+    fn from(err: SendError<Packet>) -> ClientError {
         ClientError::MpscSend(err)
     }
 }
