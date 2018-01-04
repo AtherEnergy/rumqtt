@@ -10,6 +10,8 @@ use mqtt::packet::*;
 use mqtt::control::variable_header::ConnectReturnCode;
 use connection::NetworkRequest;
 
+use rustls::TLSError;
+
 pub type SslError = openssl::error::ErrorStack;
 pub type HandShakeError = openssl::ssl::HandshakeError<TcpStream>;
 pub type Result<T> = result::Result<T, Error>;
@@ -46,6 +48,9 @@ quick_error! {
         MqttPacket
         PingTimeout
         AwaitPingResp
+        Rustls(e: TLSError) {
+            from()
+        }
         Ssl(e: SslError) {
             from()
         }

@@ -8,10 +8,9 @@ use std::time::Duration;
 use openssl::ssl::{self, SslMethod, SSL_VERIFY_NONE, SSL_VERIFY_PEER};
 use openssl::x509::X509_FILETYPE_PEM;
 
-pub type SslStream = ssl::SslStream<TcpStream>;
-
 use error::Result;
 
+pub type SslStream = ssl::SslStream<TcpStream>;
 pub struct SslContext {
     pub inner: Arc<ssl::SslConnector>,
 }

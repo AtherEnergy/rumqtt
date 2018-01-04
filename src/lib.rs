@@ -70,8 +70,16 @@ extern crate log;
 #[macro_use]
 extern crate quick_error;
 extern crate mqtt;
-extern crate openssl;
 extern crate threadpool;
+
+/* cfg(openssl) */
+extern crate openssl;
+/* */
+
+/* cfg(rustls) */
+extern crate rustls;
+/* */
+
 
 mod error;
 mod genpack;
