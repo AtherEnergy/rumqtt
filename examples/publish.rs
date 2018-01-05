@@ -20,7 +20,7 @@ fn main() {
         }
     });
 
-    for i in 0..100000 {
+    for i in 0..1000 {
         if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]) {
             println!("{:?}", e);
         }

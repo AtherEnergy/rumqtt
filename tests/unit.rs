@@ -57,46 +57,4 @@ mod tests {
                                     .set_reconnect_opts(ReconnectOptions::Always(10))
                                     .set_clean_session(true);
     }
-
-    #[test]
-    fn retain_msg_when_client_goes_offline() {
-        // TODO This goes into infinite loop when two mqtt clients are started with
-        // the same client id
-        
-        {
-            let mqtt_opts = MqttOptions::new("offline", "127.0.0.1:1883").unwrap()
-                                    .set_reconnect_opts(ReconnectOptions::Always(10))
-                                    .set_clean_session(false);
-            let (mut client_a, receiver_a) = MqttClient::start(mqtt_opts);
-            // client_a.subscribe(vec![("hello/world", QoS::AtLeastOnce)]);
-            // client_a.disconnect();
-            thread::sleep_ms(5000);
-        }
-
-        // {
-
-        //     let mqtt_opts = MqttOptions::new("second", "127.0.0.1:1883").unwrap()
-        //                                 .set_reconnect_opts(ReconnectOptions::Always(10))
-        //                                 .set_clean_session(true);
-        //     let (mut client_b, receiver_b) = MqttClient::start(mqtt_opts);
-        //     if let Err(e) = client_b.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]) {
-        //         println!("Error publishing from client b {:?}", e);
-        //     }
-
-        //     client_b.disconnect();
-        //     thread::sleep_ms(5000);
-
-        // }
-
-        let mqtt_opts = MqttOptions::new("offline", "127.0.0.1:1883").unwrap()
-                                    // .set_reconnect_opts(ReconnectOptions::Always(10))
-                                    .set_clean_session(false);
-        let (mut client_b, receiver_b) = MqttClient::start(mqtt_opts);
-
-        // for i in receiver_a {
-        //     println!("From offline session {:?}", i);
-        // }
-
-        thread::sleep_ms(10000);
-    }
 }

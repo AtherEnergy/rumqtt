@@ -480,17 +480,29 @@ mod test {
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
         let publish_out = mqtt.handle_outgoing_publish(publish);
-
+        
+        {
+            assert_eq!(mqtt.outgoing_pub.len(), 3);
+            let publish_pack = mqtt.outgoing_pub.get(0).unwrap();
+            assert_eq!(publish_pack.pid, Some(PacketIdentifier(1)));
+        }
         let publish = mqtt.handle_incoming_puback(PacketIdentifier(1)).unwrap();
-        assert_eq!(publish.pid, Some(PacketIdentifier(1)));
         assert_eq!(mqtt.outgoing_pub.len(), 2);
 
+        {
+            assert_eq!(mqtt.outgoing_pub.len(), 2);
+            let publish_pack = mqtt.outgoing_pub.get(0).unwrap();
+            assert_eq!(publish_pack.pid, Some(PacketIdentifier(2)));
+        }
         let publish = mqtt.handle_incoming_puback(PacketIdentifier(2)).unwrap();
-        assert_eq!(publish.pid, Some(PacketIdentifier(2)));
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
+        {
+            assert_eq!(mqtt.outgoing_pub.len(), 1);
+            let publish_pack = mqtt.outgoing_pub.get(0).unwrap();
+            assert_eq!(publish_pack.pid, Some(PacketIdentifier(3)));
+        }
         let publish = mqtt.handle_incoming_puback(PacketIdentifier(3)).unwrap();
-        assert_eq!(publish.pid, Some(PacketIdentifier(3)));
         assert_eq!(mqtt.outgoing_pub.len(), 0);
     }
 
