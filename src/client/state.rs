@@ -79,6 +79,8 @@ impl MqttState {
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, failure::Error> {
+        debug!("Handle outgoing = {:?}", packet);
+
         match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
@@ -261,6 +263,7 @@ impl MqttState {
 
         let elapsed = self.last_flush.elapsed();
         if elapsed >= Duration::new(u64::from(keep_alive + 1), 0) {
+            error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error", elapsed, keep_alive);
             return Err(PingError::Timeout);
         }
         // @ Prevents half open connections. Tcp writes will buffer up
@@ -274,6 +277,7 @@ impl MqttState {
 
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
+            error!("Error awaiting for last ping response");
             return Err(PingError::AwaitPingResp);
         }
 
@@ -282,7 +286,7 @@ impl MqttState {
             self.await_pingresp = true;
             Ok(())
         } else {
-            // error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
+            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
             Err(PingError::InvalidState)
         }
     }
@@ -296,7 +300,6 @@ impl MqttState {
 
         if self.connection_status == MqttConnectionStatus::Connected {
             self.last_flush = Instant::now();
-            self.await_pingresp = true;
             subscription.pid = pkid;
 
             Ok(subscription)

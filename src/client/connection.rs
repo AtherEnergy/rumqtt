@@ -69,7 +69,7 @@ impl Connection {
 
             let (mut sender, receiver) = framed.split();
             let mqtt_recv = self.mqtt_network_recv_future(receiver);
-            let ping_timer = self.ping_timer();
+            let ping_timer = self.ping_timer_future();
 
             // republish last session unacked packets
             // NOTE: this will block eventloop until last session publishs are written to network
@@ -135,7 +135,7 @@ impl Connection {
         Box::new(receiver)
     }
 
-    fn ping_timer(&self) -> Box<Future<Item=(), Error=io::Error>> {
+    fn ping_timer_future(&self) -> Box<Future<Item=(), Error=io::Error>> {
         let handle = self.reactor.handle();
         let mqtt_state = self.mqtt_state.clone();
         let commands_tx = self.commands_tx.clone();
