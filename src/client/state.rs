@@ -97,6 +97,7 @@ impl MqttState {
                 Ok(Packet::Disconnect)
             },
             Packet::Puback(pkid) => Ok(Packet::Puback(pkid)),
+            Packet::Suback(suback) => Ok(Packet::Suback(suback)),
             _ => unimplemented!(),
         }
     }

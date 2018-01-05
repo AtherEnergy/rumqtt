@@ -77,9 +77,11 @@ impl Connection {
             }
 
             // republish last session unacked packets
+            // NOTE: this will block eventloop until last session publishs are written to network
+            // TODO: verify for duplicates here
             let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
-            if last_session_publishes.is_some() {
-                for publish in last_session_publishes.unwrap() {
+            if let Some(publishes) = last_session_publishes {
+                for publish in publishes{
                     let packet = Packet::Publish(publish);
                     sender = sender.send(packet).wait().unwrap();
                 }
@@ -102,15 +104,15 @@ impl Connection {
             }
         }
     }
-    
+
 
     fn mqtt_network_recv_future(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> Box<Future<Item=(), Error=io::Error>> {
         let mqtt_state = self.mqtt_state.clone();
-        let mut commands_tx = self.commands_tx.clone();
+        let commands_tx = self.commands_tx.clone();
         let notifier = self.notifier_tx.clone();
         
         let receiver = receiver.for_each(move |packet| {
-            let commands_tx = &mut commands_tx;
+            let commands_tx = commands_tx.clone();
             let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
                 Ok((notification, reply)) => (notification, reply),
                 Err(e) => {
@@ -119,19 +121,20 @@ impl Connection {
                 }
             };
 
-            // send reply back to network
-            if let Some(reply) = reply {
-                let _ = commands_tx.send(reply).wait().unwrap();
-            } 
-            
             // send notification to user
             if let Some(notification) = notification {
                 if let Err(e) = notifier.try_send(notification) {
                     error!("Publish notification send failed. Error = {:?}", e);
                 }
             }
-            
-            future::ok(())
+
+            // send reply back to network
+            if let Some(reply) = reply {
+                let s = commands_tx.send(reply).map(|v| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                Box::new(s) as Box<Future<Item=(), Error=io::Error>>
+            } else {
+                Box::new(future::ok(()))
+            }
         });
         
         Box::new(receiver)
