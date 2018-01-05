@@ -12,7 +12,6 @@ keywords = ["mqtt", "iot", "async", "tokio", "futures"]
 futures = "0.1"
 tokio-core = "0.1"
 tokio-io = "0.1"
-tokio-timer = "0.1"
 bytes = "0.4"
 mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
 chrono = "0.4"
@@ -20,7 +19,7 @@ jsonwebtoken = "3"
 serde = "1"
 serde_derive = "1"
 failure = "0.1"
-log = "0.3"
+log = "0.4"
 crossbeam-channel = "0.1"
 
 [dev-dependencies]

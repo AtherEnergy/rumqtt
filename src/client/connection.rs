@@ -8,9 +8,8 @@ use std::io::{self, ErrorKind};
 use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
 use futures::sync::mpsc::{Sender, Receiver};
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Interval};
 use tokio_core::net::TcpStream;
-use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 
@@ -70,11 +69,7 @@ impl Connection {
 
             let (mut sender, receiver) = framed.split();
             let mqtt_recv = self.mqtt_network_recv_future(receiver);
-
-            // spawn ping timer
-            if let Some(keep_alive) = self.opts.keep_alive {
-                self.spawn_ping_timer(keep_alive);
-            }
+            let ping_timer = self.ping_timer();
 
             // republish last session unacked packets
             // NOTE: this will block eventloop until last session publishs are written to network
@@ -97,9 +92,9 @@ impl Connection {
               .map(|_| ())
               .or_else(|_| { error!("Client send error"); future::ok(())});
 
-            
-            let mqtt_send_and_recv = mqtt_recv.select(mqtt_send);
-            if let Err((err, _)) = self.reactor.run(mqtt_send_and_recv) {
+            // join all the futures and run the ractor
+            let mqtt_send_and_recv = mqtt_recv.join3(mqtt_send, ping_timer);
+            if let Err(err) = self.reactor.run(mqtt_send_and_recv) {
                 error!("Reactor halted. Error = {:?}", err);
             }
         }
@@ -130,7 +125,7 @@ impl Connection {
 
             // send reply back to network
             if let Some(reply) = reply {
-                let s = commands_tx.send(reply).map(|v| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                let s = commands_tx.send(reply).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
                 Box::new(s) as Box<Future<Item=(), Error=io::Error>>
             } else {
                 Box::new(future::ok(()))
@@ -138,6 +133,30 @@ impl Connection {
         });
         
         Box::new(receiver)
+    }
+
+    fn ping_timer(&self) -> Box<Future<Item=(), Error=io::Error>> {
+        let handle = self.reactor.handle();
+        let mqtt_state = self.mqtt_state.clone();
+        let commands_tx = self.commands_tx.clone();
+
+        if let Some(keep_alive) = self.opts.keep_alive {
+            let interval = Interval::new(Duration::new(u64::from(keep_alive), 0), &handle).unwrap();
+            let timer_future = interval.for_each(move |_t| {
+                let commands_tx = commands_tx.clone();
+                if mqtt_state.borrow().is_ping_required() {
+                    debug!("Ping timer fire");
+                    let s = commands_tx.send(Packet::Pingreq).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                    Box::new(s) as Box<Future<Item=(), Error=io::Error>>
+                } else {
+                    Box::new(future::ok(()))
+                }
+            });
+
+            Box::new(timer_future)
+        } else {
+            Box::new(future::ok(()))
+        }
     }
 
     fn mqtt_connect(&mut self) -> Result<Framed<TcpStream, MqttCodec>, ConnectError> {
@@ -169,33 +188,5 @@ impl Connection {
             }
             _ => unimplemented!(),
         }
-    }
-
-    fn spawn_ping_timer(&self, keep_alive: u16) {
-        let timer = Timer::default();
-        let interval = timer.interval(Duration::new(u64::from(keep_alive), 0));
-        let mqtt_state = self.mqtt_state.clone();
-        let mut commands_tx = self.commands_tx.clone();
-        let handle = self.reactor.handle();
-        
-        let timer_future = interval.for_each(move |_t| {
-            let ref mut commands_tx = commands_tx;
-            if mqtt_state.borrow().is_ping_required() {
-                debug!("Ping timer fire");
-                commands_tx.send(Packet::Pingreq).wait().unwrap();
-            }
-            future::ok(())
-        });
-
-        handle.spawn(
-            timer_future.then(move |result| {
-                    match result {
-                        Ok(_) => error!("Ping timer done"),
-                        Err(e) => error!("Ping timer IO error {:?}", e),
-                    }
-                    future::ok(())
-                }
-            )
-        )
     }
 }
