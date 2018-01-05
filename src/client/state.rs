@@ -5,17 +5,18 @@ use std::fs::File;
 use std::path::Path;
 use std::io::Read;
 
-use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe, SubscribeTopic};
+use failure;
+use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
 use jwt::{encode, Header, Algorithm};
 use chrono::{self, Utc};
-use failure::Error;
 
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
-
-use client::Request;
 use packet;
 use MqttOptions;
 use SecurityOptions;
+
+type Notification = Packet;
+type Reply = Packet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -77,26 +78,60 @@ impl MqttState {
         self.initial_connect
     }
 
-    pub fn handle_client_requests(&mut self, client_request: Request) -> Result<Packet, Error> {
-        match client_request {
-            Request::Publish(publish) => {
+    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, failure::Error> {
+        match packet {
+            Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
                 Ok(Packet::Publish(publish))
             },
-            Request::Ping => {
+            Packet::Pingreq => {
                 let _ping = self.handle_outgoing_ping()?;
                 Ok(Packet::Pingreq)
             }
-            Request::Subscribe(subs) => {
+            Packet::Subscribe(subs) => {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Ok(Packet::Subscribe(subscription))
             }
-            Request::Disconnect => {
+            Packet::Disconnect => {
+                println!("Disconnected received");
                 self.handle_disconnect();
                 Ok(Packet::Disconnect)
             },
-            Request::Puback(pkid) => Ok(Packet::Puback(pkid)),
+            Packet::Puback(pkid) => Ok(Packet::Puback(pkid)),
             _ => unimplemented!(),
+        }
+    }
+
+    // Takes incoming mqtt packet, applies state changes and returns notifiaction packet and 
+    // network reply packet. 
+    // Notification packet should be sent to the user and Mqtt reply packet which should be sent 
+    // back on network
+    //
+    // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
+    // be forwarded to user and Pubck packet will be written to network
+    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Reply>), failure::Error> {        
+        
+        match packet {
+            Packet::Connack(connack) => {
+                    self.handle_incoming_connack(connack)?;
+                    Ok((None, None))
+            }
+            Packet::Puback(ack) => {
+                // ignore unsolicited ack errors
+                let _ = self.handle_incoming_puback(ack);
+                Ok((Some(Packet::Puback(ack)), None))
+            }
+            Packet::Pingresp => {
+                self.handle_incoming_pingresp();
+                Ok((None, None))
+            }
+            Packet::Publish(publish) => {
+                let ack = self.handle_incoming_publish(publish.clone());
+                let publish = Some(Packet::Publish(publish));
+                Ok((publish, ack))
+            }
+            Packet::Suback(suback) => Ok((None, Some(Packet::Suback(suback)))),
+            _ => unimplemented!()
         }
     }
 
@@ -176,9 +211,10 @@ impl MqttState {
 
     }
 
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Publish, PubackError> {
+    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(), PubackError> {
         if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
-            Ok(self.outgoing_pub.remove(index).unwrap())
+            let _ = self.outgoing_pub.remove(index);
+            Ok(())
         } else {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
             Err(PubackError::Unsolicited)
@@ -187,13 +223,13 @@ impl MqttState {
 
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> (Option<Publish>, Option<Packet>) {
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Option<Packet> {
         let pkid = publish.pid;
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => (Some(publish), None),
-            QoS::AtLeastOnce => (Some(publish), Some(Packet::Puback(pkid.unwrap()))),
+            QoS::AtMostOnce => None,
+            QoS::AtLeastOnce => Some(Packet::Puback(pkid.unwrap())),
             QoS::ExactlyOnce => unimplemented!()
         }
     }
@@ -243,7 +279,7 @@ impl MqttState {
             self.await_pingresp = true;
             Ok(())
         } else {
-            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
+            // error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
             Err(PingError::InvalidState)
         }
     }
@@ -252,17 +288,15 @@ impl MqttState {
         self.await_pingresp = false;
     }
 
-    pub fn handle_outgoing_subscribe(&mut self, topics: Vec<SubscribeTopic>) -> Result<Subscribe, SubscribeError> {
+    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, SubscribeError> {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
             self.last_flush = Instant::now();
             self.await_pingresp = true;
+            subscription.pid = pkid;
 
-            Ok(Subscribe {
-                pid: pkid,
-                topics: topics,
-            })
+            Ok(subscription)
         } else {
             error!("State = {:?}. Shouldn't subscribe in this state", self.connection_status);
             Err(SubscribeError::InvalidState)
@@ -279,6 +313,7 @@ impl MqttState {
     // }
 
     pub fn handle_disconnect(&mut self) {
+        println!("Handling disconnect");
         self.await_pingresp = false;
         self.connection_status = MqttConnectionStatus::Disconnected;
 

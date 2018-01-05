@@ -5,6 +5,7 @@ use tokio_io::codec::{Encoder, Decoder};
 
 use mqtt3::{self, Packet, MqttWrite, MqttRead};
 
+#[derive(Debug)]
 pub struct MqttCodec;
 
 impl Decoder for MqttCodec {

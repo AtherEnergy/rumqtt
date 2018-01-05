@@ -5,7 +5,6 @@ use std::thread;
 use std::sync::Arc;
 use std::result::Result;
 use std::mem;
-use std::sync::mpsc as stdmpsc;
 
 use futures::sync::mpsc::{self, Sender};
 use futures::{Future, Sink};
@@ -15,19 +14,13 @@ use MqttOptions;
 use packet;
 
 use error::ClientError;
+use crossbeam_channel::{bounded, self};
 
-#[derive(Debug)]
-pub enum Request {
-    Subscribe(Vec<SubscribeTopic>),
-    Publish(Publish),
-    Puback(PacketIdentifier),
-    Connect,
-    Ping,
-    Disconnect,
-}
+/// Interface on which clients can receive messages
+pub type Notification<T> = crossbeam_channel::Receiver<T>;
 
 pub struct MqttClient {
-    nw_request_tx: Option<Sender<Request>>,
+    nw_request_tx: Option<Sender<Packet>>,
     max_packet_size: usize,
 }
 
@@ -35,9 +28,9 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> (Self, stdmpsc::Receiver<Packet>) {
+    pub fn start(opts: MqttOptions) -> (Self, Notification<Packet>) {
         let (commands_tx, commands_rx) = mpsc::channel(10);
-        let (notifier_tx, notifier_rx) = stdmpsc::sync_channel(50);
+        let (notifier_tx, notifier_rx) = bounded(50);
 
         let nw_commands_tx = commands_tx.clone();
         let max_packet_size = opts.max_packet_size;
@@ -66,7 +59,7 @@ impl MqttClient {
         let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
         
         let publish = packet::gen_publish_packet(topic.into(), qos, None, false, false, payload);
-        nw_request_tx = nw_request_tx.send(Request::Publish(publish)).wait()?;
+        nw_request_tx = nw_request_tx.send(Packet::Publish(publish)).wait()?;
 
         let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
         Ok(())
@@ -76,7 +69,6 @@ impl MqttClient {
 
     pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), ClientError>{
         if topics.len() == 0 {
-            error!("It is invaild to send a subscribe message with zero topics");
             return Err(ClientError::ZeroSubscriptions);
         }
 
@@ -86,7 +78,9 @@ impl MqttClient {
 
         // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
         let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
-        nw_request_tx = nw_request_tx.send(Request::Subscribe(sub_topics)).wait()?;
+
+        let subscribe = Subscribe {pid: PacketIdentifier::zero(), topics: sub_topics};
+        nw_request_tx = nw_request_tx.send(Packet::Subscribe(subscribe)).wait()?;
         let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
         Ok(())
     }

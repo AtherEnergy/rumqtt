@@ -12,6 +12,7 @@ extern crate jsonwebtoken as jwt;
 extern crate serde_derive;
 #[macro_use]
 extern crate log;
+extern crate crossbeam_channel;
 
 mod codec;
 mod packet;
@@ -23,3 +24,4 @@ mod error;
 pub use mqttopts::{MqttOptions, ReconnectOptions, SecurityOptions};
 pub use client::MqttClient;
 pub use mqtt3::QoS;
+pub use client::Notification;

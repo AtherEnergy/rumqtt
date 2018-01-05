@@ -17,6 +17,7 @@ pub enum SecurityOptions {
 }
 
 
+
 // TODO: Add getters & make fields private
 
 #[derive(Clone, Debug)]
