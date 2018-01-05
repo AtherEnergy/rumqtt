@@ -5,7 +5,6 @@ use std::time::Duration;
 use std::thread;
 use std::io::{self, ErrorKind};
 
-
 use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
 use futures::sync::mpsc::{Sender, Receiver};
