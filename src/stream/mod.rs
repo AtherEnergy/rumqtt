@@ -1,9 +1,17 @@
-/* cfg(openssl)
+#[cfg(feature = "tls-openssl")]
 mod openssl;
-pub use self::openssl::{SslContext, NetworkStream};
-*/
 
-/* cfg(rustls) */
+#[cfg(feature = "tls-openssl")]
+pub use self::openssl::{SslContext, NetworkStream, StreamError};
+
+#[cfg(feature = "tls-rustls")]
 mod rustls;
-pub use self::rustls::{SslContext, NetworkStream};
-/* */
+
+#[cfg(feature = "tls-rustls")]
+pub use self::rustls::{SslContext, NetworkStream, StreamError};
+
+#[cfg(not(any(feature = "tls-openssl", feature = "tls-rustls")))]
+mod no_tls;
+
+#[cfg(not(any(feature = "tls-openssl", feature = "tls-rustls")))]
+pub use self::no_tls::{NetworkStream, StreamError};

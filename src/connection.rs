@@ -15,7 +15,7 @@ use threadpool::ThreadPool;
 
 use error::{Result, Error};
 use clientoptions::MqttOptions;
-use stream::{NetworkStream, SslContext};
+use stream::NetworkStream;
 use genpack;
 use message::Message;
 use callbacks::MqttCallback;
@@ -278,24 +278,34 @@ impl Connection {
         Ok(())
     }
 
+    #[cfg(any(feature = "tls-openssl", feature = "tls-rustls"))]
+    fn network_stream(&self, stream: TcpStream) -> Result<NetworkStream> {
+      use stream::SslContext;
+      match self.opts.ca {
+          Some(ref ca) => {
+              if let Some((ref crt, ref key)) = self.opts.client_cert {
+                  let ssl_ctx: SslContext = SslContext::new(ca, Some((crt, key)), self.opts.verify_ca)?;
+                  ssl_ctx.connect(&self.domain, stream).map(NetworkStream::Tls)
+              } else {
+                  let ssl_ctx: SslContext = SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca)?;
+                  ssl_ctx.connect(&self.domain, stream).map(NetworkStream::Tls)
+              }
+          }
+          None => Ok(NetworkStream::Tcp(stream)),
+      }
+    }
+
+    #[cfg(not(any(feature = "tls-openssl", feature = "tls-rustls")))]
+    fn network_stream(&self, stream: TcpStream) -> Result<NetworkStream> {
+      Ok(NetworkStream::Tcp(stream))
+    }
+
     fn try_reconnect(&mut self) -> Result<()> {
         if !self.initial_connect {
             thread::sleep(Duration::new(self.opts.reconnect as u64, 0));
         }
         let stream = TcpStream::connect(&self.addr)?;
-        let stream = match self.opts.ca {
-            Some(ref ca) => {
-                if let Some((ref crt, ref key)) = self.opts.client_cert {
-                    let ssl_ctx: SslContext = SslContext::new(ca, Some((crt, key)), self.opts.verify_ca)?;
-                    NetworkStream::Tls(ssl_ctx.connect(&self.domain, stream)?)
-                } else {
-                    let ssl_ctx: SslContext = SslContext::new(ca, None::<(String, String)>, self.opts.verify_ca)?;
-                    NetworkStream::Tls(ssl_ctx.connect(&self.domain, stream)?)
-                }
-            }
-            None => NetworkStream::Tcp(stream),
-        };
-
+        let stream = self.network_stream(stream)?;
         self.stream = stream;
         let connect = genpack::generate_connect_packet(self.opts.clone())?;
         self.write_packet(connect)?;

@@ -1,7 +1,5 @@
 #![cfg_attr(feature="clippy", feature(plugin))]
-
 #![cfg_attr(feature="clippy", plugin(clippy))]
-
 
 //! A fast, lock free Mqtt client implementation in Rust.
 //!
@@ -72,14 +70,10 @@ extern crate quick_error;
 extern crate mqtt;
 extern crate threadpool;
 
-/* cfg(openssl) */
-extern crate openssl;
-/* */
-
-/* cfg(rustls) */
-extern crate rustls;
-/* */
-
+#[cfg(feature = "tls-openssl")] extern crate openssl;
+#[cfg(feature = "tls-rustls")] extern crate rustls;
+#[cfg(all(feature = "tls-rustls", feature = "tls-openssl"))]
+compile_error!("Multiple TLS implementations found. When compiling with tls feature support, only one of \"tls-rustls\" and \"tls-openssl\" may be used.");
 
 mod error;
 mod genpack;

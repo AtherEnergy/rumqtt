@@ -8,7 +8,22 @@ use std::time::Duration;
 
 use rustls::{PrivateKey, Certificate, Stream, ClientConfig, ClientSession, TLSError};
 use rustls::internal::pemfile;
-use error::Result;
+use error::{Result, Error};
+
+quick_error! {
+    #[derive(Debug)]
+    pub enum StreamError {
+        RustlsError(err: TLSError) {
+            from()
+        }
+    }
+}
+
+impl From<TLSError> for Error {
+  fn from(e: TLSError) -> Error {
+    Error::StreamError(e.into())
+  }
+}
 
 pub struct SslStream {
   pub session: ClientSession,
