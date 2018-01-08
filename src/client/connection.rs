@@ -7,7 +7,9 @@ use std::io::{self, ErrorKind};
 
 use futures::{future, Future, Sink};
 use futures::stream::{Stream, SplitStream};
-use futures::sync::mpsc::{Sender, Receiver};
+use futures::sync::mpsc::Receiver;
+use futures::unsync;
+use futures::unsync::mpsc::UnboundedSender;
 use tokio_core::reactor::{Core, Interval};
 use tokio_core::net::TcpStream;
 use tokio_io::AsyncRead;
@@ -23,18 +25,15 @@ use crossbeam_channel;
 
 pub struct Connection {
     notifier_tx: crossbeam_channel::Sender<Packet>,
-    commands_tx: Sender<Packet>,
-
     mqtt_state: Rc<RefCell<MqttState>>,
     opts: MqttOptions,
     reactor: Core,
 }
 
 impl Connection {
-    pub fn new(opts: MqttOptions, commands_tx: Sender<Packet>, notifier_tx: crossbeam_channel::Sender<Packet>) -> Self {
+    pub fn new(opts: MqttOptions, notifier_tx: crossbeam_channel::Sender<Packet>) -> Self {
         Connection {
             notifier_tx: notifier_tx,
-            commands_tx: commands_tx,
             mqtt_state: Rc::new(RefCell::new(MqttState::new(opts.clone()))),
             opts: opts,
             reactor: Core::new().unwrap()
@@ -67,9 +66,11 @@ impl Connection {
                 }
             };
 
+            let (network_reply_tx, mut network_reply_rx) = unsync::mpsc::unbounded::<Packet>();
+
             let (mut sender, receiver) = framed.split();
-            let mqtt_recv = self.mqtt_network_recv_future(receiver);
-            let ping_timer = self.ping_timer_future();
+            let mqtt_recv = self.mqtt_network_recv_future(receiver, network_reply_tx.clone());
+            let ping_timer = self.ping_timer_future(network_reply_tx.clone());
 
             // republish last session unacked packets
             // NOTE: this will block eventloop until last session publishs are written to network
@@ -85,14 +86,17 @@ impl Connection {
             // receive incoming user request and write to network
             let mqtt_state = self.mqtt_state.clone();
             let commands_rx = commands_rx.by_ref();
-            let mqtt_send = commands_rx.map(move |msg| {
+            let network_reply_rx = network_reply_rx.by_ref();
+
+            let mqtt_send = commands_rx.select(network_reply_rx)
+            .map(move |msg| {
                 mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(msg).unwrap()
             }).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"))
               .forward(sender)
               .map(|_| ())
               .or_else(|_| { error!("Client send error"); future::ok(())});
 
-            // join all the futures and run the ractor
+            // join all the futures and run the reactor
             let mqtt_send_and_recv = mqtt_recv.join3(mqtt_send, ping_timer);
             if let Err(err) = self.reactor.run(mqtt_send_and_recv) {
                 error!("Reactor halted. Error = {:?}", err);
@@ -101,13 +105,15 @@ impl Connection {
     }
 
 
-    fn mqtt_network_recv_future(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> Box<Future<Item=(), Error=io::Error>> {
+    /// Receives incoming mqtt packets and forwards them appropriately to user and network
+    //  TODO: Remove box when `impl Future` is stable
+    //  NOTE: Uses `unbounded` channel for sending notifications back to network as bounded
+    //        channel clone will double the size of the queue anyway.
+    fn mqtt_network_recv_future(&self, receiver: SplitStream<Framed<TcpStream, MqttCodec>>, network_reply_tx: UnboundedSender<Packet>) -> Box<Future<Item=(), Error=io::Error>> {
         let mqtt_state = self.mqtt_state.clone();
-        let commands_tx = self.commands_tx.clone();
         let notifier = self.notifier_tx.clone();
         
         let receiver = receiver.for_each(move |packet| {
-            let commands_tx = commands_tx.clone();
             let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
                 Ok((notification, reply)) => (notification, reply),
                 Err(e) => {
@@ -124,8 +130,9 @@ impl Connection {
             }
 
             // send reply back to network
+            let network_reply_tx = network_reply_tx.clone();
             if let Some(reply) = reply {
-                let s = commands_tx.send(reply).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                let s = network_reply_tx.send(reply).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
                 Box::new(s) as Box<Future<Item=(), Error=io::Error>>
             } else {
                 Box::new(future::ok(()))
@@ -135,18 +142,18 @@ impl Connection {
         Box::new(receiver)
     }
 
-    fn ping_timer_future(&self) -> Box<Future<Item=(), Error=io::Error>> {
+    /// Sends ping to the network when client is idle
+    fn ping_timer_future(&self, network_reply_tx: UnboundedSender<Packet>) -> Box<Future<Item=(), Error=io::Error>> {
         let handle = self.reactor.handle();
         let mqtt_state = self.mqtt_state.clone();
-        let commands_tx = self.commands_tx.clone();
 
         if let Some(keep_alive) = self.opts.keep_alive {
             let interval = Interval::new(Duration::new(u64::from(keep_alive), 0), &handle).unwrap();
             let timer_future = interval.for_each(move |_t| {
-                let commands_tx = commands_tx.clone();
                 if mqtt_state.borrow().is_ping_required() {
                     debug!("Ping timer fire");
-                    let s = commands_tx.send(Packet::Pingreq).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                    let network_reply_tx = network_reply_tx.clone();
+                    let s = network_reply_tx.send(Packet::Pingreq).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
                     Box::new(s) as Box<Future<Item=(), Error=io::Error>>
                 } else {
                     Box::new(future::ok(()))
@@ -159,6 +166,8 @@ impl Connection {
         }
     }
 
+
+    /// Creates a mqtt connection on top of tcp/tls and returns a `Framed`
     fn mqtt_connect(&mut self) -> Result<Framed<TcpStream, MqttCodec>, ConnectError> {
         // NOTE: make sure that dns resolution happens during reconnection to handle changes in server ip
         let addr: SocketAddr = self.opts.broker_addr.as_str().parse().unwrap();

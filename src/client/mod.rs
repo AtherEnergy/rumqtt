@@ -32,11 +32,10 @@ impl MqttClient {
         let (commands_tx, commands_rx) = mpsc::channel(10);
         let (notifier_tx, notifier_rx) = bounded(50);
 
-        let nw_commands_tx = commands_tx.clone();
         let max_packet_size = opts.max_packet_size;
 
         thread::spawn( move || {
-                let mut connection = connection::Connection::new(opts, nw_commands_tx, notifier_tx);
+                let mut connection = connection::Connection::new(opts, notifier_tx);
                 connection.start(commands_rx);
                 error!("Network Thread Stopped !!!!!!!!!");
             }
