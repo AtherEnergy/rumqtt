@@ -72,8 +72,9 @@ extern crate threadpool;
 
 #[cfg(feature = "tls-openssl")] extern crate openssl;
 #[cfg(feature = "tls-rustls")] extern crate rustls;
+
 #[cfg(all(feature = "tls-rustls", feature = "tls-openssl"))]
-compile_error!("Multiple TLS implementations found. When compiling with tls feature support, only one of \"tls-rustls\" and \"tls-openssl\" may be used.");
+compile_error!("Multiple TLS implementations found. When compiling with TLS feature support, only one of \"tls-rustls\" and \"tls-openssl\" may be used.");
 
 mod error;
 mod genpack;

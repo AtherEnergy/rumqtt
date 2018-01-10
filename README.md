@@ -8,7 +8,7 @@ A pure rust mqtt client.
 
 * Supports QoS 0, QoS 1 and QoS 2
 * Auto reconnect
-* TLS support
+* Optional TLS support, either with OpenSSL via the `tls-openssl` feature, or Rustls with the `tls-rustls` feature
 * Offline message buffering
 * LWT
 * Authentication with username and password

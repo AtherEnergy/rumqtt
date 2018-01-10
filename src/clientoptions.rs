@@ -171,7 +171,7 @@ impl MqttOptions {
         self
     }
 
-    /// Set will retian so that future clients subscribing to will topic
+    /// Set will retain so that future clients subscribing to will topic
     /// knows of client's death.
     pub fn set_will_retain(mut self, retain: bool) -> Self {
         self.will_retain = retain;
