@@ -12,6 +12,8 @@ extern crate serde_derive;
 #[macro_use]
 extern crate log;
 extern crate crossbeam_channel;
+extern crate native_tls;
+extern crate tokio_tls;
 
 mod codec;
 mod packet;

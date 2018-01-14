@@ -1,15 +1,17 @@
 extern crate rumqtt;
-extern crate loggerv;
+extern crate pretty_env_logger;
 
 use std::thread;
 use std::time::Duration;
 
-use rumqtt::{MqttOptions, ReconnectOptions, MqttClient, QoS};
+use rumqtt::{MqttOptions, ReconnectOptions, SecurityOptions, MqttClient, QoS};
 
 fn main() {
-    loggerv::init_with_verbosity(1).unwrap();
-    let mqtt_opts = MqttOptions::new("rumqtt-core", "127.0.0.1:1883").unwrap()
-                                .set_reconnect_opts(ReconnectOptions::Always(10));
+    pretty_env_logger::init().unwrap();
+
+    let mqtt_opts = MqttOptions::new("pub-1", "localhost:1883").unwrap()
+                                .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10))
+                                .set_security_opts(SecurityOptions::None);
     
 
     let (mut client, receiver) = MqttClient::start(mqtt_opts);
@@ -20,8 +22,8 @@ fn main() {
         }
     });
 
-    for i in 0..1000 {
-        if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]) {
+    for i in 0..100 {
+        if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, vec![1, 2, 3]) {
             println!("{:?}", e);
         }
         thread::sleep(Duration::new(1, 0));

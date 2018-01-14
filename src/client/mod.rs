@@ -1,16 +1,19 @@
 mod state;
+mod network;
 mod connection;
 
 use std::thread;
 use std::sync::Arc;
 use std::result::Result;
 use std::mem;
+use std::time::Duration;
 
 use futures::sync::mpsc::{self, Sender};
 use futures::{Future, Sink};
 use mqtt3::*;
 
 use MqttOptions;
+use ReconnectOptions;
 use packet;
 
 use error::ClientError;
@@ -20,7 +23,7 @@ use crossbeam_channel::{bounded, self};
 pub type Notification<T> = crossbeam_channel::Receiver<T>;
 
 pub struct MqttClient {
-    nw_request_tx: Option<Sender<Packet>>,
+    nw_request_tx: Sender<Packet>,
     max_packet_size: usize,
 }
 
@@ -33,15 +36,31 @@ impl MqttClient {
         let (notifier_tx, notifier_rx) = bounded(50);
 
         let max_packet_size = opts.max_packet_size;
+        let reconnect_config = opts.reconnect;
+        let mut sleep_duration = Duration::new(10, 0);
 
         thread::spawn( move || {
-                let mut connection = connection::Connection::new(opts, notifier_tx);
-                connection.start(commands_rx);
-                error!("Network Thread Stopped !!!!!!!!!");
-            }
-        );
+            let mut connection = connection::Connection::new(opts, commands_rx, notifier_tx);
+            let mut initial_connect = true;
 
-        let client = MqttClient { nw_request_tx: Some(commands_tx), max_packet_size: max_packet_size};
+            'reconnect: loop {
+                if let Err(e) = connection.start() {
+                    error!("Network connection failed. Error = {:?}", e);
+                    match reconnect_config {
+                        ReconnectOptions::Never => break 'reconnect,
+                        ReconnectOptions::AfterFirstSuccess(d) if !initial_connect => sleep_duration = Duration::new(u64::from(d), 0),
+                        ReconnectOptions::AfterFirstSuccess(_) => break 'reconnect,
+                        ReconnectOptions::Always(d) =>  sleep_duration = Duration::new(u64::from(d), 0),
+                    }
+                }
+
+                initial_connect = false;
+                info!("Will sleep for {:?} seconds before reconnecting", sleep_duration);
+                thread::sleep(sleep_duration);
+            };
+        });
+
+        let client = MqttClient { nw_request_tx: commands_tx, max_packet_size: max_packet_size};
         (client, notifier_rx)
     }
 
@@ -54,13 +73,11 @@ impl MqttClient {
 
         let payload = Arc::new(payload);
 
-        // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
-        let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
-        
+        let tx = &mut self.nw_request_tx;
         let publish = packet::gen_publish_packet(topic.into(), qos, None, false, false, payload);
-        nw_request_tx = nw_request_tx.send(Packet::Publish(publish)).wait()?;
 
-        let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
+        tx.send(Packet::Publish(publish)).wait()?;
+
         Ok(())
     }
 
@@ -75,12 +92,10 @@ impl MqttClient {
             |t| SubscribeTopic{topic_path: t.0.into(), qos: t.1}
         ).collect();
 
-        // NOTE: Don't clone 'tx' as it doubles the queue size for every clone
-        let mut nw_request_tx = mem::replace(&mut self.nw_request_tx, None).unwrap();
-
+        let tx = &mut self.nw_request_tx;
         let subscribe = Subscribe {pid: PacketIdentifier::zero(), topics: sub_topics};
-        nw_request_tx = nw_request_tx.send(Packet::Subscribe(subscribe)).wait()?;
-        let _ = mem::replace(&mut self.nw_request_tx, Some(nw_request_tx));
+        
+        tx.send(Packet::Subscribe(subscribe)).wait()?;
         Ok(())
     }
 }

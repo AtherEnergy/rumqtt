@@ -1,6 +1,7 @@
 use futures::sync::mpsc::SendError;
 use mqtt3::Packet;
 use std::io::Error as IoError;
+use native_tls;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -41,7 +42,11 @@ pub enum ConnectError {
     #[fail(display = "Mqtt connection failed. Error = {}", _0)]
     MqttConnectionRefused(u8),
     #[fail(display = "Io failed. Error = {}", _0)]
-    Io(IoError)
+    Io(IoError),
+    #[fail(display = "Tls failed. Error = {}", _0)]
+    Tls(native_tls::Error),
+    #[fail(display = "Empty dns list")]
+    DnsListEmpty
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -75,5 +80,11 @@ impl From<SendError<Packet>> for ClientError {
 impl From<IoError> for ConnectError {
     fn from(err: IoError) -> ConnectError {
         ConnectError::Io(err)
+    }
+}
+
+impl From<native_tls::Error> for ConnectError {
+    fn from(err: native_tls::Error) -> ConnectError {
+        ConnectError::Tls(err)
     }
 }
