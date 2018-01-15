@@ -15,15 +15,14 @@ tokio-io = "0.1"
 bytes = "0.4"
 mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
 chrono = "0.4"
-jsonwebtoken = "3"
+jsonwebtoken = "4"
 serde = "1"
 serde_derive = "1"
-derive_more = "0.6.0"
 failure = "0.1"
 log = "0.3"
 crossbeam-channel = "0.1"
-native-tls = "0.1"
-tokio-tls = "0.1"
+openssl = "0.10"
+tokio-openssl = "0.2"
 
 [dev-dependencies]
 pretty_env_logger = "0.1"

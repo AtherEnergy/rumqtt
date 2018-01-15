@@ -38,7 +38,6 @@ pub struct MqttState {
     
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
-    initial_connect: bool,
     await_pingresp: bool,
     last_flush: Instant,
     last_pkid: PacketIdentifier,
@@ -65,7 +64,6 @@ impl MqttState {
         MqttState {
             opts: opts,
             connection_status: MqttConnectionStatus::Disconnected,
-            initial_connect: true,
             await_pingresp: false,
             last_flush: Instant::now(),
             last_pkid: PacketIdentifier(0),
@@ -74,13 +72,7 @@ impl MqttState {
         }
     }
 
-    pub fn initial_connect(&self) -> bool {
-        self.initial_connect
-    }
-
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, failure::Error> {
-        debug!("Handle outgoing = {:?}", packet);
-
         match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
@@ -137,7 +129,7 @@ impl MqttState {
         }
     }
 
-    pub fn handle_outgoing_connect(&mut self) -> Connect {
+    pub fn handle_outgoing_connect(&mut self) -> Result<Connect, ConnectError> {
         let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
             keep_alive
         } else {
@@ -151,11 +143,11 @@ impl MqttState {
 
         let (username, password) = match self.opts.security {
             SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
-            SecurityOptions::GcloudIotCore((_, ref key, expiry)) => (Some("unused".to_owned()), Some(gen_iotcore_password(key, expiry))),
+            SecurityOptions::GcloudIotCore((ref project, _, ref key, expiry)) => (Some("unused".to_owned()), Some(gen_iotcore_password(project, key, expiry)?)),
             _ => (None, None),
         };
 
-        packet::gen_connect_packet(self.opts.client_id.clone(), keep_alive, self.opts.clean_session, username, password)
+        Ok(packet::gen_connect_packet(self.opts.client_id.clone(), keep_alive, self.opts.clean_session, username, password))
     }
 
     pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
@@ -165,7 +157,6 @@ impl MqttState {
             Err(ConnectError::MqttConnectionRefused(response.to_u8()))
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-            self.initial_connect = false;
             
             if self.opts.clean_session {
                 self.clear_session_info();
@@ -345,22 +336,22 @@ impl MqttState {
 }
 
 // Generates a new password for mqtt client authentication
-pub fn gen_iotcore_password<P>(key: P, expiry: i64) -> String
+pub fn gen_iotcore_password<P>(project: &str, key: P, expiry: i64) -> Result<String, ConnectError>
 where P: AsRef<Path> {
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();
-    let exp = time.checked_add_signed(chrono::Duration::minutes(expiry)).unwrap().timestamp();
+    let exp = time.checked_add_signed(chrono::Duration::minutes(expiry)).expect("Unable to create expiry").timestamp();
     let claims = Claims {
         iat: iat,
         exp: exp,
-        aud: "crested-return-122311".to_string(),
+        aud: project.to_owned(),
     };
 
-    let mut key_file = File::open(key).expect("Unable to open private keyfile for gcloud iot core auth");
+    let mut key_file = File::open(key)?;
     let mut key = vec![];
-    key_file.read_to_end(&mut key).expect("Unable to read private key file for gcloud iot core auth till end");
-    encode(&jwt_header, &claims, &key).expect("encode error")
+    key_file.read_to_end(&mut key)?;
+    Ok(encode(&jwt_header, &claims, &key)?)
 }
 
 #[cfg(test)]

@@ -14,8 +14,8 @@ pub enum SecurityOptions {
     UsernamePassword((String, String)),
     /// ca, client cert, client key
     Tls((String, String, String)),
-    /// roots.pem, private_key.der to sign jwt, expiry in seconds
-    GcloudIotCore((String, String, i64))
+    /// project name, roots.pem, private_key.der to sign jwt, expiry in seconds
+    GcloudIotCore((String, String, String, i64))
 }
 
 
@@ -55,7 +55,7 @@ impl MqttOptions {
             client_id: id.into(),
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
-            max_packet_size: 100 * 1024,
+            max_packet_size: 256 * 1024,
         })
     }
 

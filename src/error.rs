@@ -1,7 +1,8 @@
 use futures::sync::mpsc::SendError;
 use mqtt3::Packet;
 use std::io::Error as IoError;
-use native_tls;
+use openssl;
+use jwt;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -44,7 +45,9 @@ pub enum ConnectError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Tls failed. Error = {}", _0)]
-    Tls(native_tls::Error),
+    Tls(openssl::error::ErrorStack),
+    #[fail(display = "Jwt creation failed")]
+    Jwt,
     #[fail(display = "Empty dns list")]
     DnsListEmpty
 }
@@ -83,8 +86,15 @@ impl From<IoError> for ConnectError {
     }
 }
 
-impl From<native_tls::Error> for ConnectError {
-    fn from(err: native_tls::Error) -> ConnectError {
+impl From<openssl::error::ErrorStack> for ConnectError {
+    fn from(err: openssl::error::ErrorStack) -> ConnectError {
         ConnectError::Tls(err)
+    }
+}
+
+impl From<jwt::errors::Error> for ConnectError {
+    fn from(err: jwt::errors::Error) -> ConnectError {
+        error!("Jwt failed. Error = {:?}", err);
+        ConnectError::Jwt
     }
 }

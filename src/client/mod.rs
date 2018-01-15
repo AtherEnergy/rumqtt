@@ -5,7 +5,6 @@ mod connection;
 use std::thread;
 use std::sync::Arc;
 use std::result::Result;
-use std::mem;
 use std::time::Duration;
 
 use futures::sync::mpsc::{self, Sender};

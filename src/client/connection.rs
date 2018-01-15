@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
-use std::thread;
+use std::path::Path;
 use std::io::{self, ErrorKind};
 
 use futures::{future, Future, Sink};
@@ -16,13 +16,13 @@ use tokio_core::net::TcpStream;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 
-use native_tls::{TlsConnector, Certificate};
-use tokio_tls::TlsConnectorExt;
+use openssl::ssl::{SslMethod, SslConnector, SslVerifyMode, SslFiletype};
+use tokio_openssl::SslConnectorExt;
 
 use mqtt3::Packet;
 
 use error::ConnectError;
-use mqttopts::{MqttOptions, ReconnectOptions, SecurityOptions};
+use mqttopts::{MqttOptions, SecurityOptions};
 use client::state::MqttState;
 use client::network::NetworkStream;
 use codec::MqttCodec;
@@ -56,35 +56,44 @@ impl Connection {
     //       in the loop and creating a sender future
     pub fn start(&mut self) -> Result<(), ConnectError> {
         let framed = self.mqtt_connect()?;
+        info!("mqtt connection successful");
+
         let framed = self.republish_unacked(framed)?;
-        
+
         let (network_reply_tx, mut network_reply_rx) = unsync::mpsc::unbounded::<Packet>();
         let (sender, receiver) = framed.split();
         let mqtt_recv = self.mqtt_network_recv_future(receiver, network_reply_tx.clone());
         let ping_timer = self.ping_timer_future(network_reply_tx.clone());
-        
+
         // receive incoming user request and write to network
         let mqtt_state = self.mqtt_state.clone();
         let commands_rx = self.commands_rx.by_ref();
         let network_reply_rx = network_reply_rx.by_ref();
+
         let mqtt_send = commands_rx
                         .select(network_reply_rx)
-                        .map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving outgoing msg"))
+                        .map_err(|e| {
+                            error!("Receving outgoing message failed. Error = {:?}", e);
+                            io::Error::new(ErrorKind::Other, "Error receiving outgoing msg")
+                        })
                         .and_then(move |msg| {
                             match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(msg) {
-                                Ok(packet) => future::ok(packet),
+                                Ok(packet) => {
+                                    debug!("Sending packet. {}", packet_info(&packet));
+                                    future::ok(packet)
+                                }
                                 Err(e) => {
                                     error!("Handling outgoing packet failed. Error = {:?}", e);
                                     future::err(io::Error::new(ErrorKind::Other, "Error handling outgoing"))
                                 }
                             }
-                        }).forward(sender).map(|_| ()).or_else(|_| { error!("Client send error"); future::ok(())});
+                        })
+                        .forward(sender)
+                        .map(|_| ())
+                        .or_else(|e| { error!("Network send failed. Error = {:?}", e); future::ok(())});
         
         // join mqtt send and ping timer. continues even if one of the stream ends
-        let mqtt_send_and_ping = mqtt_send.join(ping_timer).map(|_|{ 
-            println!("Client send");
-            ()
-        });
+        let mqtt_send_and_ping = mqtt_send.join(ping_timer).map(|_| ());
         
         // join all the futures and run the reactor
         let mqtt_send_and_recv = mqtt_recv.select(mqtt_send_and_ping);
@@ -107,10 +116,11 @@ impl Connection {
         let notifier = self.notifier_tx.clone();
         
         let receiver = receiver.for_each(move |packet| {
+            debug!("Received packet. {:?}", packet_info(&packet));
             let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
                 Ok((notification, reply)) => (notification, reply),
                 Err(e) => {
-                    error!("{:?}", e);
+                    error!("Incoming packet handle failed. Error = {:?}", e);
                     (None, None)
                 }
             };
@@ -131,7 +141,7 @@ impl Connection {
                 Box::new(future::ok(()))
             }
         });
-        
+
         Box::new(receiver)
     }
 
@@ -182,7 +192,7 @@ impl Connection {
     pub fn mqtt_connect(&mut self) -> Result<Framed<NetworkStream, MqttCodec>, ConnectError> {
         let stream = self.create_network_stream()?;
         let framed = stream.framed(MqttCodec);
-        let connect = self.mqtt_state.borrow_mut().handle_outgoing_connect();
+        let connect = self.mqtt_state.borrow_mut().handle_outgoing_connect()?;
 
         let framed = framed.send(Packet::Connect(connect)).and_then(|framed| {
             framed.into_future().and_then(|(res, stream)| Ok((res, stream))).map_err(|(err, _stream)| err)
@@ -203,23 +213,29 @@ impl Connection {
         let security = self.opts.security.clone();
         let handle = self.reactor.handle();
 
-        let tcp_future = TcpStream::connect(&addr, &handle).map(|tcp| {
-            tcp
-        });
+        let tcp_future = TcpStream::connect(&addr, &handle).map(|tcp| tcp);
 
         let network_stream = match security {
             SecurityOptions::None => {
                 let network_future = tcp_future.map(move |connection| NetworkStream::Tcp(connection));
                 self.reactor.run(network_future)?
             }
-            SecurityOptions::GcloudIotCore((ca, _, _)) => {
-                let ca = self.get_ca_certificate();
-                let mut cx = TlsConnector::builder()?;
-                cx.add_root_certificate(ca)?;
-                let cx = cx.build()?;
+            SecurityOptions::GcloudIotCore((_, ca, _, _))  => {
+                let connector = self.new_tls_connector(ca, None::<(String, String)>, true)?;
 
                 let tls_future = tcp_future.and_then(|tcp| {
-                    let tls = cx.connect_async(&domain, tcp);
+                    let tls = connector.connect_async(&domain, tcp);
+                    tls.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                });
+
+                let network_future = tls_future.map(move |connection| NetworkStream::Tls(connection));
+                self.reactor.run(network_future)?
+            }
+            SecurityOptions::Tls((ca, cert, key)) => {
+                let connector = self.new_tls_connector(ca, Some((cert, key)), true)?;
+
+                let tls_future = tcp_future.and_then(|tcp| {
+                    let tls = connector.connect_async(&domain, tcp);
                     tls.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 });
 
@@ -232,22 +248,48 @@ impl Connection {
         Ok(network_stream)
     }
 
+    fn new_tls_connector<CA, C, K>(&self, ca: CA, client_pair: Option<(C, K)>, should_verify_ca: bool) -> Result<SslConnector, ConnectError>
+    where
+        CA: AsRef<Path>,
+        C: AsRef<Path>,
+        K: AsRef<Path>,
+    {
+        let mut tls_builder = SslConnector::builder(SslMethod::tls())?;
+        tls_builder.set_ca_file(ca.as_ref())?;
+
+        if let Some((cert, key)) = client_pair {
+            tls_builder.set_certificate_file(cert, SslFiletype::PEM)?;
+            tls_builder.set_private_key_file(key, SslFiletype::PEM)?;
+        }
+
+        if should_verify_ca {
+            tls_builder.set_verify(SslVerifyMode::PEER);
+        } else {
+            tls_builder.set_verify(SslVerifyMode::NONE);
+        }
+
+        Ok(tls_builder.build())
+    }
+
     fn get_socket_address(&self) -> Result<(SocketAddr, String), ConnectError> {
         let addr = self.opts.broker_addr.clone();
         let domain = addr.split(":")
                          .map(str::to_string)
                          .next()
                          .unwrap_or_default();
-        let mut addrs: Vec<_> = addr.to_socket_addrs()?.collect();
-        let addr = addrs.pop();
-        
+        let addr = addr.to_socket_addrs()?.next();
+        debug!("Address resolved to {:?}", addr);
+
         match addr {
             Some(a) => Ok((a, domain)),
             None => return Err(ConnectError::DnsListEmpty),
         }
     }
+}
 
-    fn get_ca_certificate(&self) -> Certificate {
-        Certificate::from_der(include_bytes!("/home/raviteja/Desktop/iotcore-certs/RAVI-LINUX/roots.der")).unwrap()
+fn packet_info(packet: &Packet) -> String {
+    match *packet {
+        Packet::Publish(ref p) => format!("topic = {}, qos = {:?}, pkid = {:?}, payload size = {:?} bytes", p.topic_name, p.qos, p.pid, p.payload.len()),
+        _ => format!("{:?}", packet)
     }
 }
