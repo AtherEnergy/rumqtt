@@ -89,8 +89,9 @@ impl Connection {
                             }
                         })
                         .forward(sender)
-                        .map(|_| ())
-                        .or_else(|e| { error!("Network send failed. Error = {:?}", e); future::ok(())});
+                        .map(|_| ()); 
+                        // NOTE: Half open connections can be detected with sender errors or ping (2nd time)
+                        //       Send errors are detected when MTU is crossed
         
         // join mqtt send and ping timer. continues even if one of the stream ends
         let mqtt_send_and_ping = mqtt_send.join(ping_timer).map(|_| ());
@@ -210,6 +211,7 @@ impl Connection {
 
     fn create_network_stream(&mut self) -> Result<NetworkStream, ConnectError> {
         let (addr, domain) = self.get_socket_address()?;
+        debug!("To connect domain = {:?}, addr = {:?}", domain, addr);
         let security = self.opts.security.clone();
         let handle = self.reactor.handle();
 
@@ -278,7 +280,6 @@ impl Connection {
                          .next()
                          .unwrap_or_default();
         let addr = addr.to_socket_addrs()?.next();
-        debug!("Address resolved to {:?}", addr);
 
         match addr {
             Some(a) => Ok((a, domain)),
