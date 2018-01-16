@@ -76,7 +76,7 @@ impl Connection {
                             error!("Receving outgoing message failed. Error = {:?}", e);
                             io::Error::new(ErrorKind::Other, "Error receiving outgoing msg")
                         })
-                        .and_then(move |msg| {
+                        .and_then(|msg| {
                             match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(msg) {
                                 Ok(packet) => {
                                     debug!("Sending packet. {}", packet_info(&packet));
@@ -89,9 +89,11 @@ impl Connection {
                             }
                         })
                         .forward(sender)
-                        .map(|_| ()); 
-                        // NOTE: Half open connections can be detected with sender errors or ping (2nd time)
-                        //       Send errors are detected when MTU is crossed
+                        .map(|_| {
+                            mqtt_state.borrow_mut().reset_last_control_at(); 
+                            ()
+                        })
+                        .or_else(|e| { error!("Network send failed. Error = {:?}", e); future::ok(())});
         
         // join mqtt send and ping timer. continues even if one of the stream ends
         let mqtt_send_and_ping = mqtt_send.join(ping_timer).map(|_| ());
@@ -100,8 +102,14 @@ impl Connection {
         let mqtt_send_and_recv = mqtt_recv.select(mqtt_send_and_ping);
         
         match self.reactor.run(mqtt_send_and_recv) {
-            Ok((v, _next)) => error!("Reactor stopper. v = {:?}", v),
-            Err((e, _next)) => error!("Reactor stopper. e = {:?}", e)
+            Ok((v, _next)) => {
+                mqtt_state.borrow_mut().handle_disconnect();
+                error!("Reactor stopped. v = {:?}", v)
+            }
+            Err((e, _next)) => {
+                mqtt_state.borrow_mut().handle_disconnect();
+                error!("Reactor stopped. e = {:?}", e)
+            }
         }
 
         Ok(())
@@ -154,6 +162,7 @@ impl Connection {
         if let Some(keep_alive) = self.opts.keep_alive {
             let interval = Interval::new(Duration::new(u64::from(keep_alive), 0), &handle).unwrap();
             let timer_future = interval.for_each(move |_t| {
+                debug!("Ping timer fired. last flush = {:?}", mqtt_state.borrow_mut().last_flush);
                 if mqtt_state.borrow().is_ping_required() {
                     debug!("Ping timer fire");
                     let network_reply_tx = network_reply_tx.clone();
@@ -200,18 +209,18 @@ impl Connection {
         });
         let (packet, framed) = self.reactor.run(framed)?;
         
-        match packet.expect("Expected connack packet") {
-            Packet::Connack(connack) => {
+        match packet {
+            Some(Packet::Connack(connack)) => {
                 self.mqtt_state.borrow_mut().handle_incoming_connack(connack)?;
                 Ok(framed)
             }
+            None => Err(io::Error::new(ErrorKind::Other, "Connection closed by server").into()),
             _ => unimplemented!(),
         } 
     }
 
     fn create_network_stream(&mut self) -> Result<NetworkStream, ConnectError> {
         let (addr, domain) = self.get_socket_address()?;
-        debug!("To connect domain = {:?}, addr = {:?}", domain, addr);
         let security = self.opts.security.clone();
         let handle = self.reactor.handle();
 
@@ -280,6 +289,7 @@ impl Connection {
                          .next()
                          .unwrap_or_default();
         let addr = addr.to_socket_addrs()?.next();
+        debug!("Address resolved to {:?}", addr);
 
         match addr {
             Some(a) => Ok((a, domain)),
