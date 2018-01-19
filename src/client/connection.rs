@@ -162,7 +162,7 @@ impl Connection {
         if let Some(keep_alive) = self.opts.keep_alive {
             let interval = Interval::new(Duration::new(u64::from(keep_alive), 0), &handle).unwrap();
             let timer_future = interval.for_each(move |_t| {
-                debug!("Ping timer fired. last flush = {:?}", mqtt_state.borrow_mut().last_flush);
+                // debug!("Ping timer fired. last flush = {:?}", mqtt_state.borrow_mut().last_flush);
                 if mqtt_state.borrow().is_ping_required() {
                     debug!("Ping timer fire");
                     let network_reply_tx = network_reply_tx.clone();
@@ -227,7 +227,7 @@ impl Connection {
         let tcp_future = TcpStream::connect(&addr, &handle).map(|tcp| tcp);
 
         let network_stream = match security {
-            SecurityOptions::None => {
+            SecurityOptions::None | SecurityOptions::UsernamePassword(_) => {
                 let network_future = tcp_future.map(move |connection| NetworkStream::Tcp(connection));
                 self.reactor.run(network_future)?
             }

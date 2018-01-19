@@ -26,3 +26,4 @@ tokio-openssl = "0.2"
 
 [dev-dependencies]
 pretty_env_logger = "0.1"
+loggerv = "0.6"
