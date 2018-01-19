@@ -19,16 +19,16 @@ mod tests {
         let (mut client, receiver) = MqttClient::start(mqtt_opts);
         let counter = Arc::new(Mutex::new(0));
 
-        client.subscribe(vec![("hello/world", QoS::AtLeastOnce)]);
+        client.subscribe(vec![("hello/world", QoS::AtLeastOnce)]).unwrap();
 
-        let counter_clone = counter.clone();
+        let counter_clone = Arc::clone(&counter);
         thread::spawn(move || {
-            for i in receiver {
+            for _ in receiver {
                 *counter_clone.lock().unwrap() += 1;
             }
         });
 
-        for i in 0..3 {
+        for _ in 0..3 {
             if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]) {
                 println!("{:?}", e);
             }
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1:1883").unwrap()
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1:1883").unwrap()
                                     .set_reconnect_opts(ReconnectOptions::Always(10))
                                     .set_clean_session(true);
     }
@@ -53,7 +53,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let mqtt_opts = MqttOptions::new("", "127.0.0.1:1883").unwrap()
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1:1883").unwrap()
                                     .set_reconnect_opts(ReconnectOptions::Always(10))
                                     .set_clean_session(true);
     }

@@ -12,12 +12,16 @@ pub enum SecurityOptions {
     None,
     /// username, password
     UsernamePassword((String, String)),
-    /// ca, client cert, client key
-    Tls((String, String, String)),
-    /// project name, roots.pem, private_key.der to sign jwt, expiry in seconds
-    GcloudIotCore((String, String, String, i64))
+    /// project name, private_key.der to sign jwt, expiry in seconds
+    GcloudIotCore((String, String, i64))
 }
 
+#[derive(Clone, Debug)]
+pub enum ConnectionMethod {
+    Tcp,
+    // ca and, optionally, a pair of client cert and client key
+    Tls(String, Option<(String, String)>)
+}
 
 
 // TODO: Add getters & make fields private
@@ -32,6 +36,8 @@ pub struct MqttOptions {
     pub clean_session: bool,
     /// client identifier
     pub client_id: String,
+    /// connection method
+    pub connection_method: ConnectionMethod,
     /// reconnection options
     pub reconnect: ReconnectOptions,
     /// security options
@@ -53,6 +59,7 @@ impl MqttOptions {
             keep_alive: Some(10),
             clean_session: true,
             client_id: id.into(),
+            connection_method: ConnectionMethod::Tcp,
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
@@ -86,6 +93,12 @@ impl MqttOptions {
     /// So **make sure that you manually set `client_id` when `clean_session` is false**
     pub fn set_clean_session(mut self, clean_session: bool) -> Self {
         self.clean_session = clean_session;
+        self
+    }
+
+    /// Set how to connect to a MQTT Broker (either plain TCP or SSL)
+    pub fn set_connection_method(mut self, opts: ConnectionMethod) -> Self {
+        self.connection_method = opts;
         self
     }
 
