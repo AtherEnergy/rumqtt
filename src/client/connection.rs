@@ -22,7 +22,7 @@ use tokio_openssl::SslConnectorExt;
 use mqtt3::Packet;
 
 use error::ConnectError;
-use mqttopts::{MqttOptions, SecurityOptions};
+use mqttopts::{MqttOptions, ConnectionMethod};
 use client::state::MqttState;
 use client::network::NetworkStream;
 use codec::MqttCodec;
@@ -221,19 +221,19 @@ impl Connection {
 
     fn create_network_stream(&mut self) -> Result<NetworkStream, ConnectError> {
         let (addr, domain) = self.get_socket_address()?;
-        let security = self.opts.security.clone();
+        let connection_method = self.opts.connection_method.clone();
         let handle = self.reactor.handle();
 
         let tcp_future = TcpStream::connect(&addr, &handle).map(|tcp| tcp);
 
-        let network_stream = match security {
-            SecurityOptions::None | SecurityOptions::UsernamePassword(_) => {
+        let network_stream = match connection_method {
+            ConnectionMethod::Tcp => {
                 let network_future = tcp_future.map(move |connection| NetworkStream::Tcp(connection));
                 self.reactor.run(network_future)?
-            }
-            SecurityOptions::GcloudIotCore((_, ca, _, _))  => {
-                let connector = self.new_tls_connector(ca, None::<(String, String)>, true)?;
-
+            },
+            ConnectionMethod::Tls(ca, client_pair) => {
+                let connector = self.new_tls_connector(ca, client_pair, true)?;
+          
                 let tls_future = tcp_future.and_then(|tcp| {
                     let tls = connector.connect_async(&domain, tcp);
                     tls.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
@@ -242,18 +242,6 @@ impl Connection {
                 let network_future = tls_future.map(move |connection| NetworkStream::Tls(connection));
                 self.reactor.run(network_future)?
             }
-            SecurityOptions::Tls((ca, cert, key)) => {
-                let connector = self.new_tls_connector(ca, Some((cert, key)), true)?;
-
-                let tls_future = tcp_future.and_then(|tcp| {
-                    let tls = connector.connect_async(&domain, tcp);
-                    tls.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                });
-
-                let network_future = tls_future.map(move |connection| NetworkStream::Tls(connection));
-                self.reactor.run(network_future)?
-            }
-            _ => unimplemented!()
         };
 
         Ok(network_stream)

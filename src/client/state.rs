@@ -143,7 +143,7 @@ impl MqttState {
 
         let (username, password) = match self.opts.security {
             SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
-            SecurityOptions::GcloudIotCore((ref project, _, ref key, expiry)) => (Some("unused".to_owned()), Some(gen_iotcore_password(project, key, expiry)?)),
+            SecurityOptions::GcloudIotCore((ref project, ref key, expiry)) => (Some("unused".to_owned()), Some(gen_iotcore_password(project, key, expiry)?)),
             _ => (None, None),
         };
 
