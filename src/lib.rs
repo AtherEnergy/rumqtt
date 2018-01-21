@@ -6,6 +6,7 @@ extern crate bytes;
 extern crate chrono;
 #[macro_use]
 extern crate failure;
+#[cfg(feature = "jwt")]
 extern crate jsonwebtoken as jwt;
 #[macro_use]
 extern crate serde_derive;

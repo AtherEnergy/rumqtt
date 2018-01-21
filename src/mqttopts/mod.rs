@@ -12,6 +12,7 @@ pub enum SecurityOptions {
     None,
     /// username, password
     UsernamePassword((String, String)),
+    #[cfg(feature = "jwt")]
     /// project name, private_key.der to sign jwt, expiry in seconds
     GcloudIotCore((String, String, i64))
 }

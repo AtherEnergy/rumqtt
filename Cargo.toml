@@ -15,7 +15,7 @@ tokio-io = "0.1"
 bytes = "0.4"
 mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
 chrono = "0.4"
-jsonwebtoken = "4"
+jsonwebtoken = { version = "4", optional = true }
 serde = "1"
 serde_derive = "1"
 failure = "0.1"
@@ -27,3 +27,7 @@ tokio-openssl = "0.2"
 [dev-dependencies]
 pretty_env_logger = "0.1"
 loggerv = "0.6"
+
+[features]
+default = ["jwt"]
+jwt = ["jsonwebtoken"]

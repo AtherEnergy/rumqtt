@@ -1,14 +1,10 @@
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::result::Result;
-use std::fs::File;
 use std::path::Path;
-use std::io::Read;
 
 use failure;
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
-use jwt::{encode, Header, Algorithm};
-use chrono::{self, Utc};
 
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
 use packet;
@@ -143,6 +139,7 @@ impl MqttState {
 
         let (username, password) = match self.opts.security {
             SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
+            #[cfg(feature = "jwt")]
             SecurityOptions::GcloudIotCore((ref project, ref key, expiry)) => (Some("unused".to_owned()), Some(gen_iotcore_password(project, key, expiry)?)),
             _ => (None, None),
         };
@@ -335,9 +332,16 @@ impl MqttState {
     }
 }
 
+#[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
 pub fn gen_iotcore_password<P>(project: &str, key: P, expiry: i64) -> Result<String, ConnectError>
 where P: AsRef<Path> {
+    use std::fs::File;
+    use std::io::Read;
+
+    use jwt::{encode, Header, Algorithm};
+    use chrono::{self, Utc};
+
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();
@@ -608,7 +612,7 @@ mod test {
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
-        mqtt.handle_outgoing_connect();
+        mqtt.handle_outgoing_connect().unwrap();
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Handshake);
 
         let connack = Connack {
