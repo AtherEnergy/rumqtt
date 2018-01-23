@@ -144,7 +144,7 @@ impl MqttState {
             _ => (None, None),
         };
 
-        Ok(packet::gen_connect_packet(self.opts.client_id.clone(), keep_alive, self.opts.clean_session, username, password))
+        Ok(packet::gen_connect_packet(self.opts.client_id.clone(), keep_alive, self.opts.clean_session, username, password, self.opts.last_will.clone()))
     }
 
     pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
@@ -719,4 +719,36 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn connec_should_respect_options() {
+        use mqttopts::SecurityOptions::UsernamePassword;
+
+        let lwt = LastWill {
+            topic: String::from("LWT_TOPIC"),
+            message: String::from("LWT_MESSAGE"),
+            qos: QoS::ExactlyOnce,
+            retain: true,
+        };
+        let opts = MqttOptions::new("test-id", "127.0.0.1:1883")
+            .unwrap()
+            .set_clean_session(true)
+            .set_keep_alive(50)
+            .set_last_will(lwt.clone())
+            .set_security_opts(UsernamePassword((String::from("USER"), String::from("PASS"))));
+        let mut mqtt = MqttState::new(opts);
+
+        assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
+        let pkt = mqtt.handle_outgoing_connect().unwrap();
+        assert_eq!(pkt, Connect {
+            protocol: Protocol::MQTT(4),
+            keep_alive: 50,
+            clean_session: true,
+            client_id: String::from("test-id"),
+            username: Some(String::from("USER")),
+            password: Some(String::from("PASS")),
+            last_will: Some(lwt.clone())
+        });
+    }
+
 }

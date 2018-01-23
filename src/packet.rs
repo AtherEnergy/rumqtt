@@ -6,14 +6,15 @@ pub fn gen_connect_packet(client_id: String,
                           keep_alive: u16,
                           clean_session: bool,
                           username: Option<String>,
-                          password: Option<String>)
+                          password: Option<String>,
+                          last_will: Option<LastWill>)
                           -> Connect {
     Connect {
         protocol: Protocol::MQTT(4),
         keep_alive: keep_alive,
         client_id: client_id,
         clean_session: clean_session,
-        last_will: None,
+        last_will: last_will,
         username: username,
         password: password,
     }
