@@ -1,4 +1,5 @@
 use error::ClientError;
+use mqtt3::LastWill;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ReconnectOptions {
@@ -45,6 +46,8 @@ pub struct MqttOptions {
     pub security: SecurityOptions,
     /// maximum packet size
     pub max_packet_size: usize,
+    /// last will and testament
+    pub last_will: Option<LastWill>
 }
 
 impl MqttOptions {
@@ -64,6 +67,7 @@ impl MqttOptions {
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
+            last_will: None,
         })
     }
 
@@ -114,6 +118,18 @@ impl MqttOptions {
     /// Supports username-password auth, tls client cert auth, gcloud iotcore jwt auth
     pub fn set_security_opts(mut self, opts: SecurityOptions) -> Self {
         self.security = opts;
+        self
+    }
+
+    /// Set last will and testament
+    pub fn set_last_will(mut self, last_will: LastWill) -> Self {
+        self.last_will = Some(last_will);
+        self
+    }
+
+    /// Clear last will and testament
+    pub fn clear_last_will(mut self) -> Self {
+        self.last_will  = None;
         self
     }
 }
