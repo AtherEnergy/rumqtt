@@ -167,11 +167,7 @@ impl MqttState {
         if self.opts.clean_session {
             None
         } else {
-            if self.outgoing_pub.is_empty() {
-                None
-            } else {
-                Some(self.outgoing_pub.clone())
-            }
+            Some(self.outgoing_pub.clone())
         }
     }
 

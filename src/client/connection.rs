@@ -7,7 +7,7 @@ use std::path::Path;
 use std::io::{self, ErrorKind};
 
 use futures::{future, Future, Sink};
-use futures::stream::{self, Stream, SplitStream};
+use futures::stream::{Stream, SplitStream};
 use futures::sync::mpsc::Receiver;
 use futures::unsync;
 use futures::unsync::mpsc::UnboundedSender;
@@ -186,16 +186,14 @@ impl Connection {
         let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
         match last_session_publishes {
             Some(publishes) => {
-                let publishes = stream::iter_ok::<_, io::Error>(publishes);
-                let publish_forward_future = publishes.and_then(|publish| {
-                    let publish = Packet::Publish(publish);
-                    Ok(publish)
-                }).forward(framed);
-
-                let (_, framed) = self.reactor.run(publish_forward_future)?;
-                Ok(framed)
+                let mut last_framed = framed;
+                for publish in publishes {
+                    let send = last_framed.send(Packet::Publish(publish));
+                    last_framed = self.reactor.run(send)?;
+                }
+                Ok(last_framed)
             }
-            None => Ok(framed)
+            None => Ok(framed),
         }
     }
 
