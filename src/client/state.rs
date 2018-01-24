@@ -660,30 +660,6 @@ mod test {
     }
 
     #[test]
-    fn connack_handle_should_not_return_list_of_incomplete_messages_to_be_sent_in_persistent_session_if_there_are_no_pending_messages() {
-        let mqtt_opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
-        let mut mqtt = MqttState::new(mqtt_opts);
-        mqtt.opts.clean_session = false;
-
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
-
-        let connack = Connack {
-            session_present: false,
-            code: ConnectReturnCode::Accepted
-        };
-
-        mqtt.handle_incoming_connack(connack).unwrap();
-        assert_eq!(None, mqtt.handle_reconnection());
-    }
-    
-    #[test]
     fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
         let mqtt_opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
         let mut mqtt = MqttState::new(mqtt_opts);
