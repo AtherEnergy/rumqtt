@@ -29,7 +29,7 @@ use codec::MqttCodec;
 use crossbeam_channel;
 
 // DEVELOPER NOTES: Don't use `wait` in eventloop thread even if you
-//                  are ok with blocking code. It might cause deadlock
+//                  are ok with blocking code. It might cause deadlocks
 // https://github.com/tokio-rs/tokio-core/issues/182 
 
 pub struct Connection {
@@ -58,19 +58,23 @@ impl Connection {
         let framed = self.mqtt_connect()?;
         info!("mqtt connection successful");
 
-        let framed = self.republish_unacked(framed)?;
-
         let (network_reply_tx, mut network_reply_rx) = unsync::mpsc::unbounded::<Packet>();
         let (sender, receiver) = framed.split();
         let mqtt_recv = self.mqtt_network_recv_future(receiver, network_reply_tx.clone());
         let ping_timer = self.ping_timer_future(network_reply_tx.clone());
 
+        let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
+        let mut last_session_publishes = stream::iter_ok::<_, ()>(last_session_publishes);
+        let last_session_publishes = last_session_publishes.by_ref();
+
         // receive incoming user request and write to network
         let mqtt_state = self.mqtt_state.clone();
+
         let commands_rx = self.commands_rx.by_ref();
         let network_reply_rx = network_reply_rx.by_ref();
 
-        let mqtt_send = commands_rx
+        let mqtt_send = last_session_publishes
+                        .chain(commands_rx)
                         .select(network_reply_rx)
                         .map_err(|e| {
                             error!("Receving outgoing message failed. Error = {:?}", e);
@@ -89,10 +93,7 @@ impl Connection {
                             }
                         })
                         .forward(sender)
-                        .map(|_| {
-                            mqtt_state.borrow_mut().reset_last_control_at(); 
-                            ()
-                        })
+                        .map(|_| { mqtt_state.borrow_mut().reset_last_control_at();})
                         .or_else(|e| { error!("Network send failed. Error = {:?}", e); future::ok(())});
         
         // join mqtt send and ping timer. continues even if one of the stream ends
@@ -179,26 +180,6 @@ impl Connection {
         }
     }
 
-    pub fn republish_unacked(&mut self, framed: Framed<NetworkStream, MqttCodec>) -> Result<Framed<NetworkStream, MqttCodec>, ConnectError> {
-        // republish last session unacked packets
-        // NOTE: this will block eventloop until last session publishs are written to network
-        // TODO: verify for duplicates here
-        let last_session_publishes = self.mqtt_state.borrow_mut().handle_reconnection();
-        match last_session_publishes {
-            Some(publishes) => {
-                let publishes = stream::iter_ok::<_, io::Error>(publishes);
-                let publish_forward_future = publishes.and_then(|publish| {
-                    let publish = Packet::Publish(publish);
-                    Ok(publish)
-                }).forward(framed);
-
-                let (_, framed) = self.reactor.run(publish_forward_future)?;
-                Ok(framed)
-            }
-            None => Ok(framed)
-        }
-    }
-
     pub fn mqtt_connect(&mut self) -> Result<Framed<NetworkStream, MqttCodec>, ConnectError> {
         let stream = self.create_network_stream()?;
         let framed = stream.framed(MqttCodec);
@@ -261,11 +242,7 @@ impl Connection {
             tls_builder.set_private_key_file(key, SslFiletype::PEM)?;
         }
 
-        if should_verify_ca {
-            tls_builder.set_verify(SslVerifyMode::PEER);
-        } else {
-            tls_builder.set_verify(SslVerifyMode::NONE);
-        }
+        tls_builder.set_verify(SslVerifyMode::NONE);
 
         Ok(tls_builder.build())
     }

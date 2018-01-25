@@ -11,6 +11,7 @@ fn main() {
 
     let mqtt_opts = MqttOptions::new("pub-1", "localhost:1883").unwrap()
                                 .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10))
+                                .set_clean_session(false)
                                 .set_security_opts(SecurityOptions::None);
     
 

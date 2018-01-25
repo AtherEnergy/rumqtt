@@ -163,11 +163,11 @@ impl MqttState {
         }
     }
 
-    pub fn handle_reconnection(&mut self) -> Option<VecDeque<Publish>> {
+    pub fn handle_reconnection(&mut self) -> VecDeque<Packet> {
         if self.opts.clean_session {
-            None
+            VecDeque::new()
         } else {
-            Some(self.outgoing_pub.clone())
+            self.outgoing_pub.clone().into_iter().map(|publish| Packet::Publish(publish)).collect()
         }
     }
 
