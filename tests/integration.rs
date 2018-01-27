@@ -41,20 +41,4 @@ mod tests {
         // 3 for actual published messages
         assert_eq!(*counter.lock().unwrap(), 7);
     }
-
-    #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1:1883").unwrap()
-                                    .set_reconnect_opts(ReconnectOptions::Always(10))
-                                    .set_clean_session(true);
-    }
-
-    #[test]
-    #[should_panic]
-    fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1:1883").unwrap()
-                                    .set_reconnect_opts(ReconnectOptions::Always(10))
-                                    .set_clean_session(true);
-    }
 }

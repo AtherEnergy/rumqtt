@@ -455,7 +455,7 @@ mod test {
             retain: false,
             pid: None,
             topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![0; 101 * 1024]),
+            payload: Arc::new(vec![0; 257 * 1024]),
         };
 
         let publish_out = mqtt.handle_outgoing_publish(publish);
@@ -656,7 +656,8 @@ mod test {
         };
 
         mqtt.handle_incoming_connack(connack).unwrap();
-        assert_eq!(None, mqtt.handle_reconnection());
+        let pubs = mqtt.handle_reconnection();
+        assert_eq!(0, pubs.len());
     }
 
     #[test]
@@ -683,13 +684,8 @@ mod test {
             code: ConnectReturnCode::Accepted
         };
 
-        if let Ok(_) = mqtt.handle_incoming_connack(connack) {
-            if let Some(v) = mqtt.handle_reconnection() {
-                assert_eq!(v.len(), 3);
-            } else {
-                panic!("Should return publishes to be retransmitted");
-            }
-        }
+        let pubs = mqtt.handle_reconnection();
+        assert_eq!(3, pubs.len());
     }
 
     #[test]
