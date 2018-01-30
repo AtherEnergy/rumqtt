@@ -8,7 +8,7 @@ mod tests {
     use std::time::Duration;
     use std::sync::{Arc, Mutex};
 
-    use self::rumqtt::{MqttOptions, ReconnectOptions, MqttClient, QoS, Packet};
+    use self::rumqtt::{MqttOptions, ReconnectOptions, MqttClient, QoS, Packet, LastWill};
 
     #[test]
     fn basic_qos0_publish() {
@@ -74,11 +74,31 @@ mod tests {
 
     #[test]
     fn connect_with_will() {
+        let mqtt_opts = MqttOptions::new("c1", "127.0.0.1:1883").unwrap();
+        let (mut client1, receiver1) = MqttClient::start(mqtt_opts);
+        client1.subscribe(vec![("iam/dead", QoS::AtLeastOnce)]).unwrap();
+
         {
-            let mqtt_opts = MqttOptions::new("qos1publish", "127.0.0.1:1883").unwrap()
-                                    .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10));
+            let will = LastWill{topic: "iam/dead".to_owned(), message: "dead".to_string(), qos: QoS::AtLeastOnce, retain: false};
+            let mqtt_opts = MqttOptions::new("willpublish", "127.0.0.1:1883").unwrap()
+                                    .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10))
+                                    .set_last_will(will);
 
             let (mut client, receiver) = MqttClient::start(mqtt_opts);
+            thread::sleep(Duration::new(2, 0));
+        }
+
+        for message in receiver1 {
+            match message {
+                Packet::Publish(publish) => {
+                    if publish.topic_name != "iam/dead" {
+                        panic!("Didn't receive will message");
+                    } else {
+                        break
+                    }
+                }
+                _ => panic!("Didn't receive publish message")
+            }
         }
     }
 }

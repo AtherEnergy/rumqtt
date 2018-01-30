@@ -16,20 +16,20 @@ fn main() {
     
 
     {
-    let (mut client, receiver) = MqttClient::start(mqtt_opts);
-
-    thread::spawn(||{
-        for i in receiver {
-            println!("{:?}", i);
+        let (mut client, receiver) = MqttClient::start(mqtt_opts);
+    
+        thread::spawn(||{
+            for i in receiver {
+                println!("{:?}", i);
+            }
+        });
+    
+        for i in 0..10 {
+            if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, vec![1, 2, 3]) {
+                println!("Publish error = {:?}", e);
+            }
+            thread::sleep(Duration::new(1, 0));
         }
-    });
-
-    for i in 0..10 {
-        if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, vec![1, 2, 3]) {
-            println!("Publish error = {:?}", e);
-        }
-        thread::sleep(Duration::new(1, 0));
-    }
     }
 
     thread::sleep(Duration::new(60, 0));
