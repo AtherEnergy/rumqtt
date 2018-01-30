@@ -2,6 +2,8 @@ use futures::sync::mpsc::SendError;
 use mqtt3::Packet;
 use std::io::Error as IoError;
 use openssl;
+use client::Command;
+
 #[cfg(feature = "jwt")]
 use jwt;
 
@@ -12,7 +14,7 @@ pub enum ClientError {
     #[fail(display = "Packet size limit has crossed maximum")]
     PacketSizeLimitExceeded,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<Packet>),
+    MpscSend(SendError<Command>),
     #[fail(display = "Client id should not be empty")]
     EmptyClientId
 }
@@ -51,7 +53,11 @@ pub enum ConnectError {
     #[fail(display = "Jwt creation failed")]
     Jwt,
     #[fail(display = "Empty dns list")]
-    DnsListEmpty
+    DnsListEmpty,
+    #[fail(display = "Received halt command")]
+    Halt,
+    #[fail(display = "Outgoing receive failed")]
+    Outgoing,
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -76,8 +82,8 @@ pub enum SubscribeError {
     InvalidState
 }
 
-impl From<SendError<Packet>> for ClientError {
-    fn from(err: SendError<Packet>) -> ClientError {
+impl From<SendError<Command>> for ClientError {
+    fn from(err: SendError<Command>) -> ClientError {
         ClientError::MpscSend(err)
     }
 }

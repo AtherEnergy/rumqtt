@@ -15,14 +15,20 @@ use MqttOptions;
 use ReconnectOptions;
 use packet;
 
-use error::ClientError;
+use error::{ConnectError, ClientError};
 use crossbeam_channel::{bounded, self};
 
 /// Interface on which clients can receive messages
 pub type Notification<T> = crossbeam_channel::Receiver<T>;
 
+#[derive(Clone)]
+pub enum Command {
+    Mqtt(Packet),
+    Halt,
+}
+
 pub struct MqttClient {
-    nw_request_tx: Sender<Packet>,
+    nw_request_tx: Sender<Command>,
     max_packet_size: usize,
 }
 
@@ -44,6 +50,11 @@ impl MqttClient {
 
             'reconnect: loop {
                 if let Err(e) = connection.start() {
+                    match e {
+                        ConnectError::Halt => {error!("Halting connection thread"); break 'reconnect},
+                        _ => (),
+                    }
+
                     error!("Network connection failed. Error = {:?}", e);
                     match reconnect_config {
                         ReconnectOptions::Never => break 'reconnect,
@@ -74,8 +85,9 @@ impl MqttClient {
 
         let tx = &mut self.nw_request_tx;
         let publish = packet::gen_publish_packet(topic.into(), qos, None, false, false, payload);
+        let packet = Packet::Publish(publish);
 
-        tx.send(Packet::Publish(publish)).wait()?;
+        tx.send(Command::Mqtt(packet)).wait()?;
 
         Ok(())
     }
@@ -87,14 +99,22 @@ impl MqttClient {
             return Err(ClientError::ZeroSubscriptions);
         }
 
-        let sub_topics: Vec<_> = topics.into_iter().map(
-            |t| SubscribeTopic{topic_path: t.0.into(), qos: t.1}
-        ).collect();
+        let sub_topics: Vec<_> = topics.into_iter().map(|t| {
+            SubscribeTopic{topic_path: t.0.into(), qos: t.1}
+        }).collect();
 
         let tx = &mut self.nw_request_tx;
         let subscribe = Subscribe {pid: PacketIdentifier::zero(), topics: sub_topics};
-        
-        tx.send(Packet::Subscribe(subscribe)).wait()?;
+        let packet = Packet::Subscribe(subscribe);
+
+        tx.send(Command::Mqtt(packet)).wait()?;
         Ok(())
+    }
+}
+
+impl Drop for MqttClient {
+    fn drop(&mut self) {
+        let tx = &mut self.nw_request_tx;
+        let _ = tx.send(Command::Halt).wait();
     }
 }

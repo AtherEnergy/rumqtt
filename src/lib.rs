@@ -25,5 +25,5 @@ mod error;
 // expose to other crates
 pub use mqttopts::{ConnectionMethod, MqttOptions, ReconnectOptions, SecurityOptions};
 pub use client::MqttClient;
-pub use mqtt3::QoS;
+pub use mqtt3::{QoS, Packet};
 pub use client::Notification;
