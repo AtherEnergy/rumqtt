@@ -11,7 +11,8 @@ use futures::stream::{self, Stream, SplitStream};
 use futures::sync::mpsc::Receiver;
 use futures::unsync;
 use futures::unsync::mpsc::UnboundedSender;
-use tokio_core::reactor::{Core, Interval};
+use futures::future::Either;
+use tokio_core::reactor::{Core, Interval, Timeout};
 use tokio_core::net::TcpStream;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
@@ -25,7 +26,7 @@ use error::ConnectError;
 use mqttopts::{MqttOptions, ConnectionMethod};
 use client::state::MqttState;
 use client::network::NetworkStream;
-use client::Command;
+use client::{Command, ConnectCount};
 use codec::MqttCodec;
 use crossbeam_channel;
 
@@ -33,10 +34,12 @@ use crossbeam_channel;
 //                  are ok with blocking code. It might cause deadlocks
 // https://github.com/tokio-rs/tokio-core/issues/182
 
+
 pub struct Connection {
     commands_rx: Receiver<Command>,
     notifier_tx: crossbeam_channel::Sender<Packet>,
     mqtt_state: Rc<RefCell<MqttState>>,
+    connection_count: ConnectCount,
     opts: MqttOptions,
     reactor: Core,
 }
@@ -47,6 +50,7 @@ impl Connection {
             commands_rx: commands_rx,
             notifier_tx: notifier_tx,
             mqtt_state: Rc::new(RefCell::new(MqttState::new(opts.clone()))),
+            connection_count: ConnectCount::InitialConnect,
             opts: opts,
             reactor: Core::new().expect("Unable to create new reactor")
         }
@@ -55,9 +59,14 @@ impl Connection {
     // TODO: This method is too big. Passing rx as reference to a method to create
     //       network sender future is not ergonomic. Check other ways of reusing rx
     //       in the loop and creating a sender future
-    pub fn start(&mut self) -> Result<(), ConnectError> {
-        let framed = self.mqtt_connect()?;
+    pub fn start(&mut self) -> Result<(), (ConnectError, ConnectCount)> {
+        let framed = match self.mqtt_connect() {
+            Ok(framed) => framed,
+            Err(e) => return Err((e, self.connection_count))
+        };
+        
         info!("mqtt connection successful");
+        self.connection_count = ConnectCount::ConnectedBefore(1);
 
         let (network_reply_tx, mut network_reply_rx) = unsync::mpsc::unbounded::<Command>();
         let (sender, receiver) = framed.split();
@@ -114,7 +123,7 @@ impl Connection {
             Err((e, _next)) => {
                 mqtt_state.borrow_mut().handle_disconnect();
                 error!("Reactor stopped. e = {:?}", e);
-                Err(e)
+                Err((e, self.connection_count))
             }
         }
     }
@@ -182,11 +191,30 @@ impl Connection {
         let stream = self.create_network_stream()?;
         let framed = stream.framed(MqttCodec);
         let connect = self.mqtt_state.borrow_mut().handle_outgoing_connect()?;
-
+        let connect_timeout = Timeout::new(Duration::new(30, 0), &self.reactor.handle())?;
+        
         let framed = framed.send(Packet::Connect(connect)).and_then(|framed| {
             framed.into_future().and_then(|(res, stream)| Ok((res, stream))).map_err(|(err, _stream)| err)
         });
-        let (packet, framed) = self.reactor.run(framed)?;
+
+        // this allows configuring connection timeout if the connection takes too long
+        // and most importantly used to prevent blocking indefinitely while waiting for
+        // connack packets. 
+        // If a tcp halfopen connection happens right after tcp connection is
+        // established and mqtt connect packet is sent, timeout prevents indefinite
+        // waiting for connack packet
+        let framed_with_timeout = framed.select2(connect_timeout);
+        let framed_with_timeout = framed_with_timeout.map_err(|err| { 
+            match err {
+                Either::A((e, _)) => ConnectError::Io(e),
+                Either::B((e, _)) => ConnectError::Io(e)
+            }
+        });
+
+        let ((packet, framed), _timeout) = match self.reactor.run(framed_with_timeout)? {
+            Either::A(f) => f,
+            Either::B(_t) => return Err(ConnectError::Timeout)
+        };
         
         match packet {
             Some(Packet::Connack(connack)) => {
@@ -252,7 +280,7 @@ impl Connection {
                          .next()
                          .unwrap_or_default();
         let addr = addr.to_socket_addrs()?.next();
-        debug!("Address resolved to {:?}", addr);
+        info!("Address resolved to {:?}", addr);
 
         match addr {
             Some(a) => Ok((a, domain)),
