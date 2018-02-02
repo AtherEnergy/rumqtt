@@ -24,6 +24,7 @@ func (toxic *Toxic) Clean() {
 	toxic.proxy.RemoveToxic("bandwidth_up")
 	toxic.proxy.RemoveToxic("bandwidth_down")
 	toxic.proxy.RemoveToxic("timeout_up")
+	log.Debugln("Done cleaning ......")
 }
 
 func (toxic *Toxic) LowBandwidth() {
@@ -36,6 +37,18 @@ func (toxic *Toxic) LowBandwidth() {
 
 	toxic.proxy.AddToxic("bandwidth_down", "bandwidth", "downstream", 1.0, toxiproxy.Attributes{
 		"rate": 25,
+	})
+}
+
+func (toxic *Toxic) ZeroUpBandwidth() {
+	toxic.Clean()
+	log.Debugln("Applying Zero upstream bandwidth Toxic")
+
+	toxic.proxy.AddToxic("bandwidth_up", "bandwidth", "upstream", 1.0, toxiproxy.Attributes{
+		"rate": 0,
+	})
+	toxic.proxy.AddToxic("bandwidth_down", "bandwidth", "downstream", 1.0, toxiproxy.Attributes{
+		"rate": 250,
 	})
 }
 
@@ -65,29 +78,39 @@ func main() {
 	proxy, err := client.CreateProxy("toxicbroker", "127.0.0.1:9883", "127.0.0.1:1883")
 
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln("Couldn't create proxy client", err)
 	}
 
 	toxic := Toxic{client, proxy}
 
-	clean := time.After(1 * time.Second)
+	var clean1 = time.After(1 * time.Second)
+	var clean2 <-chan time.Time
 	var lowbandwidth <-chan time.Time
+	var zeroupbandwidth <-chan time.Time
 	var timeout <-chan time.Time
 	var halfopen <-chan time.Time
 
+	var toxicTime = 2 * time.Minute
+
 	for {
 		select {
-		case <-clean:
-			lowbandwidth = time.After(1 * time.Minute)
+		case <-clean1:
+			lowbandwidth = time.After(toxicTime)
 			toxic.Clean()
 		case <-lowbandwidth:
-			halfopen = time.After(1 * time.Minute)
+			zeroupbandwidth = time.After(toxicTime)
 			toxic.LowBandwidth()
+		case <-zeroupbandwidth:
+			clean2 = time.After(toxicTime)
+			toxic.ZeroUpBandwidth()
+		case <-clean2:
+			halfopen = time.After(toxicTime)
+			toxic.Clean()
 		case <-halfopen:
-			timeout = time.After(1 * time.Minute)
+			timeout = time.After(toxicTime)
 			toxic.HalfOpenConnection()
 		case <-timeout:
-			clean = time.After(1 * time.Minute)
+			clean1 = time.After(toxicTime)
 			toxic.Disconnect()
 		}
 	}
