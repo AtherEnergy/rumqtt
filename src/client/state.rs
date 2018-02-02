@@ -35,7 +35,7 @@ pub struct MqttState {
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
     await_pingresp: bool,
-    last_flush: Instant,
+    pub last_flush: Instant,
     last_pkid: PacketIdentifier,
 
     // For QoS 1. Stores outgoing publishes
@@ -232,16 +232,6 @@ impl MqttState {
         self.last_flush = Instant::now();
     }
 
-    // check if pinging is required based on last flush time
-    pub fn is_ping_required(&self) -> bool {
-        if let Some(keep_alive) = self.opts.keep_alive  {
-            let keep_alive = Duration::new(f32::ceil(0.9 * f32::from(keep_alive)) as u64, 0);
-            self.last_flush.elapsed() > keep_alive
-        } else {
-            false
-        }
-    }
-
     // check when the last control packet/pingreq packet
     // is received and return the status which tells if
     // keep alive time has exceeded
@@ -318,6 +308,7 @@ impl MqttState {
 
     fn clear_session_info(&mut self) {
         self.outgoing_pub.clear();
+        self.last_flush = Instant::now();
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation

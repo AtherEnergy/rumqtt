@@ -166,15 +166,10 @@ impl Connection {
         if let Some(keep_alive) = self.opts.keep_alive {
             let interval = Interval::new(Duration::new(u64::from(keep_alive), 0), &handle).unwrap();
             let timer_future = interval.for_each(move |_t| {
-                // debug!("Ping timer fired. last flush = {:?}", mqtt_state.borrow_mut().last_flush);
-                if mqtt_state.borrow().is_ping_required() {
-                    debug!("Ping timer fire");
-                    let network_reply_tx = network_reply_tx.clone();
-                    let s = network_reply_tx.send(Command::Mqtt(Packet::Pingreq)).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
-                    Box::new(s) as Box<Future<Item=(), Error=io::Error>>
-                } else {
-                    Box::new(future::ok(()))
-                }
+                debug!("Ping timer fired. last flush = {:?}", mqtt_state.borrow_mut().last_flush);
+                let network_reply_tx = network_reply_tx.clone();
+                let s = network_reply_tx.send(Command::Mqtt(Packet::Pingreq)).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                Box::new(s) as Box<Future<Item=(), Error=io::Error>>
             });
 
             Box::new(timer_future)

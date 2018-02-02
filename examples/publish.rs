@@ -9,7 +9,7 @@ use rumqtt::{MqttOptions, ReconnectOptions, SecurityOptions, MqttClient, QoS};
 fn main() {
     pretty_env_logger::init().unwrap();
 
-    let mqtt_opts = MqttOptions::new("pub-1", "localhost:1883").unwrap()
+    let mqtt_opts = MqttOptions::new("pub-1", "127.0.0.1:9883").unwrap()
                                 .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10))
                                 .set_clean_session(false)
                                 .set_security_opts(SecurityOptions::None);
@@ -24,7 +24,7 @@ fn main() {
             }
         });
     
-        for i in 0..10 {
+        for i in 0..1000 {
             if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, vec![1, 2, 3]) {
                 println!("Publish error = {:?}", e);
             }
