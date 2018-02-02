@@ -1,5 +1,4 @@
 use futures::sync::mpsc::SendError;
-use mqtt3::Packet;
 use std::io::Error as IoError;
 use openssl;
 use client::Command;
@@ -58,6 +57,8 @@ pub enum ConnectError {
     Halt,
     #[fail(display = "Outgoing receive failed")]
     Outgoing,
+    #[fail(display = "Counldn't receive connack in time")]
+    Timeout,
 }
 
 #[derive(Debug, Fail, PartialEq)]

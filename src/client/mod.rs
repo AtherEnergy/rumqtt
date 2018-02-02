@@ -21,6 +21,12 @@ use crossbeam_channel::{bounded, self};
 /// Interface on which clients can receive messages
 pub type Notification<T> = crossbeam_channel::Receiver<T>;
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ConnectCount {
+    InitialConnect,
+    ConnectedBefore(u32)
+}
+
 #[derive(Clone)]
 pub enum Command {
     Mqtt(Packet),
@@ -46,25 +52,23 @@ impl MqttClient {
 
         thread::spawn( move || {
             let mut connection = connection::Connection::new(opts, commands_rx, notifier_tx);
-            let mut initial_connect = true;
 
             'reconnect: loop {
-                if let Err(e) = connection.start() {
+                if let Err((e, connection_count)) = connection.start() {
                     match e {
                         ConnectError::Halt => {error!("Halting connection thread"); break 'reconnect},
                         _ => (),
                     }
 
-                    error!("Network connection failed. Error = {:?}", e);
+                    error!("Network connection failed. Error = {:?}, Connection count = {:?}", e, connection_count);
                     match reconnect_config {
                         ReconnectOptions::Never => break 'reconnect,
-                        ReconnectOptions::AfterFirstSuccess(d) if !initial_connect => sleep_duration = Duration::new(u64::from(d), 0),
+                        ReconnectOptions::AfterFirstSuccess(d) if connection_count != ConnectCount::InitialConnect => sleep_duration = Duration::new(u64::from(d), 0),
                         ReconnectOptions::AfterFirstSuccess(_) => break 'reconnect,
                         ReconnectOptions::Always(d) =>  sleep_duration = Duration::new(u64::from(d), 0),
                     }
                 }
 
-                initial_connect = false;
                 info!("Will sleep for {:?} seconds before reconnecting", sleep_duration);
                 thread::sleep(sleep_duration);
             };
