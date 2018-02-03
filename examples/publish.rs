@@ -1,5 +1,8 @@
 extern crate rumqtt;
 extern crate pretty_env_logger;
+extern crate rand;
+
+use rand::{thread_rng, Rng};
 
 use std::thread;
 use std::time::Duration;
@@ -24,12 +27,20 @@ fn main() {
             }
         });
     
-        for i in 0..1000 {
-            if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, vec![1, 2, 3]) {
+        for i in 0..20 {
+            // create payload of size 0-100K bytes
+            let x: usize = thread_rng().gen_range(0, 256 * 1024);
+            let mut payload: Vec<usize> = (0..x).collect();
+            let mut payload: Vec<u8> = payload.into_iter().map(|v: usize| (v % 255) as u8).collect();
+            thread_rng().shuffle(&mut payload);
+
+            if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, payload) {
                 println!("Publish error = {:?}", e);
             }
             thread::sleep(Duration::new(1, 0));
         }
+
+        thread::sleep(Duration::new(60, 0));
     }
 
     thread::sleep(Duration::new(60, 0));

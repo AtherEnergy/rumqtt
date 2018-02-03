@@ -60,7 +60,7 @@ impl MqttOptions {
         }
         Ok(MqttOptions {
             broker_addr: addr.into(),
-            keep_alive: Some(10),
+            keep_alive: Some(30),
             clean_session: true,
             client_id: id.into(),
             connection_method: ConnectionMethod::Tcp,
