@@ -120,7 +120,7 @@ impl MqttState {
                 let publish = Some(Packet::Publish(publish));
                 Ok((publish, ack))
             }
-            Packet::Suback(suback) => Ok((None, Some(Packet::Suback(suback)))),
+            Packet::Suback(suback) => Ok((Some(Packet::Suback(suback)), None)),
             _ => unimplemented!()
         }
     }

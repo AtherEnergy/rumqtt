@@ -1,5 +1,5 @@
 extern crate rumqtt;
-extern crate loggerv;
+extern crate pretty_env_logger;
 
 use std::thread;
 use std::time::Duration;
@@ -7,7 +7,7 @@ use std::time::Duration;
 use rumqtt::{MqttOptions, ReconnectOptions, MqttClient, QoS};
 
 fn main() {
-    loggerv::init_with_verbosity(1).unwrap();
+    pretty_env_logger::init().unwrap();
     let mqtt_opts = MqttOptions::new("rumqtt-core", "test.mosquitto.org:1883").unwrap()
 
                                 .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10));
