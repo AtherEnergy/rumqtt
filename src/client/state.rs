@@ -35,7 +35,8 @@ pub struct MqttState {
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
     await_pingresp: bool,
-    pub last_flush: Instant,
+    pub last_out_control_time: Instant,
+    pub last_in_control_time: Instant,
     last_pkid: PacketIdentifier,
 
     // For QoS 1. Stores outgoing publishes
@@ -61,7 +62,8 @@ impl MqttState {
             opts: opts,
             connection_status: MqttConnectionStatus::Disconnected,
             await_pingresp: false,
-            last_flush: Instant::now(),
+            last_out_control_time: Instant::now(),
+            last_in_control_time: Instant::now(),
             last_pkid: PacketIdentifier(0),
             outgoing_pub: VecDeque::new(),
             // subscriptions: VecDeque::new(),
@@ -69,6 +71,8 @@ impl MqttState {
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, failure::Error> {
+        self.update_last_out_control_time();
+
         match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
@@ -100,7 +104,8 @@ impl MqttState {
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
     pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Reply>), failure::Error> {        
-        
+        self.update_last_in_control_time();
+
         match packet {
             Packet::Connack(connack) => {
                     self.handle_incoming_connack(connack)?;
@@ -129,9 +134,9 @@ impl MqttState {
         let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
             keep_alive
         } else {
-            // rumqtt sets keep alive time to 3 minutes if user sets it to none.
+            // rumqtt sets keep alive time to 2 minutes if user sets it to none.
             // (get consensus)
-            180
+            Duration::new(120, 0)
         };
 
         self.opts.keep_alive = Some(keep_alive);
@@ -197,7 +202,6 @@ impl MqttState {
         };
 
         if self.connection_status == MqttConnectionStatus::Connected {
-            self.reset_last_control_at();
             Ok(publish)
         } else {
             Err(PublishError::InvalidState)
@@ -227,9 +231,27 @@ impl MqttState {
         }
     }
 
-    // reset the last control packet received time
-    pub fn reset_last_control_at(&mut self) {
-        self.last_flush = Instant::now();
+    // reset the last control packet sent time
+    pub fn update_last_out_control_time(&mut self) {
+        self.last_out_control_time = Instant::now();
+    }
+
+    // reset the last control packet sent time
+    pub fn update_last_in_control_time(&mut self) {
+        self.last_in_control_time = Instant::now();
+    }
+
+    // check if pinging is required based on last flush time
+    pub fn is_ping_required(&self) -> bool {
+        if let Some(keep_alive) = self.opts.keep_alive  {
+            let out_elapsed = self.last_out_control_time.elapsed();
+            let in_elapsed = self.last_in_control_time.elapsed();
+            
+            debug!("Last outgoing before {:?} seconds. Last incoming packet before {:?} seconds", out_elapsed.as_secs(), in_elapsed.as_secs());
+            out_elapsed >= keep_alive || in_elapsed >= keep_alive
+        } else {
+            false
+        }
     }
 
     // check when the last control packet/pingreq packet
@@ -237,13 +259,13 @@ impl MqttState {
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
     pub fn handle_outgoing_ping(&mut self) -> Result<(), PingError> {
-        let keep_alive = self.opts.keep_alive.expect("No keep alive");
+        // let keep_alive = self.opts.keep_alive.expect("No keep alive");
 
-        let elapsed = self.last_flush.elapsed();
-        if elapsed >= Duration::new(u64::from(keep_alive + 1), 0) {
-            error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error", elapsed, keep_alive);
-            return Err(PingError::Timeout);
-        }
+        // let elapsed = self.last_out_control_time.elapsed();
+        // if elapsed >= keep_alive {
+        //     error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error", elapsed.as_secs(), keep_alive);
+        //     return Err(PingError::Timeout);
+        // }
         // @ Prevents half open connections. Tcp writes will buffer up
         // with out throwing any error (till a timeout) when internet
         // is down. Eventhough broker closes the socket after timeout,
@@ -260,7 +282,6 @@ impl MqttState {
         }
 
         if self.connection_status == MqttConnectionStatus::Connected {
-            self.last_flush = Instant::now();
             self.await_pingresp = true;
             Ok(())
         } else {
@@ -277,7 +298,6 @@ impl MqttState {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
-            self.last_flush = Instant::now();
             subscription.pid = pkid;
 
             Ok(subscription)
@@ -308,7 +328,8 @@ impl MqttState {
 
     fn clear_session_info(&mut self) {
         self.outgoing_pub.clear();
-        self.last_flush = Instant::now();
+        self.last_out_control_time = Instant::now();
+        self.last_in_control_time = Instant::now();
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation

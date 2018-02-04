@@ -1,6 +1,8 @@
 use error::ClientError;
 use mqtt3::LastWill;
 
+use std::time::Duration;
+
 #[derive(Copy, Clone, Debug)]
 pub enum ReconnectOptions {
     Never,
@@ -33,7 +35,7 @@ pub struct MqttOptions {
     /// broker address that you want to connect to
     pub broker_addr: String,
     /// keep alive time to send pingreq to broker when the connection is idle
-    pub keep_alive: Option<u16>,
+    pub keep_alive: Option<Duration>,
     /// clean (or) persistent session 
     pub clean_session: bool,
     /// client identifier
@@ -60,7 +62,7 @@ impl MqttOptions {
         }
         Ok(MqttOptions {
             broker_addr: addr.into(),
-            keep_alive: Some(30),
+            keep_alive: Some(Duration::new(30, 0)),
             clean_session: true,
             client_id: id.into(),
             connection_method: ConnectionMethod::Tcp,
@@ -78,7 +80,7 @@ impl MqttOptions {
             panic!("Keep alives should be greater than 5 secs");
         }
 
-        self.keep_alive = Some(secs);
+        self.keep_alive = Some(Duration::new(secs as u64, 0));
         self
     }
 

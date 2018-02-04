@@ -106,7 +106,7 @@ impl Connection {
                             }
                         })
                         .forward(sender)
-                        .map(|_| { mqtt_state.borrow_mut().reset_last_control_at();});
+                        .map(|_p| error!("Sender done !!"));
         
         // join mqtt send and ping timer. continues even if one of the stream ends
         let mqtt_send_and_ping = ping_timer.map_err(|e| ConnectError::Io(e)).join(mqtt_send).map(|_| ());
@@ -136,7 +136,7 @@ impl Connection {
     fn mqtt_network_recv_future(&self, receiver: SplitStream<Framed<NetworkStream, MqttCodec>>, network_reply_tx: UnboundedSender<Command>) -> Box<Future<Item=(), Error=io::Error>> {
         let mqtt_state = self.mqtt_state.clone();
         let notifier = self.notifier_tx.clone();
-        
+
         let receiver = receiver.for_each(move |packet| {
             debug!("Received packet. {:?}", packet_info(&packet));
             let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
@@ -173,12 +173,26 @@ impl Connection {
         let mqtt_state = self.mqtt_state.clone();
 
         if let Some(keep_alive) = self.opts.keep_alive {
-            let interval = Interval::new(Duration::new(u64::from(keep_alive), 0), &handle).unwrap();
+            // keep the interval time less than half that of keep alive so that
+            // interval logic gets a chance to ping before broker disconnects.
+            // If you use 'keep alive' as 'interval', if last publish is at 't' secs
+            // next ping will only happen at 2 * keepalive, with elapsed time since
+            // last publish = (2 * keepalive) - t. which is too late
+            let interval_time = if keep_alive > Duration::new(20, 0) {
+                Duration::new(10, 0)
+            } else {
+                keep_alive / 2
+            };
+
+            let interval = Interval::new(interval_time, &handle).unwrap();
             let timer_future = interval.for_each(move |_t| {
-                debug!("Ping timer fired. last flush = {:?}", mqtt_state.borrow_mut().last_flush);
-                let network_reply_tx = network_reply_tx.clone();
-                let s = network_reply_tx.send(Command::Mqtt(Packet::Pingreq)).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
-                Box::new(s) as Box<Future<Item=(), Error=io::Error>>
+                if mqtt_state.borrow().is_ping_required() {
+                    let network_reply_tx = network_reply_tx.clone();
+                    let s = network_reply_tx.send(Command::Mqtt(Packet::Pingreq)).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                    Box::new(s) as Box<Future<Item=(), Error=io::Error>>
+                } else {
+                    Box::new(future::ok(()))
+                }
             });
 
             Box::new(timer_future)

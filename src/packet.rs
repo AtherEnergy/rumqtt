@@ -1,9 +1,10 @@
 use mqtt3::*;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 pub fn gen_connect_packet(client_id: String,
-                          keep_alive: u16,
+                          keep_alive: Duration,
                           clean_session: bool,
                           username: Option<String>,
                           password: Option<String>,
@@ -11,7 +12,7 @@ pub fn gen_connect_packet(client_id: String,
                           -> Connect {
     Connect {
         protocol: Protocol::MQTT(4),
-        keep_alive: keep_alive,
+        keep_alive: keep_alive.as_secs() as u16,
         client_id: client_id,
         clean_session: clean_session,
         last_will: last_will,

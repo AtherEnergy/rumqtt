@@ -40,7 +40,7 @@ fn main() {
             thread::sleep(Duration::new(1, 0));
         }
 
-        thread::sleep(Duration::new(60, 0));
+        thread::sleep(Duration::new(360, 0));
     }
 
     thread::sleep(Duration::new(60, 0));

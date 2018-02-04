@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -21,7 +22,7 @@ func randSeq(n int) string {
 
 func main() {
 	const TOPIC = "mytopic/test"
-	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:9883").SetKeepAlive(10 * time.Second)
+	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:9883").SetKeepAlive(10 * time.Second) //.SetAutoReconnect(true)
 
 	client := mqtt.NewClient(opts)
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
@@ -33,7 +34,7 @@ func main() {
 
 	for i := 0; i < 1000; i++ {
 		if token := client.Publish(TOPIC, 1, false, randSeq(100)); token.Wait() && token.Error() != nil {
-			log.Fatal(token.Error())
+			fmt.Println(token.Error())
 		}
 
 		time.Sleep(1 * time.Second)
