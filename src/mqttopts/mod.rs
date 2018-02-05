@@ -53,7 +53,7 @@ pub struct MqttOptions {
 }
 
 impl MqttOptions {
-    pub fn new<S: Into<String>>(id: S, addr: S) -> Result<MqttOptions, ClientError> {
+    pub fn new<S: Into<String>, T: Into<String>>(id: S, addr: T) -> Result<MqttOptions, ClientError> {
         // TODO: Validate client id. Shouldn't be empty or start with spaces
         // TODO: Validate if addr is proper address type
         let id = id.into();
