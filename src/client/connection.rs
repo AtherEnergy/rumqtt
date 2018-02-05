@@ -178,10 +178,10 @@ impl Connection {
             // If you use 'keep alive' as 'interval', if last publish is at 't' secs
             // next ping will only happen at 2 * keepalive, with elapsed time since
             // last publish = (2 * keepalive) - t. which is too late
-            let interval_time = if keep_alive > Duration::new(20, 0) {
+            let interval_time = if keep_alive >= Duration::new(30, 0) {
                 Duration::new(10, 0)
             } else {
-                keep_alive / 2
+                keep_alive / 3
             };
 
             let interval = Interval::new(interval_time, &handle).unwrap();
