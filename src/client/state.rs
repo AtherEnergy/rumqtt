@@ -5,14 +5,12 @@ use std::path::Path;
 
 use failure;
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
-
+use client::{UserData, Notification, Reply};
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
 use packet;
 use MqttOptions;
 use SecurityOptions;
 
-type Notification = Packet;
-type Reply = Packet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -40,7 +38,7 @@ pub struct MqttState {
     last_pkid: PacketIdentifier,
 
     // For QoS 1. Stores outgoing publishes
-    outgoing_pub: VecDeque<Publish>,
+    outgoing_pub: VecDeque<(Publish, UserData)>,
     // clean_session=false will remember subscriptions only till lives.
     // Even so, if broker crashes, all its state will be lost (most brokers).
     // client should resubscribe it comes back up again or else the data will
@@ -70,12 +68,12 @@ impl MqttState {
         }
     }
 
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, failure::Error> {
+    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet, userdata: UserData) -> Result<Packet, failure::Error> {
         self.update_last_out_control_time();
 
         match packet {
             Packet::Publish(publish) => {
-                let publish = self.handle_outgoing_publish(publish)?;
+                let publish = self.handle_outgoing_publish(publish, userdata)?;
                 Ok(Packet::Publish(publish))
             },
             Packet::Pingreq => {
@@ -112,9 +110,19 @@ impl MqttState {
                     Ok((None, None))
             }
             Packet::Puback(ack) => {
-                // ignore unsolicited ack errors
-                let _ = self.handle_incoming_puback(ack);
-                Ok((Some(Packet::Puback(ack)), None))
+                //NOTE: handle unsolicited ack errors
+                let userdata = match self.handle_incoming_puback(ack) {
+                    Ok(ud) => ud,
+                    Err(e) => {
+                        error!("Puback handle error = {:?}", e);
+                        None
+                    }
+                };
+                
+                let ack = Packet::Puback(ack);
+                let notification = Some((ack, userdata));
+                let reply = None;
+                Ok((notification, reply))
             }
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
@@ -122,10 +130,13 @@ impl MqttState {
             }
             Packet::Publish(publish) => {
                 let ack = self.handle_incoming_publish(publish.clone());
-                let publish = Some(Packet::Publish(publish));
-                Ok((publish, ack))
+                let notification = Some((Packet::Publish(publish), None));
+                Ok((notification, ack))
             }
-            Packet::Suback(suback) => Ok((Some(Packet::Suback(suback)), None)),
+            Packet::Suback(suback) => {
+                let notification = Some((Packet::Suback(suback), None));
+                Ok((notification, None))
+            }
             _ => unimplemented!()
         }
     }
@@ -168,17 +179,18 @@ impl MqttState {
         }
     }
 
-    pub fn handle_reconnection(&mut self) -> VecDeque<Packet> {
+    pub fn handle_reconnection(&mut self) -> VecDeque<(Packet, UserData)> {
         if self.opts.clean_session {
             VecDeque::new()
         } else {
-            self.outgoing_pub.clone().into_iter().map(Packet::Publish).collect()
+            //TODO: Write unittest for checking state during reconnection
+            self.outgoing_pub.clone().into_iter().map(|(publish, userdata)| (Packet::Publish(publish),userdata)).collect()
         }
     }
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
-    pub fn handle_outgoing_publish(&mut self, mut publish: Publish) -> Result<Publish, PublishError> {
+    pub fn handle_outgoing_publish(&mut self, mut publish: Publish, userdata: UserData) -> Result<Publish, PublishError> {
         if publish.payload.len() > self.opts.max_packet_size {
             return Err(PublishError::PacketSizeLimitExceeded)
         }
@@ -195,7 +207,8 @@ impl MqttState {
                     publish
                 };
 
-                self.outgoing_pub.push_back(publish.clone());
+                let backup = (publish.clone(), userdata);
+                self.outgoing_pub.push_back(backup);
                 publish
             }
             _ => unimplemented!()
@@ -208,10 +221,10 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(), PubackError> {
-        if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
-            let _ = self.outgoing_pub.remove(index);
-            Ok(())
+    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<UserData, PubackError> {
+        if let Some(index) = self.outgoing_pub.iter().position(|x| x.0.pid == Some(pkid)) {
+            let (_publish, userdata) = self.outgoing_pub.remove(index).expect("Wrong index");
+            Ok(userdata)
         } else {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
             Err(PubackError::Unsolicited)

@@ -18,8 +18,9 @@ use packet;
 use error::{ConnectError, ClientError};
 use crossbeam_channel::{bounded, self};
 
-/// Interface on which clients can receive messages
-pub type Notification<T> = crossbeam_channel::Receiver<T>;
+pub type UserData = Option<String>;
+pub type Notification = (Packet, UserData);
+pub type Reply = Packet;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ConnectCount {
@@ -29,7 +30,7 @@ pub enum ConnectCount {
 
 #[derive(Clone)]
 pub enum Command {
-    Mqtt(Packet),
+    Mqtt((Packet, UserData)),
     Halt,
 }
 
@@ -42,7 +43,7 @@ impl MqttClient {
     /// Connects to the broker and starts an event loop in a new thread.
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
-    pub fn start(opts: MqttOptions) -> (Self, Notification<Packet>) {
+    pub fn start(opts: MqttOptions) -> (Self, crossbeam_channel::Receiver<Notification>) {
         let (commands_tx, commands_rx) = mpsc::channel(10);
         let (notifier_tx, notifier_rx) = bounded(50);
 
@@ -91,7 +92,8 @@ impl MqttClient {
         let publish = packet::gen_publish_packet(topic.into(), qos, None, false, false, payload);
         let packet = Packet::Publish(publish);
 
-        tx.send(Command::Mqtt(packet)).wait()?;
+        let s = (packet, None);
+        tx.send(Command::Mqtt(s)).wait()?;
 
         Ok(())
     }
@@ -111,7 +113,8 @@ impl MqttClient {
         let subscribe = Subscribe {pid: PacketIdentifier::zero(), topics: sub_topics};
         let packet = Packet::Subscribe(subscribe);
 
-        tx.send(Command::Mqtt(packet)).wait()?;
+        let s = (packet, None);
+        tx.send(Command::Mqtt(s)).wait()?;
         Ok(())
     }
 }

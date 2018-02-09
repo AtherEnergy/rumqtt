@@ -26,6 +26,7 @@ use error::ConnectError;
 use mqttopts::{MqttOptions, ConnectionMethod};
 use client::state::MqttState;
 use client::network::NetworkStream;
+use client::Notification;
 use client::{Command, ConnectCount};
 use codec::MqttCodec;
 use crossbeam_channel;
@@ -37,7 +38,7 @@ use crossbeam_channel;
 
 pub struct Connection {
     commands_rx: Receiver<Command>,
-    notifier_tx: crossbeam_channel::Sender<Packet>,
+    notifier_tx: crossbeam_channel::Sender<Notification>,
     mqtt_state: Rc<RefCell<MqttState>>,
     connection_count: ConnectCount,
     opts: MqttOptions,
@@ -45,7 +46,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(opts: MqttOptions, commands_rx: Receiver<Command>, notifier_tx: crossbeam_channel::Sender<Packet>) -> Self {
+    pub fn new(opts: MqttOptions, commands_rx: Receiver<Command>, notifier_tx: crossbeam_channel::Sender<Notification>) -> Self {
         Connection {
             commands_rx: commands_rx,
             notifier_tx: notifier_tx,
@@ -92,7 +93,7 @@ impl Connection {
                         })
                         .and_then(|msg| {
                             match msg {
-                                Command::Mqtt(packet) => match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet) {
+                                Command::Mqtt((packet, userdata)) => match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet, userdata) {
                                     Ok(packet) => {
                                         debug!("Sending packet. {}", packet_info(&packet));
                                         future::ok(packet)
@@ -157,7 +158,7 @@ impl Connection {
             // send reply back to network
             let network_reply_tx = network_reply_tx.clone();
             if let Some(reply) = reply {
-                let s = network_reply_tx.send(Command::Mqtt(reply)).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                let s = network_reply_tx.send(Command::Mqtt((reply, None))).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
                 Box::new(s) as Box<Future<Item=(), Error=io::Error>>
             } else {
                 Box::new(future::ok(()))
@@ -188,7 +189,7 @@ impl Connection {
             let timer_future = interval.for_each(move |_t| {
                 if mqtt_state.borrow().is_ping_required() {
                     let network_reply_tx = network_reply_tx.clone();
-                    let s = network_reply_tx.send(Command::Mqtt(Packet::Pingreq)).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
+                    let s = network_reply_tx.send(Command::Mqtt((Packet::Pingreq, None))).map(|_| ()).map_err(|_| io::Error::new(ErrorKind::Other, "Error receiving client msg"));
                     Box::new(s) as Box<Future<Item=(), Error=io::Error>>
                 } else {
                     Box::new(future::ok(()))
