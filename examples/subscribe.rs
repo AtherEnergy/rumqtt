@@ -14,7 +14,7 @@ fn main() {
 
     let (mut client, receiver) = MqttClient::start(mqtt_opts);
 
-    client.subscribe(vec![("hello/world", QoS::AtLeastOnce)]);
+    client.subscribe(vec![("hello/world", QoS::AtLeastOnce)]).unwrap();
 
     thread::spawn(move || {
         for msg in receiver {
@@ -22,8 +22,8 @@ fn main() {
         }
     });
 
-    for i in 0..100 {
-        client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]);
+    for _ in 0..100 {
+        client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]).unwrap();
         //thread::sleep(Duration::new(1, 0));
     }
 

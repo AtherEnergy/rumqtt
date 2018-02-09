@@ -27,7 +27,7 @@ fn main() {
             }
         });
     
-        for i in 0..20 {
+        for _ in 0..20 {
             // create payload of size 0-100K bytes
             let x: usize = thread_rng().gen_range(0, 256 * 1024);
             let mut payload: Vec<usize> = (0..x).collect();

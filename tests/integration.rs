@@ -24,7 +24,7 @@ mod tests {
         
         // incoming packets
         thread::spawn(move || {
-            for packet in receiver {
+            for (packet, _) in receiver {
                 match packet {
                     Packet::Publish(_) => *receiver_counter.lock().unwrap() += 1,
                     _ => (),
@@ -55,7 +55,7 @@ mod tests {
         
         // incoming packets
         thread::spawn(move || {
-            for packet in receiver {
+            for (packet, _) in receiver {
                 match packet {
                     Packet::Publish(_) => *receiver_counter.lock().unwrap() += 1,
                     _ => (),
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn connect_with_will() {
-        let mqtt_opts = MqttOptions::new("c1", "127.0.0.1:1883").unwrap();
+        let mqtt_opts = MqttOptions::new("willconnect", "127.0.0.1:1883").unwrap();
         let (mut client1, receiver1) = MqttClient::start(mqtt_opts);
         client1.subscribe(vec![("iam/dead", QoS::AtLeastOnce)]).unwrap();
 
@@ -84,11 +84,11 @@ mod tests {
                                     .set_reconnect_opts(ReconnectOptions::AfterFirstSuccess(10))
                                     .set_last_will(will);
 
-            let (mut client, receiver) = MqttClient::start(mqtt_opts);
+            let (_client, _receiver) = MqttClient::start(mqtt_opts);
             thread::sleep(Duration::new(2, 0));
         }
 
-        for message in receiver1 {
+        for (message, _) in receiver1 {
             match message {
                 Packet::Publish(publish) => {
                     if publish.topic_name != "iam/dead" {
@@ -97,7 +97,7 @@ mod tests {
                         break
                     }
                 }
-                _ => panic!("Didn't receive publish message")
+                _ => continue,
             }
         }
     }
