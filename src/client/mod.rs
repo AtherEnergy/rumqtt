@@ -79,7 +79,7 @@ impl MqttClient {
         (client, notifier_rx)
     }
 
-    pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), ClientError>{
+    fn _publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>, userdata: UserData) -> Result<(), ClientError>{
         let payload_len = payload.len();
 
         if payload_len > self.max_packet_size {
@@ -92,13 +92,19 @@ impl MqttClient {
         let publish = packet::gen_publish_packet(topic.into(), qos, None, false, false, payload);
         let packet = Packet::Publish(publish);
 
-        let s = (packet, None);
+        let s = (packet, userdata);
         tx.send(Command::Mqtt(s)).wait()?;
 
         Ok(())
     }
 
-    // TODO: Add userdata publish
+    pub fn publish<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>) -> Result<(), ClientError> {
+        self._publish(topic, qos, payload, None)
+    }
+
+    pub fn publish_with_userdata<S: Into<String>>(&mut self, topic: S, qos: QoS, payload: Vec<u8>, userdata: S) -> Result<(), ClientError> {
+        self._publish(topic, qos, payload, Some(userdata.into()))
+    }
 
     pub fn subscribe<S: Into<String>>(&mut self, topics: Vec<(S, QoS)>) -> Result<(), ClientError> {
         if topics.len() == 0 {

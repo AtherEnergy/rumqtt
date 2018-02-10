@@ -712,6 +712,40 @@ mod test {
     }
 
     #[test]
+    fn puback_handle_should_return_correct_notification_with_userdata() {
+        let mqtt_opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
+        let mut mqtt = MqttState::new(mqtt_opts);
+        mqtt.opts.clean_session = false;
+
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let _ = mqtt.handle_outgoing_publish(publish.clone(), Some("abc".to_owned()));
+        let _ = mqtt.handle_outgoing_publish(publish.clone(), Some("def".to_owned()));
+        let _ = mqtt.handle_outgoing_publish(publish, Some("ghi".to_owned()));
+
+        assert_eq!(mqtt.outgoing_pub.len(), 3);
+        
+        let userdata = mqtt.handle_incoming_puback(PacketIdentifier(1)).unwrap();
+        let userdata = userdata.unwrap();
+        assert_eq!(userdata, "abc");
+
+        let userdata = mqtt.handle_incoming_puback(PacketIdentifier(2)).unwrap();
+        let userdata = userdata.unwrap();
+        assert_eq!(userdata, "def");
+
+        let userdata = mqtt.handle_incoming_puback(PacketIdentifier(3)).unwrap();
+        let userdata = userdata.unwrap();
+        assert_eq!(userdata, "ghi");
+    }
+
+    #[test]
     fn connect_should_respect_options() {
         use mqttopts::SecurityOptions::UsernamePassword;
 
