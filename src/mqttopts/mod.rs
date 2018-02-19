@@ -3,10 +3,19 @@ use mqtt3::LastWill;
 
 use std::time::Duration;
 
+/// Control how the connection is re-established if it is lost.
 #[derive(Copy, Clone, Debug)]
 pub enum ReconnectOptions {
+    /// On connection loss, don't reconnect automatically.
     Never,
+    /// Reconnect automatically if the connection has been established
+    /// successfully at least once.
+    ///
+    /// Before a reconnection attempt, sleep for the specified amount of seconds.
     AfterFirstSuccess(u16),
+    /// Always reconnect automatically.
+    ///
+    /// Before a reconnection attempt, sleep for the specified amount of seconds.
     Always(u16),
 }
 
