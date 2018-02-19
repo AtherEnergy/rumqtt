@@ -37,7 +37,7 @@ mod tests {
             thread::sleep(Duration::from_millis(100));
         }
 
-        thread::sleep(Duration::new(10, 0));
+        thread::sleep(Duration::from_secs(10));
         assert_eq!(*counter.lock().unwrap(), total_count);
     }
 
@@ -68,7 +68,7 @@ mod tests {
             thread::sleep(Duration::from_millis(100));
         }
 
-        thread::sleep(Duration::new(10, 0));
+        thread::sleep(Duration::from_secs(10));
         assert_eq!(*counter.lock().unwrap(), total_count);
     }
 
@@ -100,7 +100,7 @@ mod tests {
             thread::sleep(Duration::from_millis(100));
         }
 
-        thread::sleep(Duration::new(10, 0));
+        thread::sleep(Duration::from_secs(10));
         assert_eq!(*counter.lock().unwrap(), total_count);
     }
 
@@ -117,7 +117,7 @@ mod tests {
                                     .set_last_will(will);
 
             let (_client, _receiver) = MqttClient::start(mqtt_opts);
-            thread::sleep(Duration::new(2, 0));
+            thread::sleep(Duration::from_secs(2));
         }
 
         for (message, _) in receiver1 {

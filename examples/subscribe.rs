@@ -24,8 +24,8 @@ fn main() {
 
     for _ in 0..100 {
         client.publish("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]).unwrap();
-        //thread::sleep(Duration::new(1, 0));
+        //thread::sleep(Duration::from_secs(1));
     }
 
-    thread::sleep(Duration::new(60, 0));
+    thread::sleep(Duration::from_secs(60));
 }

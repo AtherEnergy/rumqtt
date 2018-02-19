@@ -49,7 +49,7 @@ impl MqttClient {
 
         let max_packet_size = opts.max_packet_size;
         let reconnect_config = opts.reconnect;
-        let mut sleep_duration = Duration::new(10, 0);
+        let mut sleep_duration = Duration::from_secs(10);
 
         thread::spawn( move || {
             let mut connection = connection::Connection::new(opts, commands_rx, notifier_tx);
@@ -64,9 +64,9 @@ impl MqttClient {
                     error!("Network connection failed. Error = {:?}, Connection count = {:?}", e, connection_count);
                     match reconnect_config {
                         ReconnectOptions::Never => break 'reconnect,
-                        ReconnectOptions::AfterFirstSuccess(d) if connection_count != ConnectCount::InitialConnect => sleep_duration = Duration::new(u64::from(d), 0),
+                        ReconnectOptions::AfterFirstSuccess(d) if connection_count != ConnectCount::InitialConnect => sleep_duration = Duration::from_secs(d as u64),
                         ReconnectOptions::AfterFirstSuccess(_) => break 'reconnect,
-                        ReconnectOptions::Always(d) =>  sleep_duration = Duration::new(u64::from(d), 0),
+                        ReconnectOptions::Always(d) =>  sleep_duration = Duration::from_secs(d as u64),
                     }
                 }
 

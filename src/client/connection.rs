@@ -179,8 +179,8 @@ impl Connection {
             // If you use 'keep alive' as 'interval', if last publish is at 't' secs
             // next ping will only happen at 2 * keepalive, with elapsed time since
             // last publish = (2 * keepalive) - t. which is too late
-            let interval_time = if keep_alive >= Duration::new(30, 0) {
-                Duration::new(10, 0)
+            let interval_time = if keep_alive >= Duration::from_secs(30) {
+                Duration::from_secs(10)
             } else {
                 keep_alive / 3
             };
@@ -206,7 +206,7 @@ impl Connection {
         let stream = self.create_network_stream()?;
         let framed = stream.framed(MqttCodec);
         let connect = self.mqtt_state.borrow_mut().handle_outgoing_connect()?;
-        let connect_timeout = Timeout::new(Duration::new(30, 0), &self.reactor.handle())?;
+        let connect_timeout = Timeout::new(Duration::from_secs(30), &self.reactor.handle())?;
         
         let framed = framed.send(Packet::Connect(connect)).and_then(|framed| {
             framed.into_future().and_then(|(res, stream)| Ok((res, stream))).map_err(|(err, _stream)| err)
