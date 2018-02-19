@@ -147,7 +147,7 @@ impl MqttState {
         } else {
             // rumqtt sets keep alive time to 2 minutes if user sets it to none.
             // (get consensus)
-            Duration::new(120, 0)
+            Duration::from_secs(120)
         };
 
         self.opts.keep_alive = Some(keep_alive);
@@ -533,8 +533,8 @@ mod test {
         // 1. test for invalid state
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::new(5, 0));
-        thread::sleep(Duration::new(5, 0));
+        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(5));
         assert_eq!(Err(PingError::InvalidState), mqtt.handle_outgoing_ping());
     }
 
@@ -542,12 +542,12 @@ mod test {
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::new(5, 0));
+        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::new(5, 0));
+        thread::sleep(Duration::from_secs(5));
         // should ping
         assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
-        thread::sleep(Duration::new(5, 0));
+        thread::sleep(Duration::from_secs(5));
         // should throw error because we didn't get pingresp for previous ping
         assert_eq!(Err(PingError::AwaitPingResp), mqtt.handle_outgoing_ping());
     }
@@ -556,9 +556,9 @@ mod test {
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::new(5, 0));
+        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::new(7, 0));
+        thread::sleep(Duration::from_secs(7));
         // should ping
         assert_eq!(Err(PingError::Timeout), mqtt.handle_outgoing_ping());
     }
@@ -567,13 +567,13 @@ mod test {
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::new(5, 0));
+        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::new(5, 0));
+        thread::sleep(Duration::from_secs(5));
         // should ping
         assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
         mqtt.handle_incoming_pingresp();
-        thread::sleep(Duration::new(5, 0));
+        thread::sleep(Duration::from_secs(5));
         // should ping
         assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
     }

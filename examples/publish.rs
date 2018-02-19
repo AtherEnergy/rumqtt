@@ -37,11 +37,11 @@ fn main() {
             if let Err(e) = client.publish("/devices/RAVI-MAC/events/imu", QoS::AtLeastOnce, payload) {
                 println!("Publish error = {:?}", e);
             }
-            thread::sleep(Duration::new(1, 0));
+            thread::sleep(Duration::from_secs(1));
         }
 
-        thread::sleep(Duration::new(360, 0));
+        thread::sleep(Duration::from_secs(360));
     }
 
-    thread::sleep(Duration::new(60, 0));
+    thread::sleep(Duration::from_secs(60));
 }

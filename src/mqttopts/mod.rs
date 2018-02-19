@@ -62,7 +62,7 @@ impl MqttOptions {
         }
         Ok(MqttOptions {
             broker_addr: addr.into(),
-            keep_alive: Some(Duration::new(30, 0)),
+            keep_alive: Some(Duration::from_secs(30)),
             clean_session: true,
             client_id: id.into(),
             connection_method: ConnectionMethod::Tcp,
@@ -80,7 +80,7 @@ impl MqttOptions {
             panic!("Keep alives should be >= 10 secs");
         }
 
-        self.keep_alive = Some(Duration::new(secs as u64, 0));
+        self.keep_alive = Some(Duration::from_secs(secs as u64));
         self
     }
 
