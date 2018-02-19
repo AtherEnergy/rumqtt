@@ -3,20 +3,32 @@ use mqtt3::LastWill;
 
 use std::time::Duration;
 
+/// Control how the connection is re-established if it is lost.
 #[derive(Copy, Clone, Debug)]
 pub enum ReconnectOptions {
+    /// On connection loss, don't reconnect automatically.
     Never,
+    /// Reconnect automatically if the connection has been established
+    /// successfully at least once.
+    ///
+    /// Before a reconnection attempt, sleep for the specified amount of seconds.
     AfterFirstSuccess(u16),
+    /// Always reconnect automatically.
+    ///
+    /// Before a reconnection attempt, sleep for the specified amount of seconds.
     Always(u16),
 }
 
+/// Configure server authentication.
 #[derive(Clone, Debug)]
 pub enum SecurityOptions {
+    /// No authentication.
     None,
-    /// username, password
+    /// Use the specified `(username, password)` tuple to authenticate.
     UsernamePassword((String, String)),
     #[cfg(feature = "jwt")]
-    /// project name, private_key.der to sign jwt, expiry in seconds
+    /// Authenticate against a Google Cloud IoT Core project with the triple
+    /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
     GcloudIotCore((String, String, i64))
 }
 
