@@ -19,13 +19,16 @@ pub enum ReconnectOptions {
     Always(u16),
 }
 
+/// Configure server authentication.
 #[derive(Clone, Debug)]
 pub enum SecurityOptions {
+    /// No authentication.
     None,
-    /// username, password
+    /// Use the specified `(username, password)` tuple to authenticate.
     UsernamePassword((String, String)),
     #[cfg(feature = "jwt")]
-    /// project name, private_key.der to sign jwt, expiry in seconds
+    /// Authenticate against a Google Cloud IoT Core project with the triple
+    /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
     GcloudIotCore((String, String, i64))
 }
 
