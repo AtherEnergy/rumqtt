@@ -2,7 +2,7 @@ use rand::{self, Rng};
 use std::path::{Path, PathBuf};
 use mqtt::QualityOfService;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MqttOptions {
     pub addr: String, // TODO: Use a default localhost here instead of option
     pub keep_alive: Option<u16>,
