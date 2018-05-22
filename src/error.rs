@@ -1,6 +1,6 @@
 use futures::sync::mpsc::SendError;
+use native_tls;
 use std::io::Error as IoError;
-use openssl;
 use client::Command;
 
 #[cfg(feature = "jwt")]
@@ -47,7 +47,7 @@ pub enum ConnectError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Tls failed. Error = {}", _0)]
-    Tls(openssl::error::ErrorStack),
+    Tls(native_tls::Error),
     #[cfg(feature = "jwt")]
     #[fail(display = "Jwt creation failed")]
     Jwt,
@@ -95,8 +95,8 @@ impl From<IoError> for ConnectError {
     }
 }
 
-impl From<openssl::error::ErrorStack> for ConnectError {
-    fn from(err: openssl::error::ErrorStack) -> ConnectError {
+impl From<native_tls::Error> for ConnectError {
+    fn from(err: native_tls::Error) -> ConnectError {
         ConnectError::Tls(err)
     }
 }

@@ -17,8 +17,8 @@ use tokio_core::net::TcpStream;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 
-use openssl::ssl::{SslMethod, SslConnector, SslVerifyMode, SslFiletype};
-use tokio_openssl::SslConnectorExt;
+use native_tls::{TlsConnector, TlsConnectorBuilder};
+use tokio_tls::TlsConnectorExt;
 
 use mqtt3::Packet;
 
@@ -269,23 +269,23 @@ impl Connection {
         Ok(network_stream)
     }
 
-    fn new_tls_connector<CA, C, K>(&self, ca: CA, client_pair: Option<(C, K)>, should_verify_ca: bool) -> Result<SslConnector, ConnectError>
+    fn new_tls_connector<CA, C, K>(
+        &self,
+        _ca: CA,
+        client_pair: Option<(C, K)>,
+        _should_verify_ca: bool,
+    ) -> Result<TlsConnector, ConnectError>
     where
         CA: AsRef<Path>,
         C: AsRef<Path>,
         K: AsRef<Path>,
     {
-        let mut tls_builder = SslConnector::builder(SslMethod::tls())?;
-        tls_builder.set_ca_file(ca.as_ref())?;
-
-        if let Some((cert, key)) = client_pair {
-            tls_builder.set_certificate_file(cert, SslFiletype::PEM)?;
-            tls_builder.set_private_key_file(key, SslFiletype::PEM)?;
+        let tls_builder: TlsConnectorBuilder = TlsConnector::builder()?;
+        if let Some((_cert, _key)) = client_pair {
+            //tls_builder.identity(pkcs12)
         }
 
-        tls_builder.set_verify(SslVerifyMode::NONE);
-
-        Ok(tls_builder.build())
+        Ok(tls_builder.build()?)
     }
 
     fn get_socket_address(&self) -> Result<(SocketAddr, String), ConnectError> {

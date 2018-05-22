@@ -1,13 +1,13 @@
 use std::io::{self, Read, Write};
 
 use tokio_core::net::TcpStream;
-use tokio_openssl::SslStream;
 use tokio_io::{AsyncRead, AsyncWrite};
 use futures::Poll;
+use tokio_tls::TlsStream;
 
 pub enum NetworkStream {
     Tcp(TcpStream),
-    Tls(SslStream<TcpStream>)
+    Tls(TlsStream<TcpStream>),
 }
 
 impl Read for NetworkStream {
