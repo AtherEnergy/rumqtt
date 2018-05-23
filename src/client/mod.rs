@@ -57,7 +57,10 @@ impl MqttClient {
             'reconnect: loop {
                 if let Err((e, connection_count)) = connection.start() {
                     match e {
-                        ConnectError::Halt => {error!("Halting connection thread"); break 'reconnect},
+                        ConnectError::Halt => {
+                            info!("Halting connection thread");
+                            break 'reconnect;
+                        }
                         _ => (),
                     }
 

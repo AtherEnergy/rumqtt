@@ -121,6 +121,10 @@ impl Connection {
                 error!("Reactor stopped. v = {:?}", v);
                 Ok(())
             }
+            Err((ConnectError::Halt, _next)) => {
+                mqtt_state.borrow_mut().handle_disconnect();
+                Err((ConnectError::Halt, self.connection_count))
+            }
             Err((e, _next)) => {
                 mqtt_state.borrow_mut().handle_disconnect();
                 error!("Reactor stopped. e = {:?}", e);
