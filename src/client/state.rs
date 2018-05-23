@@ -6,7 +6,7 @@ use std::path::Path;
 use failure;
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
 use client::{UserData, Notification, Reply};
-use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
+use error::{PingError, ConnectError, PubcompError, PublishError, PubrecError, PubrelError, PubackError, SubscribeError};
 use packet;
 use MqttOptions;
 use SecurityOptions;
@@ -39,6 +39,10 @@ pub struct MqttState {
 
     // For QoS 1. Stores outgoing publishes
     outgoing_pub: VecDeque<(Publish, UserData)>,
+    // For QoS 2. Stores outgoing pubrec
+    outgoing_rel: VecDeque<(PacketIdentifier, UserData)>,
+    // For QoS 2. Stores incomming publish
+    incoming_pub: VecDeque<Publish>,
     // clean_session=false will remember subscriptions only till lives.
     // Even so, if broker crashes, all its state will be lost (most brokers).
     // client should resubscribe it comes back up again or else the data will
@@ -64,6 +68,8 @@ impl MqttState {
             last_in_control_time: Instant::now(),
             last_pkid: PacketIdentifier(0),
             outgoing_pub: VecDeque::new(),
+            outgoing_rel: VecDeque::new(),
+            incoming_pub: VecDeque::new(),
             // subscriptions: VecDeque::new(),
         }
     }
@@ -89,6 +95,9 @@ impl MqttState {
                 Ok(Packet::Disconnect)
             },
             Packet::Puback(pkid) => Ok(Packet::Puback(pkid)),
+            Packet::Pubrel(pkid) => Ok(Packet::Pubrel(pkid)),
+            Packet::Pubrec(pkid) => Ok(Packet::Pubrec(pkid)),
+            Packet::Pubcomp(pkid) => Ok(Packet::Pubcomp(pkid)),
             Packet::Suback(suback) => Ok(Packet::Suback(suback)),
             _ => unimplemented!(),
         }
@@ -124,13 +133,53 @@ impl MqttState {
                 let reply = None;
                 Ok((notification, reply))
             }
+            Packet::Pubrec(pkid) => {
+                //NOTE: handle unsolicited rec errors
+                match self.handle_incoming_pubrec(pkid) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Pubrec handle error = {:?}", e);
+                    }
+                };
+
+                let reply = Some(Packet::Pubrel(pkid));
+                Ok((None, reply))
+            }
+            Packet::Pubrel(pkid) => {
+                //NOTE: handle unsolicited rel errors
+                let notification = match self.handle_incoming_pubrel(pkid) {
+                    Ok(publish) => Some((Packet::Publish(publish), None)),
+                    Err(e) => {
+                        error!("Pubrel handle error = {:?}", e);
+                        None
+                    }
+                };
+
+                let reply = Some(Packet::Pubcomp(pkid));
+                Ok((notification, reply))
+            }
+            Packet::Pubcomp(pkid) => {
+                //NOTE: handle unsolicited comp errors
+                let userdata = match self.handle_incoming_pubcomp(pkid) {
+                    Ok(ud) => ud,
+                    Err(e) => {
+                        error!("Pubcomp handle error = {:?}", e);
+                        None
+                    }
+                };
+
+                let comp = Packet::Pubcomp(pkid);
+                let notification = Some((comp, userdata));
+                let reply = None;
+                Ok((notification, reply))
+            }
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
                 Ok((None, None))
             }
             Packet::Publish(publish) => {
-                let ack = self.handle_incoming_publish(publish.clone());
-                let notification = Some((Packet::Publish(publish), None));
+                let (publish, ack) = self.handle_incoming_publish(publish);
+                let notification = publish.map(|publish| (Packet::Publish(publish), None));
                 Ok((notification, ack))
             }
             Packet::Suback(suback) => {
@@ -211,7 +260,20 @@ impl MqttState {
                 self.outgoing_pub.push_back(backup);
                 publish
             }
-            _ => unimplemented!()
+            QoS::ExactlyOnce => {
+                // add pkid if None
+                let publish = if publish.pid == None {
+                    let pkid = self.next_pkid();
+                    publish.pid = Some(pkid);
+                    publish
+                } else {
+                    publish
+                };
+
+                let backup = (publish.clone(), userdata);
+                self.outgoing_pub.push_back(backup);
+                publish
+            }
         };
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -231,16 +293,59 @@ impl MqttState {
         }
     }
 
+    pub fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(), PubrecError> {
+        if let Some(index) = self.outgoing_pub.iter().position(|x| x.0.pid == Some(pkid)) {
+            let (_publish, userdata) = self.outgoing_pub.remove(index).expect("Wrong index");
+            self.outgoing_rel.push_back((pkid, userdata));
+            Ok(())
+        } else {
+            error!("Unsolicited PUBREC packet: {:?}", pkid);
+            Err(PubrecError::Unsolicited)
+        }
+    }
+
+    pub fn handle_incoming_pubrel(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<Publish, PubrelError> {
+        if let Some(index) = self.incoming_pub.iter().position(|x| x.pid == Some(pkid)) {
+            let publish = self.incoming_pub.remove(index).expect("Wrong index");
+            Ok(publish)
+        } else {
+            error!("Unsolicited PUBREL packet: {:?}", pkid);
+            Err(PubrelError::Unsolicited)
+        }
+    }
+
+    pub fn handle_incoming_pubcomp(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<UserData, PubcompError> {
+        if let Some(index) = self.outgoing_rel.iter().position(|x| x.0 == pkid) {
+            let (_publish, userdata) = self.outgoing_rel.remove(index).expect("Wrong index");
+            Ok(userdata)
+        } else {
+            error!("Unsolicited PUBCOMP packet: {:?}", pkid);
+            Err(PubcompError::Unsolicited)
+        }
+    }
+
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Option<Packet> {
+    pub fn handle_incoming_publish(
+        &mut self,
+        publish: Publish,
+    ) -> (Option<Publish>, Option<Packet>) {
         let pkid = publish.pid;
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => None,
-            QoS::AtLeastOnce => Some(Packet::Puback(pkid.unwrap())),
-            QoS::ExactlyOnce => unimplemented!()
+            QoS::AtMostOnce => (Some(publish), None),
+            QoS::AtLeastOnce => (Some(publish), Some(Packet::Puback(pkid.unwrap()))),
+            QoS::ExactlyOnce => {
+                self.incoming_pub.push_back(publish);
+                (None, Some(Packet::Pubrec(pkid.unwrap())))
+            }
         }
     }
 
@@ -525,6 +630,48 @@ mod test {
         }
 
         let _ = mqtt.handle_incoming_puback(PacketIdentifier(3)).unwrap();
+        assert_eq!(mqtt.outgoing_pub.len(), 0);
+    }
+
+    #[test]
+    fn incoming_pubrec_should_remove_correct_publish_from_queue() {
+        let opts = MqttOptions::new("test-id", "127.0.0.1:1883").unwrap();
+        let mut mqtt = MqttState::new(opts);
+        // QoS1 Publish
+        let publish = Publish {
+            dup: false,
+            qos: QoS::ExactlyOnce,
+            retain: false,
+            pid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let _publish_out = mqtt.handle_outgoing_publish(publish.clone(), None);
+        let _publish_out = mqtt.handle_outgoing_publish(publish.clone(), None);
+        let _publish_out = mqtt.handle_outgoing_publish(publish, None);
+
+        {
+            assert_eq!(mqtt.outgoing_pub.len(), 3);
+            let backup = mqtt.outgoing_pub.get(0).unwrap();
+            assert_eq!(backup.0.pid, Some(PacketIdentifier(1)));
+        }
+
+        {
+            let _ = mqtt.handle_incoming_pubrec(PacketIdentifier(1)).unwrap();
+            assert_eq!(mqtt.outgoing_pub.len(), 2);
+            let backup = mqtt.outgoing_pub.get(0).unwrap();
+            assert_eq!(backup.0.pid, Some(PacketIdentifier(2)));
+        }
+
+        {
+            let _ = mqtt.handle_incoming_pubrec(PacketIdentifier(2)).unwrap();
+            assert_eq!(mqtt.outgoing_pub.len(), 1);
+            let backup = mqtt.outgoing_pub.get(0).unwrap();
+            assert_eq!(backup.0.pid, Some(PacketIdentifier(3)));
+        }
+
+        let _ = mqtt.handle_incoming_pubrec(PacketIdentifier(3)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 0);
     }
 

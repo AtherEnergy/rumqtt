@@ -73,8 +73,32 @@ pub enum PublishError {
 pub enum PubackError {
     // #[fail(display = "Client not in connected state")]
     // InvalidState,
-    #[fail(display = "Received unsolicited acknowledgment")]
-    Unsolicited
+    #[fail(display = "Received unsolicited publish acknowledgment")]
+    Unsolicited,
+}
+
+#[derive(Debug, Fail)]
+pub enum PubrecError {
+    // #[fail(display = "Client not in connected state")]
+    // InvalidState,
+    #[fail(display = "Received unsolicited publish received")]
+    Unsolicited,
+}
+
+#[derive(Debug, Fail)]
+pub enum PubrelError {
+    // #[fail(display = "Client not in connected state")]
+    // InvalidState,
+    #[fail(display = "Received unsolicited publish release")]
+    Unsolicited,
+}
+
+#[derive(Debug, Fail)]
+pub enum PubcompError {
+    // #[fail(display = "Client not in connected state")]
+    // InvalidState,
+    #[fail(display = "Received unsolicited publish complete")]
+    Unsolicited,
 }
 
 #[derive(Debug, Fail)]
