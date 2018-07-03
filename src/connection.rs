@@ -685,7 +685,7 @@ impl Connection {
                 if let Some(keep_alive) = self.opts.keep_alive {
                     let elapsed = self.last_flush.elapsed();
 
-                    if elapsed >= Duration::from_millis(((keep_alive * 1000) as f64 * 0.9) as u64) {
+                    if elapsed >= Duration::from_millis(((keep_alive as u64 * 1000) as f64 * 0.9) as u64) {
                         if elapsed >= Duration::new((keep_alive + 1) as u64, 0) {
                             return Err(Error::PingTimeout);
                         }
