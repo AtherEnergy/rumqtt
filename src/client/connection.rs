@@ -40,8 +40,8 @@ fn handshake(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = Framed<
 }
 
 fn mqtt_connect(address: &SocketAddr) {
-    let mqtt_connect = tcp_connect(address).map(|framed| {
-        handshake(framed).map(|framed| {
+    let mqtt_connect = tcp_connect(address).and_then(|framed| {
+        handshake(framed).and_then(|framed| {
             framed
                 .into_future()
                 .map_err(|(err, _framed)| ConnectError::from(err))
@@ -49,17 +49,12 @@ fn mqtt_connect(address: &SocketAddr) {
         })
     });
 
-    let mqtt_connect_deadline = Deadline::new(mqtt_connect, Instant::now() + Duration::from_secs(10));
+    // let mqtt_connect_deadline = Deadline::new(mqtt_connect, Instant::now() + Duration::from_secs(10));
 
-
-    let mqtt = tokio_current_thread::block_on_all(
-        tokio_current_thread::block_on_all(
-            match tokio_current_thread::block_on_all(mqtt_connect_deadline) {
-                Ok(v) => v,
-                Err(e) => panic!("{:?}", e),
-            }
-        ).unwrap()
-    ).unwrap();
+    let _framed = match tokio_current_thread::block_on_all(mqtt_connect) {
+        Ok(v) => v,
+        Err(e) => panic!("{:?}", e),
+    };
 
     thread::sleep_ms(15000);
 }
