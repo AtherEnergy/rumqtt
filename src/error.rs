@@ -7,7 +7,7 @@ pub enum ClientError {
     #[fail(display = "Packet size limit has crossed maximum")]
     PacketSizeLimitExceeded,
     #[fail(display = "Client id should not be empty")]
-    EmptyClientId
+    EmptyClientId,
 }
 
 #[derive(Debug, Fail)]

@@ -2,63 +2,80 @@ use failure;
 //use futures::sync::mpsc::Receiver;
 use futures::{Future, Sink, Stream};
 use std::net::SocketAddr;
+use std::thread;
 use tokio::net::TcpStream;
-
+use tokio_timer::Deadline;
 use codec::MqttCodec;
-use mqtt3::Packet;
-use tokio_codec::{Framed, Decoder};
-use tokio_io::AsyncRead;
-use mqttoptions::MqttOptions;
-use mqtt3::ConnectReturnCode;
-use futures::future;
 use error::ConnectError;
+use futures::future;
 use futures::future::FutureResult;
+use futures::lazy;
+use mqtt3::ConnectReturnCode;
+use mqtt3::Packet;
+use mqttoptions::MqttOptions;
+use tokio_codec::{Decoder, Framed};
+use tokio_io::AsyncRead;
+use tokio_core::reactor::Core;
+
+use tokio::runtime::current_thread;
+use tokio_current_thread;
+use pretty_env_logger;
+use std::time::Instant;
+use std::time::Duration;
 
 pub struct Connection;
 
-impl Connection {
-    fn connect(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = failure::Error> {
-        TcpStream::connect(address)
-            .map_err(failure::Error::from)
-            .map(|stream| MqttCodec.framed(stream))
-    }
+fn tcp_connect(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+    TcpStream::connect(address)
+        .map_err(ConnectError::from)
+        .map(|stream| MqttCodec.framed(stream))
+}
 
-    fn handshake(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = impl Future<Item = Self, Error=ConnectError>,
-                                                               Error = failure::Error> {
-        let mqttoptions = MqttOptions::default();
-        let connect_packet = mqttoptions.connect_packet();
+fn handshake(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+    let mqttoptions = MqttOptions::default();
+    let connect_packet = mqttoptions.connect_packet();
 
-        let framed = framed.send(connect_packet).map(|f| {
-            f.into_future()
-        });
+    let framed = framed.send(connect_packet);
+    framed.map_err(|err| ConnectError::from(err))
+}
 
-        framed
-            .map_err(|err|failure::Error::from(err))
-            .map(|f|
-                f.and_then(|(response, framed)| {
-                    Self::validate_connack(response)
-                })
-            )
-            .map_err(|(err, _framed)| {
-                err
-            })
-    }
+fn mqtt_connect(address: &SocketAddr) {
+    let mqtt_connect = tcp_connect(address).map(|framed| {
+        handshake(framed).map(|framed| {
+            framed
+                .into_future()
+                .map_err(|(err, _framed)| ConnectError::from(err))
+                .and_then(|(response, framed)| validate_connack(response.unwrap(), framed))
+        })
+    });
 
-    fn validate_connack(response: Option<Packet>) -> FutureResult<Connection, ConnectError> {
-        if let Some(packet) = response {
-            match packet {
-                Packet::Connack(connack) => {
-                    if connack.code == ConnectReturnCode::Accepted {
-                        future::ok(Connection)
-                    } else {
-                        future::err(ConnectError::MqttConnectionRefused(connack.code.to_u8()))
-                    }
-                }
-                _ => unimplemented!()
+    let mqtt_connect_deadline = Deadline::new(mqtt_connect, Instant::now() + Duration::from_secs(10));
+
+
+    let mqtt = tokio_current_thread::block_on_all(
+        tokio_current_thread::block_on_all(
+            match tokio_current_thread::block_on_all(mqtt_connect_deadline) {
+                Ok(v) => v,
+                Err(e) => panic!("{:?}", e),
             }
-        } else {
-            unimplemented ! ()
+        ).unwrap()
+    ).unwrap();
+
+    thread::sleep_ms(15000);
+}
+
+fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> FutureResult<Framed<TcpStream, MqttCodec>, ConnectError> {
+    info!("Packet = {:?}", packet);
+
+    match packet {
+        Packet::Connack(connack) => {
+            if connack.code == ConnectReturnCode::Accepted {
+                future::ok(framed)
+            } else {
+                future::err(ConnectError::MqttConnectionRefused(connack.code.to_u8()))
+            }
         }
+        _ => unimplemented!(),
     }
 }
 
@@ -70,9 +87,8 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let mut rt = current_thread::Runtime::new().unwrap();
-        let mqtt = Connection::connect(&"127.0.0.1:1883".parse().unwrap());
-        let mqtt = rt.block_on(mqtt).unwrap();
+        pretty_env_logger::init();
+        mqtt_connect(&"127.0.0.1:1883".parse().unwrap());
         thread::sleep_ms(10000);
     }
 }

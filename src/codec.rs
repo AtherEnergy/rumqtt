@@ -1,8 +1,8 @@
 use bytes::BytesMut;
+use mqtt3::{self, MqttRead, MqttWrite, Packet};
 use std::error::Error;
 use std::io::{self, Cursor, ErrorKind};
 use tokio_codec::{Decoder, Encoder};
-use mqtt3::{self, MqttRead, MqttWrite, Packet};
 
 #[derive(Debug)]
 pub struct MqttCodec;

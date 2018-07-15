@@ -1,9 +1,9 @@
 use mqtt3::LastWill;
 
-use std::time::Duration;
-use mqtt3::Protocol;
 use mqtt3::Connect;
 use mqtt3::Packet;
+use mqtt3::Protocol;
+use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
 #[derive(Copy, Clone, Debug)]
@@ -31,16 +31,15 @@ pub enum SecurityOptions {
     #[cfg(feature = "jwt")]
     /// Authenticate against a Google Cloud IoT Core project with the triple
     /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
-    GcloudIotCore((String, String, i64))
+    GcloudIotCore((String, String, i64)),
 }
 
 #[derive(Clone, Debug)]
 pub enum ConnectionMethod {
     Tcp,
     // ca and, optionally, a pair of client cert and client key
-    Tls(String, Option<(String, String)>)
+    Tls(String, Option<(String, String)>),
 }
-
 
 // TODO: Add getters & make fields private
 
@@ -63,7 +62,7 @@ pub struct MqttOptions {
     /// maximum packet size
     pub max_packet_size: usize,
     /// last will and testament
-    pub last_will: Option<LastWill>
+    pub last_will: Option<LastWill>,
 }
 
 impl Default for MqttOptions {
@@ -161,7 +160,7 @@ impl MqttOptions {
 
     /// Clear last will and testament
     pub fn clear_last_will(mut self) -> Self {
-        self.last_will  = None;
+        self.last_will = None;
         self
     }
 
