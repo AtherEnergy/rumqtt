@@ -1,14 +1,15 @@
-use mqtt3::LastWill;
+use mqtt3::{LastWill,
+            Connect,
+            Connack,
+            Packet,
+            Protocol};
 
-use mqtt3::Connect;
-use mqtt3::Packet;
-use mqtt3::Protocol;
 use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
 #[derive(Copy, Clone, Debug)]
-pub enum ReconnectOptions {
-    /// On connection loss, don't reconnect automatically.
+pub(crate) enum ReconnectOptions {
+    /// Don't automatically reconnect
     Never,
     /// Reconnect automatically if the connection has been established
     /// successfully at least once.
@@ -23,28 +24,22 @@ pub enum ReconnectOptions {
 
 /// Configure server authentication.
 #[derive(Clone, Debug)]
-pub enum SecurityOptions {
+pub(crate) enum SecurityOptions {
     /// No authentication.
     None,
     /// Use the specified `(username, password)` tuple to authenticate.
-    UsernamePassword((String, String)),
-    #[cfg(feature = "jwt")]
-    /// Authenticate against a Google Cloud IoT Core project with the triple
-    /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
-    GcloudIotCore((String, String, i64)),
+    UsernamePassword((String, String))
 }
 
 #[derive(Clone, Debug)]
-pub enum ConnectionMethod {
+pub(crate) enum ConnectionMethod {
     Tcp,
     // ca and, optionally, a pair of client cert and client key
     Tls(String, Option<(String, String)>),
 }
 
-// TODO: Add getters & make fields private
-
 #[derive(Clone, Debug)]
-pub struct MqttOptions {
+pub(crate) struct MqttOptions {
     /// broker address that you want to connect to
     pub broker_addr: String,
     /// keep alive time to send pingreq to broker when the connection is idle
@@ -164,8 +159,8 @@ impl MqttOptions {
         self
     }
 
-    pub fn connect_packet(&self) -> Packet {
-        Packet::Connect(Connect {
+    pub fn connect_packet(&self) -> Connect {
+        Connect {
             protocol: Protocol::MQTT(4),
             keep_alive: 60 as u16,
             client_id: self.client_id.clone(),
@@ -173,7 +168,7 @@ impl MqttOptions {
             last_will: self.last_will.clone(),
             username: None,
             password: None,
-        })
+        }
     }
 }
 

@@ -20,6 +20,7 @@ pub mod client;
 pub mod codec;
 pub mod error;
 pub mod mqttoptions;
+pub mod mqttstate;
 
 fn create_channel() {
     // let (tx, rx) = mpsc::channel::<i32>(1);

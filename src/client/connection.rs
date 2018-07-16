@@ -38,7 +38,7 @@ fn handshake_future(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = 
     let mqttoptions = MqttOptions::default();
     let connect_packet = mqttoptions.connect_packet();
 
-    let framed = framed.send(connect_packet);
+    let framed = framed.send(Packet::Connect(connect_packet));
     framed.map_err(|err| ConnectError::from(err))
 }
 
@@ -76,7 +76,14 @@ fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> Fut
     }
 }
 
-struct Connection;
+//  NOTES: Don't use `wait` in eventloop thread even if you
+//         are ok with blocking code. It might cause deadlocks
+// https://github.com/tokio-rs/tokio-core/issues/182
+
+
+struct Connection {
+
+}
 
 //pub fn run(framed: Framed<TcpStream, MqttCodec>) {
 //    let (network_sink, network_stream) = framed.split();
