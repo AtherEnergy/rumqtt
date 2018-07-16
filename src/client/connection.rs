@@ -4,12 +4,11 @@ use futures::{Future, Sink, Stream};
 use std::net::SocketAddr;
 use std::thread;
 use tokio::net::TcpStream;
-use tokio_timer::Deadline;
+use tokio::timer::Deadline;
 use codec::MqttCodec;
 use error::ConnectError;
 use futures::future;
 use futures::future::FutureResult;
-use futures::lazy;
 use mqtt3::ConnectReturnCode;
 use mqtt3::Packet;
 use mqttoptions::MqttOptions;
@@ -22,16 +21,20 @@ use tokio_current_thread;
 use pretty_env_logger;
 use std::time::Instant;
 use std::time::Duration;
+use tokio;
 
-pub struct Connection;
 
-fn tcp_connect(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+/// Composes a future which makes a new tcp connection to the broker.
+/// Note this doesn't actual connect to the broker
+fn tcp_connect_future(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
     TcpStream::connect(address)
         .map_err(ConnectError::from)
         .map(|stream| MqttCodec.framed(stream))
 }
 
-fn handshake(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+/// Composes a future which sends mqtt connect packet to the broker.
+/// Note that this doesn't actually send the connect packet.
+fn handshake_future(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
     let mqttoptions = MqttOptions::default();
     let connect_packet = mqttoptions.connect_packet();
 
@@ -39,9 +42,11 @@ fn handshake(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = Framed<
     framed.map_err(|err| ConnectError::from(err))
 }
 
-fn mqtt_connect(address: &SocketAddr) {
-    let mqtt_connect = tcp_connect(address).and_then(|framed| {
-        handshake(framed).and_then(|framed| {
+/// Composes a new future which is a combination of tcp connect + handshake + connack receive.
+/// This function also runs to eventloop to create mqtt connection and returns `Framed`
+fn mqtt_connect(address: &SocketAddr) -> Result<Framed<TcpStream, MqttCodec>, ConnectError> {
+    let mqtt_connect_deadline = tcp_connect_future(address).and_then(|framed| {
+        handshake_future(framed).and_then(|framed| {
             framed
                 .into_future()
                 .map_err(|(err, _framed)| ConnectError::from(err))
@@ -49,14 +54,11 @@ fn mqtt_connect(address: &SocketAddr) {
         })
     });
 
-    // let mqtt_connect_deadline = Deadline::new(mqtt_connect, Instant::now() + Duration::from_secs(10));
+    // TODO: Add a timeout to the whole tcp connect + mqtt connect + connack wait so that our client
+    // TODO: won't be indefinitely blocked
+    // let mqtt_connect_deadline = Deadline::new(mqtt_connect_deadline, Instant::now() + Duration::from_secs(30));
 
-    let _framed = match tokio_current_thread::block_on_all(mqtt_connect) {
-        Ok(v) => v,
-        Err(e) => panic!("{:?}", e),
-    };
-
-    thread::sleep_ms(15000);
+    tokio_current_thread::block_on_all(mqtt_connect_deadline)
 }
 
 fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> FutureResult<Framed<TcpStream, MqttCodec>, ConnectError> {
@@ -73,6 +75,21 @@ fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> Fut
         _ => unimplemented!(),
     }
 }
+
+struct Connection;
+
+//pub fn run(framed: Framed<TcpStream, MqttCodec>) {
+//    let (network_sink, network_stream) = framed.split();
+//
+//    let mut connection = Connection;
+//    let network_reader = network_stream
+//    .for_each(move |packet| {
+//        connection;
+//        future::ok(())
+//    })
+//    .map_err(|e| future::err::<(), _>(connection));
+//}
+
 
 #[cfg(test)]
 mod tests {
