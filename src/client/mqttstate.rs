@@ -6,6 +6,8 @@ use failure;
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
 use error::{PingError, ConnectError, PublishError, PubackError, SubscribeError};
 use mqttoptions::{self, MqttOptions, SecurityOptions};
+use client::Notification;
+use client::Reply;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -15,7 +17,7 @@ enum MqttConnectionStatus {
 }
 
 #[derive(Debug)]
-struct MqttState {
+pub(crate) struct MqttState {
     opts: MqttOptions,
 
     // --------  State  ----------
@@ -88,24 +90,35 @@ impl MqttState {
     //
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(), failure::Error> {
+    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Reply), failure::Error> {
         self.update_last_in_control_time();
 
         match packet {
             Packet::Connack(connack) => {
                 self.handle_incoming_connack(connack)?;
-                Ok(())
+                Ok((None, None))
             }
-            Packet::Puback(ack) => Ok(()),
+            Packet::Puback(ack) => {
+                //NOTE: handle unsolicited ack errors
+
+                let ack = Packet::Puback(ack);
+                let notification = Some(ack);
+                let reply = None;
+                Ok((notification, reply))
+            }
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
-                Ok(())
+                Ok((None, None))
             }
             Packet::Publish(publish) => {
                 let ack = self.handle_incoming_publish(publish.clone());
-                Ok(())
+                let notification = Some(Packet::Publish(publish));
+                Ok((notification, ack))
             }
-            Packet::Suback(suback) => Ok(()),
+            Packet::Suback(suback) => {
+                let notification = Some(Packet::Suback(suback));
+                Ok((notification, None))
+            }
             _ => unimplemented!()
         }
     }

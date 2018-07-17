@@ -1,8 +1,10 @@
 use failure;
 //use futures::sync::mpsc::Receiver;
 use futures::{Future, Sink, Stream};
+use futures::stream::{SplitSink, SplitStream};
 use std::net::SocketAddr;
 use std::thread;
+use std::io;
 use tokio::net::TcpStream;
 use tokio::timer::Deadline;
 use codec::MqttCodec;
@@ -22,6 +24,9 @@ use pretty_env_logger;
 use std::time::Instant;
 use std::time::Duration;
 use tokio;
+use std::rc::Rc;
+use std::cell::RefCell;
+use client::mqttstate::MqttState;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
@@ -82,20 +87,48 @@ fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> Fut
 
 
 struct Connection {
-
+    mqtt_state: Rc<RefCell<MqttState>>
 }
 
-//pub fn run(framed: Framed<TcpStream, MqttCodec>) {
-//    let (network_sink, network_stream) = framed.split();
+impl Connection {
+    pub fn run(framed: Framed<TcpStream, MqttCodec>, mqttopts: MqttOptions) {
+        let (network_sink, network_stream) = framed.split();
+
+        let mut connection = Connection {
+            mqtt_state: Rc::new(RefCell::new(MqttState::new(mqttopts)))
+        };
+
+//        let network_reader = network_stream
+//            .for_each(move |packet| {
+//                connection;
+//                future::ok(())
+//            })
+//            .map_err(|e| future::err::<(), _>(connection));
+    }
+
+//    fn network_receiver_future(&self, network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=io::Error> {
+//        let mqtt_state = self.mqtt_state.clone();
 //
-//    let mut connection = Connection;
-//    let network_reader = network_stream
-//    .for_each(move |packet| {
-//        connection;
-//        future::ok(())
-//    })
-//    .map_err(|e| future::err::<(), _>(connection));
-//}
+//        network_stream.for_each(|packet| {
+//            //let (notification, reply) =
+//                future::ok(())
+//        })
+//    }
+}
+
+
+
+fn packet_info(packet: &Packet) -> String {
+    match packet {
+        Packet::Publish(p) => format!(
+            "topic = {}, \
+             qos = {:?}, \
+             pkid = {:?}, \
+             payload size = {:?} bytes", p.topic_name, p.qos, p.pid, p.payload.len()),
+
+        _ => format!("{:?}", packet)
+    }
+}
 
 
 #[cfg(test)]

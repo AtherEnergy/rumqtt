@@ -8,7 +8,7 @@ use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum ReconnectOptions {
+pub enum ReconnectOptions {
     /// Don't automatically reconnect
     Never,
     /// Reconnect automatically if the connection has been established
@@ -24,7 +24,7 @@ pub(crate) enum ReconnectOptions {
 
 /// Configure server authentication.
 #[derive(Clone, Debug)]
-pub(crate) enum SecurityOptions {
+pub enum SecurityOptions {
     /// No authentication.
     None,
     /// Use the specified `(username, password)` tuple to authenticate.
@@ -32,14 +32,14 @@ pub(crate) enum SecurityOptions {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum ConnectionMethod {
+pub enum ConnectionMethod {
     Tcp,
     // ca and, optionally, a pair of client cert and client key
     Tls(String, Option<(String, String)>),
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct MqttOptions {
+pub struct MqttOptions {
     /// broker address that you want to connect to
     pub broker_addr: String,
     /// keep alive time to send pingreq to broker when the connection is idle
