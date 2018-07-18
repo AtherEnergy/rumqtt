@@ -1,4 +1,5 @@
 use std::io::Error as IoError;
+use tokio::timer::DeadlineError;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -18,12 +19,8 @@ pub enum ConnectError {
     Io(IoError),
     #[fail(display = "Empty dns list")]
     DnsListEmpty,
-    #[fail(display = "Received halt command")]
-    Halt,
-    #[fail(display = "Outgoing receive failed")]
-    Outgoing,
-    #[fail(display = "Counldn't receive connack in time")]
-    Timeout,
+    #[fail(display = "Couldn't create mqtt connection in time")]
+    Timeout
 }
 
 #[derive(Debug, Fail)]

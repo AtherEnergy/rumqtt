@@ -4,9 +4,7 @@ extern crate mqtt3;
 extern crate tokio;
 extern crate tokio_codec;
 extern crate tokio_io;
-extern crate tokio_current_thread;
-extern crate tokio_core;
-extern crate tokio_timer;
+
 #[macro_use]
 extern crate try_future;
 #[macro_use]

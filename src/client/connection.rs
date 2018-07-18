@@ -14,13 +14,13 @@ use tokio_codec::{Decoder, Framed};
 use tokio_io::AsyncRead;
 
 use tokio::runtime::current_thread;
-use tokio_current_thread;
 use std::time::Instant;
 use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
 use client::mqttstate::MqttState;
 use error::NetworkReceiveError;
+use tokio::timer::DeadlineError;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
@@ -43,9 +43,8 @@ fn handshake_future(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = 
 
 /// Composes a new future which is a combination of tcp connect + handshake + connack receive.
 /// This function also runs to eventloop to create mqtt connection and returns `Framed`
-fn mqtt_connect(address: &SocketAddr, mqttopts: MqttOptions) -> Result<Connection, ConnectError> {
+fn mqtt_connect(address: &SocketAddr, mqttopts: MqttOptions) -> Result<Connection, DeadlineError<ConnectError>> {
     let mqtt_connect_deadline = tcp_connect_future(address).and_then(|framed| {
-
         handshake_future(framed).and_then(|framed| {
             framed
                 .into_future()
@@ -74,9 +73,10 @@ fn mqtt_connect(address: &SocketAddr, mqttopts: MqttOptions) -> Result<Connectio
 
     // TODO: Add a timeout to the whole tcp connect + mqtt connect + connack wait so that our client
     // TODO: won't be indefinitely blocked
-    // let mqtt_connect_deadline = Deadline::new(mqtt_connect_deadline, Instant::now() + Duration::from_secs(30));
-
-    tokio_current_thread::block_on_all(mqtt_connect_deadline)
+    let mqtt_connect_deadline = Deadline::new(mqtt_connect_deadline, Instant::now() + Duration::from_secs(30));
+    // tokio_current_thread::block_on_all(mqtt_connect_deadline);
+    let mut rt = current_thread::Runtime::new().unwrap();
+    rt.block_on(mqtt_connect_deadline)
 }
 
 
@@ -131,13 +131,12 @@ fn packet_info(packet: &Packet) -> String {
 mod tests {
     use super::*;
     use std::thread;
-    use tokio::runtime::current_thread;
     use pretty_env_logger;
 
-//    #[test]
-//    fn it_works() {
-//        pretty_env_logger::init();
-//        mqtt_connect(&"127.0.0.1:1883".parse().unwrap());
-//        thread::sleep_ms(10000);
-//    }
+    #[test]
+    fn it_works() {
+        pretty_env_logger::init();
+        let connection = mqtt_connect(&"127.0.0.1:1883".parse().unwrap(), MqttOptions::default()).unwrap();
+        thread::sleep_ms(10000);
+    }
 }

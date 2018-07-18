@@ -411,8 +411,10 @@ mod test {
             payload: Arc::new(vec![1, 2, 3]),
         };
 
-        let publish_out = mqtt.handle_outgoing_publish(publish);
-        assert_eq!(publish_out, Err( NetworkSendError::InvalidState));
+        match mqtt.handle_outgoing_publish(publish) {
+            Err(NetworkSendError::InvalidState) => (),
+            _ => panic!("Should throw packet size limit error")
+        }
     }
 
     #[test]
@@ -429,8 +431,10 @@ mod test {
             payload: Arc::new(vec![0; 257 * 1024]),
         };
 
-        let publish_out = mqtt.handle_outgoing_publish(publish);
-        assert_eq!(publish_out, Err( NetworkSendError::PacketSizeLimitExceeded));
+        match mqtt.handle_outgoing_publish(publish) {
+            Err(NetworkSendError::PacketSizeLimitExceeded) => (),
+            _ => panic!("Should throw packet size limit error")
+        }
     }
 
     #[test]
@@ -482,7 +486,11 @@ mod test {
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         thread::sleep(Duration::from_secs(5));
-        assert_eq!(Err( NetworkSendError::InvalidState), mqtt.handle_outgoing_ping());
+        match mqtt.handle_outgoing_ping() {
+            Err(NetworkSendError::InvalidState) => (),
+            _ => panic!("Should throw timeout error")
+
+        }
     }
 
     #[test]
@@ -492,11 +500,17 @@ mod test {
         mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(5));
+
         // should ping
-        assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
+        assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
         thread::sleep(Duration::from_secs(5));
+
         // should throw error because we didn't get pingresp for previous ping
-        assert_eq!(Err( NetworkSendError::AwaitPingResp), mqtt.handle_outgoing_ping());
+        match mqtt.handle_outgoing_ping() {
+            Err(NetworkSendError::AwaitPingResp) => (),
+            _ => panic!("Should throw timeout error")
+
+        }
     }
 
     // #[test]
@@ -506,8 +520,12 @@ mod test {
         mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(7));
-        // should ping
-        assert_eq!(Err( NetworkSendError::Timeout), mqtt.handle_outgoing_ping());
+
+        match mqtt.handle_outgoing_ping() {
+            Err(NetworkSendError::Timeout) => (),
+            _ => panic!("Should throw timeout error")
+
+        }
     }
 
     #[test]
@@ -517,12 +535,13 @@ mod test {
         mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(5));
+
         // should ping
-        assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
+        assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
         mqtt.handle_incoming_pingresp();
         thread::sleep(Duration::from_secs(5));
         // should ping
-        assert_eq!(Ok(()), mqtt.handle_outgoing_ping());
+        assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
     }
 
     #[test]
