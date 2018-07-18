@@ -29,39 +29,23 @@ pub enum ConnectError {
 #[derive(Debug, Fail)]
 pub enum NetworkReceiveError {
     #[fail(display = "Io failed. Error = {}", _0)]
-    Io(IoError)
-}
-
-#[derive(Debug, Fail, PartialEq)]
-pub enum PingError {
-    #[fail(display = "Last ping response not received")]
-    AwaitPingResp,
-    #[fail(display = "Client not in connected state")]
-    InvalidState,
-    #[fail(display = "Couldn't ping in time")]
-    Timeout
-}
-
-#[derive(Debug, Fail, PartialEq)]
-pub enum PublishError {
-    #[fail(display = "Client not in connected state")]
-    InvalidState,
-    #[fail(display = "Packet limit size exceeded")]
-    PacketSizeLimitExceeded
-}
-
-#[derive(Debug, Fail)]
-pub enum PubackError {
-    // #[fail(display = "Client not in connected state")]
-    // InvalidState,
+    Io(IoError),
     #[fail(display = "Received unsolicited acknowledgment")]
     Unsolicited
 }
 
 #[derive(Debug, Fail)]
-pub enum SubscribeError {
+pub enum NetworkSendError {
+    #[fail(display = "Io failed. Error = {}", _0)]
+    Io(IoError),
+    #[fail(display = "Last ping response not received")]
+    AwaitPingResp,
     #[fail(display = "Client not in connected state")]
-    InvalidState
+    InvalidState,
+    #[fail(display = "Couldn't ping in time")]
+    Timeout,
+    #[fail(display = "Packet limit size exceeded")]
+    PacketSizeLimitExceeded
 }
 
 impl From<IoError> for ConnectError {
@@ -73,5 +57,11 @@ impl From<IoError> for ConnectError {
 impl From<IoError> for NetworkReceiveError {
     fn from(err: IoError) -> NetworkReceiveError {
         NetworkReceiveError::Io(err)
+    }
+}
+
+impl From<IoError> for NetworkSendError {
+    fn from(err: IoError) -> NetworkSendError {
+        NetworkSendError::Io(err)
     }
 }

@@ -1,35 +1,26 @@
-use failure;
 //use futures::sync::mpsc::Receiver;
 use futures::{Future, Sink, Stream};
 use futures::stream::{SplitSink, SplitStream};
 use std::net::SocketAddr;
 use std::thread;
-use std::io;
 use tokio::net::TcpStream;
 use tokio::timer::Deadline;
 use codec::MqttCodec;
 use error::ConnectError;
 use futures::future;
-use futures::future::FutureResult;
-use mqtt3::ConnectReturnCode;
 use mqtt3::Packet;
 use mqttoptions::MqttOptions;
 use tokio_codec::{Decoder, Framed};
 use tokio_io::AsyncRead;
-use tokio_core::reactor::Core;
 
 use tokio::runtime::current_thread;
 use tokio_current_thread;
-use pretty_env_logger;
 use std::time::Instant;
 use std::time::Duration;
-use tokio;
 use std::rc::Rc;
 use std::cell::RefCell;
 use client::mqttstate::MqttState;
 use error::NetworkReceiveError;
-use mqtt3::Connect;
-use mqtt3::Connack;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
@@ -88,20 +79,6 @@ fn mqtt_connect(address: &SocketAddr, mqttopts: MqttOptions) -> Result<Connectio
     tokio_current_thread::block_on_all(mqtt_connect_deadline)
 }
 
-fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> FutureResult<Framed<TcpStream, MqttCodec>, ConnectError> {
-    info!("Packet = {:?}", packet);
-
-    match packet {
-        Packet::Connack(connack) => {
-            if connack.code == ConnectReturnCode::Accepted {
-                future::ok(framed)
-            } else {
-                future::err(ConnectError::MqttConnectionRefused(connack.code.to_u8()))
-            }
-        }
-        _ => unimplemented!(),
-    }
-}
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -119,18 +96,20 @@ impl Connection {
         let (network_sink, network_stream) = framed.split();
     }
 
-//    fn network_receiver_future(&self, network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkReceiveError> {
-//        let mqtt_state = self.mqtt_state.clone();
-//
-//        network_stream.for_each(|packet| {
-//            let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
-//                Ok(v) => v,
-//                Err(e) => e.from(),
-//            };
-//
-//            future::ok(())
-//        })
-//    }
+    fn network_receiver_future(&self, network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkReceiveError> {
+        let mqtt_state = self.mqtt_state.clone();
+
+        network_stream
+            .map_err(|e| NetworkReceiveError::from(e))
+            .for_each(move |packet| {
+                let (_notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
+                    Ok(v) => v,
+                    Err(e) => return future::err(e),
+                };
+
+                future::ok(())
+        })
+    }
 }
 
 
@@ -153,6 +132,7 @@ mod tests {
     use super::*;
     use std::thread;
     use tokio::runtime::current_thread;
+    use pretty_env_logger;
 
 //    #[test]
 //    fn it_works() {
