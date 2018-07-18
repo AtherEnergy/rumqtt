@@ -94,10 +94,6 @@ impl MqttState {
         self.update_last_in_control_time();
 
         match packet {
-            Packet::Connack(connack) => {
-                self.handle_incoming_connack(connack)?;
-                Ok((None, None))
-            }
             Packet::Puback(ack) => {
                 //NOTE: handle unsolicited ack errors
 

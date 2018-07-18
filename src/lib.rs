@@ -8,6 +8,8 @@ extern crate tokio_current_thread;
 extern crate tokio_core;
 extern crate tokio_timer;
 #[macro_use]
+extern crate try_future;
+#[macro_use]
 extern crate log;
 #[macro_use]
 extern crate failure;

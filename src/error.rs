@@ -26,6 +26,12 @@ pub enum ConnectError {
     Timeout,
 }
 
+#[derive(Debug, Fail)]
+pub enum NetworkReceiveError {
+    #[fail(display = "Io failed. Error = {}", _0)]
+    Io(IoError)
+}
+
 #[derive(Debug, Fail, PartialEq)]
 pub enum PingError {
     #[fail(display = "Last ping response not received")]
@@ -61,5 +67,11 @@ pub enum SubscribeError {
 impl From<IoError> for ConnectError {
     fn from(err: IoError) -> ConnectError {
         ConnectError::Io(err)
+    }
+}
+
+impl From<IoError> for NetworkReceiveError {
+    fn from(err: IoError) -> NetworkReceiveError {
+        NetworkReceiveError::Io(err)
     }
 }

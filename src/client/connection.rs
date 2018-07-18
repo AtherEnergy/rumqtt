@@ -27,6 +27,9 @@ use tokio;
 use std::rc::Rc;
 use std::cell::RefCell;
 use client::mqttstate::MqttState;
+use error::NetworkReceiveError;
+use mqtt3::Connect;
+use mqtt3::Connack;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
@@ -49,13 +52,32 @@ fn handshake_future(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = 
 
 /// Composes a new future which is a combination of tcp connect + handshake + connack receive.
 /// This function also runs to eventloop to create mqtt connection and returns `Framed`
-fn mqtt_connect(address: &SocketAddr) -> Result<Framed<TcpStream, MqttCodec>, ConnectError> {
+fn mqtt_connect(address: &SocketAddr, mqttopts: MqttOptions) -> Result<Connection, ConnectError> {
     let mqtt_connect_deadline = tcp_connect_future(address).and_then(|framed| {
+
         handshake_future(framed).and_then(|framed| {
             framed
                 .into_future()
                 .map_err(|(err, _framed)| ConnectError::from(err))
-                .and_then(|(response, framed)| validate_connack(response.unwrap(), framed))
+                .and_then(|(response, framed)| {
+                    let mut mqtt_state = MqttState::new(mqttopts);
+
+                    if let Some(Packet::Connack(connack)) = response {
+                        match mqtt_state.handle_incoming_connack(connack) {
+                            Ok(v) => v,
+                            Err(e) => return future::err(e),
+                        }
+                    } else {
+                        panic!("Expected connack packet. Got = {:?}", response);
+                    }
+
+                    let connection = Connection {
+                        mqtt_state: Rc::new(RefCell::new(mqtt_state)),
+                        framed: Some(framed)
+                    };
+
+                    future::ok(connection)
+                })
         })
     });
 
@@ -87,31 +109,26 @@ fn validate_connack(packet: Packet, framed: Framed<TcpStream, MqttCodec>) -> Fut
 
 
 struct Connection {
-    mqtt_state: Rc<RefCell<MqttState>>
+    mqtt_state: Rc<RefCell<MqttState>>,
+    framed: Option<Framed<TcpStream, MqttCodec>>
 }
 
 impl Connection {
-    pub fn run(framed: Framed<TcpStream, MqttCodec>, mqttopts: MqttOptions) {
+    pub fn run(&mut self) {
+        let framed = self.framed.take().unwrap();
         let (network_sink, network_stream) = framed.split();
-
-        let mut connection = Connection {
-            mqtt_state: Rc::new(RefCell::new(MqttState::new(mqttopts)))
-        };
-
-//        let network_reader = network_stream
-//            .for_each(move |packet| {
-//                connection;
-//                future::ok(())
-//            })
-//            .map_err(|e| future::err::<(), _>(connection));
     }
 
-//    fn network_receiver_future(&self, network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=io::Error> {
+//    fn network_receiver_future(&self, network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkReceiveError> {
 //        let mqtt_state = self.mqtt_state.clone();
 //
 //        network_stream.for_each(|packet| {
-//            //let (notification, reply) =
-//                future::ok(())
+//            let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
+//                Ok(v) => v,
+//                Err(e) => e.from(),
+//            };
+//
+//            future::ok(())
 //        })
 //    }
 }
@@ -137,10 +154,10 @@ mod tests {
     use std::thread;
     use tokio::runtime::current_thread;
 
-    #[test]
-    fn it_works() {
-        pretty_env_logger::init();
-        mqtt_connect(&"127.0.0.1:1883".parse().unwrap());
-        thread::sleep_ms(10000);
-    }
+//    #[test]
+//    fn it_works() {
+//        pretty_env_logger::init();
+//        mqtt_connect(&"127.0.0.1:1883".parse().unwrap());
+//        thread::sleep_ms(10000);
+//    }
 }
