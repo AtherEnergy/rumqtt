@@ -1,4 +1,4 @@
-//use futures::sync::mpsc::Receiver;
+use futures::sync::mpsc::{self, Sender, Receiver};
 use futures::{Future, Sink, Stream};
 use futures::stream::{SplitSink, SplitStream};
 use std::net::SocketAddr;
@@ -12,7 +12,6 @@ use mqtt3::Packet;
 use mqttoptions::MqttOptions;
 use tokio_codec::{Decoder, Framed};
 use tokio_io::AsyncRead;
-
 use tokio::runtime::current_thread;
 use std::time::Instant;
 use std::time::Duration;
@@ -21,6 +20,9 @@ use std::cell::RefCell;
 use client::mqttstate::MqttState;
 use error::NetworkReceiveError;
 use tokio::timer::DeadlineError;
+use crossbeam_channel;
+use client::Notification;
+use mqtt3::PacketIdentifier;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
@@ -91,21 +93,32 @@ struct Connection {
 }
 
 impl Connection {
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> crossbeam_channel::Receiver<Notification> {
         let framed = self.framed.take().unwrap();
         let (network_sink, network_stream) = framed.split();
+
+        let (notification_tx, notificaiton_rx) = crossbeam_channel::bounded(10);
+
+
+        notificaiton_rx
     }
 
-    fn network_receiver_future(&self, network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkReceiveError> {
+    fn network_receiver_future(&self,
+                               notification_tx: crossbeam_channel::Sender<Notification>,
+                               network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkReceiveError> {
         let mqtt_state = self.mqtt_state.clone();
 
         network_stream
             .map_err(|e| NetworkReceiveError::from(e))
             .for_each(move |packet| {
-                let (_notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
+                let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
                     Ok(v) => v,
                     Err(e) => return future::err(e),
                 };
+
+                if !notification_tx.is_full() {
+                    notification_tx.send(notification)
+                }
 
                 future::ok(())
         })

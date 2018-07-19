@@ -94,26 +94,23 @@ impl MqttState {
         self.update_last_in_control_time();
 
         match packet {
-            Packet::Puback(ack) => {
+            Packet::Puback(PacketIdentifier(ack)) => {
                 //NOTE: handle unsolicited ack errors
-
-                let ack = Packet::Puback(ack);
-                let notification = Some(ack);
-                let reply = None;
-                Ok((notification, reply))
+                Ok((Notification::PubAck(ack), Reply::None))
             }
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
-                Ok((None, None))
+                Ok((Notification::None, Reply::None))
             }
             Packet::Publish(publish) => {
-                let ack = self.handle_incoming_publish(publish.clone());
-                let notification = Some(Packet::Publish(publish));
-                Ok((notification, ack))
+                let notification = Notification::Publish(publish.payload.clone());
+                let reply =  self.handle_incoming_publish(publish.clone());
+                Ok((notification, reply))
             }
-            Packet::Suback(suback) => {
-                let notification = Some(Packet::Suback(suback));
-                Ok((notification, None))
+            Packet::Suback(_suback) => {
+                let notification = Notification::None;
+                let reply = Reply::None;
+                Ok((notification, reply))
             }
             _ => unimplemented!()
         }
@@ -206,13 +203,14 @@ impl MqttState {
 
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Option<Packet> {
-        let pkid = publish.pid;
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Reply {
+        let pkid = publish.pid.unwrap();
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => None,
-            QoS::AtLeastOnce => Some(Packet::Puback(pkid.unwrap())),
+            QoS::AtMostOnce => Reply::None,
+            //TODO: Add method in mqtt3 to convert PacketIdentifier to u16
+            QoS::AtLeastOnce => Reply::PubAck(10),
             QoS::ExactlyOnce => unimplemented!()
         }
     }
