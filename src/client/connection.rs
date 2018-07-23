@@ -24,6 +24,7 @@ use crossbeam_channel;
 use client::Notification;
 use client::Reply;
 use error::NetworkSendError;
+use client::UserRequest;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
@@ -90,6 +91,7 @@ fn mqtt_connect(mqttopts: MqttOptions) -> impl Future<Item = (Framed<TcpStream, 
 
 struct Connection {
     mqtt_state: Rc<RefCell<MqttState>>,
+    userrequest_rx: mpsc::Receiver<UserRequest>,
 }
 
 
@@ -97,6 +99,8 @@ impl Connection {
     pub fn run(mqttopts: MqttOptions) -> crossbeam_channel::Receiver<Notification> {
         let (notification_tx, notificaiton_rx) = crossbeam_channel::bounded(10);
         let (networkreply_tx, networkreply_rx) = mpsc::channel::<Reply>(10);
+        let (userrequest_tx, mut userrequest_rx) = mpsc::channel::<UserRequest>(10);
+
 
         let mqtt_connect_future = mqtt_connect(mqttopts);
         let mqtt_connect_deadline = Deadline::new(mqtt_connect_future,
@@ -105,9 +109,11 @@ impl Connection {
         let mut rt = current_thread::Runtime::new().unwrap();
         let (framed, mqtt_state) = rt.block_on(mqtt_connect_deadline).unwrap();
 
-        thread::spawn(|| {
+        thread::spawn(move || {
+            let mut rt = current_thread::Runtime::new().unwrap();
+
             let mqtt_state = Rc::new(RefCell::new(mqtt_state));
-            let connection = Connection{mqtt_state};
+            let connection = Connection{mqtt_state, userrequest_rx};
             let (network_sink, network_stream) = framed.split();
 
 
@@ -115,7 +121,10 @@ impl Connection {
                                                                             networkreply_tx,
                                                                             network_stream);
 
-            thread::sleep_ms(10000);
+            let network_transmit_future = connection.network_transmit_future(network_sink);
+
+            let out = rt.block_on(network_transmit_future);
+            info!("Reactor result = {:?}", out);
         });
 
         notificaiton_rx
@@ -143,28 +152,51 @@ impl Connection {
         })
     }
 
-    fn network_send_future(&self,
-                           request_rx: mpsc::Receiver<Packet>,
-                           network_sink: SplitSink<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkSendError> {
+    fn network_transmit_future(&self, network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
+        -> impl Future<Item=(), Error=NetworkSendError> {
         let mqtt_state = self.mqtt_state.clone();
+        let request_rx = self.userrequest_rx.by_ref();
 
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
         let mut last_session_publishes = stream::iter_ok::<_, ()>(last_session_publishes);
 
-        request_rx.and_then(|packet| {
-            match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet) {
-                Ok(packet) => {
-                    debug!("Sending packet. {}", packet_info(&packet));
-                    future::ok(packet)
+        // NOTE: AndThen is a stream and ForEach is a future
+        request_rx
+            .map_err(|e| NetworkSendError::Blah)
+            .and_then(move |request| {
+                let packet = match request {
+                    UserRequest::MqttPublish(p) => Packet::Publish(p)
+                };
+
+                match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet) {
+                    Ok(packet) => {
+                        debug!("Sending packet. {}", packet_info(&packet));
+                        future::ok(packet)
+                    }
+                    Err(e) => {
+                        error!("Handling outgoing packet failed. Error = {:?}", e);
+                        future::err(e)
+                    }
                 }
-                Err(e) => {
-                    error!("Handling outgoing packet failed. Error = {:?}", e);
-                    future::err(e)
-                }
-            }
-        }).forward(network_sink
-        )
+            })
+            .forward(network_sink)
+            .map(|_v| ())
     }
+
+//    fn network_send_future(&self,
+//                           request_rx: mpsc::Receiver<Packet>,
+//                           network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
+//                           -> impl Future<Item=(), Error=NetworkSendError> {
+//
+//        // NOTE: AndThen is a stream and ForEach is a future
+//        request_rx
+//            .map_err(|e| NetworkSendError::Blah)
+//            .and_then(move |packet| {
+//                future::ok(Packet::Pingreq)
+//            })
+//            .forward(network_sink)
+//            .map(|v| ())
+//    }
 }
 
 

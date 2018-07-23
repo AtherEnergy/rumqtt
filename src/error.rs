@@ -42,7 +42,9 @@ pub enum NetworkSendError {
     #[fail(display = "Couldn't ping in time")]
     Timeout,
     #[fail(display = "Packet limit size exceeded")]
-    PacketSizeLimitExceeded
+    PacketSizeLimitExceeded,
+    #[fail(display = "Dummy error for converting () to network error")]
+    Blah
 }
 
 impl From<IoError> for ConnectError {

@@ -1,5 +1,6 @@
 use mqtt3::Packet;
 use std::sync::Arc;
+use mqtt3::Publish;
 
 pub mod connection;
 pub mod mqttstate;
@@ -18,4 +19,8 @@ pub enum Notification {
 pub enum Reply {
     PubAck(u16),
     None
+}
+
+pub enum UserRequest {
+    MqttPublish(Publish)
 }
