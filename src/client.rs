@@ -51,7 +51,7 @@ impl MqttClient {
                     // break immediately if rx is dropped
                     &TrySendError::Disconnected(_) => return Err(Error::NoConnectionThread),
                     &TrySendError::Full(_) => {
-                        warn!("Request Queue Full !!!!!!!!");
+                        info!("Request Queue Full !!!!!!!!");
                         thread::sleep(Duration::new(3, 0));
                         continue;
                     }
@@ -74,7 +74,7 @@ impl MqttClient {
                     // break immediately if rx is dropped
                     &TrySendError::Disconnected(_) => return Err(Error::NoConnectionThread),
                     &TrySendError::Full(_) => {
-                        warn!("Request Queue Full !!!!!!!!");
+                        info!("Request Queue Full !!!!!!!!");
                         thread::sleep(Duration::new(3, 0));
                         continue;
                     }

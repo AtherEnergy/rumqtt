@@ -1,4 +1,4 @@
-extern crate cloudpubsub;
+extern crate rumqtt;
 extern crate pretty_env_logger;
 extern crate rand;
 
@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rand::{thread_rng, Rng};
 
-use cloudpubsub::{MqttOptions, MqttClient, MqttCallback, Message};
+use rumqtt::{MqttOptions, MqttClient, MqttCallback, Message};
 
 fn main() {
     pretty_env_logger::init().unwrap();
@@ -19,7 +19,7 @@ fn main() {
                                     .set_first_reconnect_loop(true)
                                     .set_reconnect_interval(10)
                                     //.set_broker("dev-mqtt-broker.atherengineering.in:1883");
-                                    .set_broker("localhost:1883");
+                                    .set_broker("localhost:9883");
 
     let count = Arc::new(AtomicUsize::new(0));
     let callback_count = count.clone();
@@ -34,12 +34,13 @@ fn main() {
 
     let mut client = MqttClient::start(options, Some(on_publish)).expect("Start Error");
 
-    for _ in 0..100 {
+    for _ in 0..10000 {
         let len: usize = thread_rng().gen_range(0, 100_000);
         let mut v = vec![0; len];
         thread_rng().fill_bytes(&mut v);
 
         let _ = client.userdata_publish("hello/world", v, "MYUNIQUEUSERDATA".to_string().into_bytes());
+        thread::sleep_ms(100);
     }
 
     // verifies pingreqs and responses
@@ -47,7 +48,7 @@ fn main() {
 
     // disconnections because of pingreq delays will be know during
     // subsequent publishes
-    for _ in 0..100 {
+    for _ in 0..10000 {
         let len: usize = thread_rng().gen_range(0, 100_000);
         let mut v = vec![0; len];
         thread_rng().fill_bytes(&mut v);
