@@ -75,8 +75,14 @@ impl NetworkStream {
         };
 
         let stream = TcpStream::connect_timeout(&addr, timeout)?;
+        warn!("Tcp connection successful");
 
-        if let Some(ca) = ca {
+        //NOTE: Should be less than default keep alive time to make sure that server doesn't 
+        //      disconnect while waiting for read.
+        stream.set_read_timeout(Some(Duration::new(10, 0)))?;
+        stream.set_write_timeout(Some(Duration::new(30, 0)))?;
+        
+        let stream = if let Some(ca) = ca {
             let ssl_ctx = if let Some((ref crt, ref key)) = certs {
                 SslContext::new(ca, Some((crt, key)), true)?
             } else {
@@ -84,14 +90,16 @@ impl NetworkStream {
             };
 
             if host_name_verification {
-                Ok(NetworkStream::Tls(ssl_ctx.connect(&domain, stream)?))
+                NetworkStream::Tls(ssl_ctx.connect(&domain, stream)?)
             } else {
-                Ok(NetworkStream::Tls(ssl_ctx.connect("", stream)?))
+                NetworkStream::Tls(ssl_ctx.connect("", stream)?)
             }
         } else {
-            Ok(NetworkStream::Tcp(stream))
-        }
+            NetworkStream::Tcp(stream)
+        };
 
+        warn!("Tls connection successful");
+        Ok(stream)
     }
 
 

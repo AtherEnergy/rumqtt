@@ -262,12 +262,7 @@ impl Publisher {
         self.initial_connect = false;
         let host_name_verification = self.opts.host_name_verification;
         let connect_timeout = Duration::new(20, 0);
-        let mut stream = NetworkStream::connect_timeout(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification, connect_timeout)?;
-
-        //NOTE: Should be less than default keep alive time to make sure that server doesn't 
-        //      disconnect while waiting for read.
-        stream.set_read_timeout(Some(Duration::new(10, 0)))?;
-        stream.set_write_timeout(Some(Duration::new(30, 0)))?;
+        let stream = NetworkStream::connect_timeout(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification, connect_timeout)?;
 
         if let Some((ref key, expiry)) = self.opts.gcloud_iotcore_auth {
             let password = gen_password(key, expiry);
@@ -350,7 +345,7 @@ impl Publisher {
             self.no_of_reconnections += 1;
         }
 
-        info!("Mqtt connection successful !!");
+        warn!("Mqtt connection successful !!");
         self.state = MqttState::Connected;
 
         // Retransmit QoS1,2 queues after reconnection when clean_session = false
