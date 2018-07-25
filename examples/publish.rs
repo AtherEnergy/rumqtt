@@ -34,7 +34,7 @@ fn main() {
 
     let mut client = MqttClient::start(options, Some(on_publish)).expect("Start Error");
 
-    for _ in 0..10000 {
+    for _ in 0..100000 {
         let len: usize = thread_rng().gen_range(0, 100_000);
         let mut v = vec![0; len];
         thread_rng().fill_bytes(&mut v);
@@ -48,7 +48,7 @@ fn main() {
 
     // disconnections because of pingreq delays will be know during
     // subsequent publishes
-    for _ in 0..10000 {
+    for _ in 0..100000 {
         let len: usize = thread_rng().gen_range(0, 100_000);
         let mut v = vec![0; len];
         thread_rng().fill_bytes(&mut v);
