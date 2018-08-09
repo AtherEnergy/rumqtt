@@ -160,14 +160,23 @@ impl MqttOptions {
     }
 
     pub fn connect_packet(&self) -> Connect {
+        let (username, password) = match self.security {
+            SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
+            _ => (None, None),
+        };
+        let keep_alive: u16;
+        match self.keep_alive {
+            Some(ka) => keep_alive = ka.as_secs() as u16,
+            _ => keep_alive = 60 as u16,
+        };
         Connect {
             protocol: Protocol::MQTT(4),
-            keep_alive: 60 as u16,
+            keep_alive: keep_alive,
             client_id: self.client_id.clone(),
             clean_session: self.clean_session,
             last_will: self.last_will.clone(),
-            username: None,
-            password: None,
+            username: username,
+            password: password,
         }
     }
 }
