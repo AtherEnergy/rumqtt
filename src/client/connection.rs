@@ -99,7 +99,7 @@ impl Connection {
     pub fn run(mqttopts: MqttOptions) -> crossbeam_channel::Receiver<Notification> {
         let (notification_tx, notificaiton_rx) = crossbeam_channel::bounded(10);
         let (networkreply_tx, networkreply_rx) = mpsc::channel::<Reply>(10);
-        let (userrequest_tx, mut userrequest_rx) = mpsc::channel::<UserRequest>(10);
+        let (userrequest_tx, userrequest_rx) = mpsc::channel::<UserRequest>(10);
 
 
         let mqtt_connect_future = mqtt_connect(mqttopts);
@@ -113,7 +113,7 @@ impl Connection {
             let mut rt = current_thread::Runtime::new().unwrap();
 
             let mqtt_state = Rc::new(RefCell::new(mqtt_state));
-            let connection = Connection{mqtt_state, userrequest_rx};
+            let mut connection = Connection{mqtt_state, userrequest_rx};
             let (network_sink, network_stream) = framed.split();
 
 
@@ -152,8 +152,8 @@ impl Connection {
         })
     }
 
-    fn network_transmit_future(&self, network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
-        -> impl Future<Item=(), Error=NetworkSendError> {
+    fn network_transmit_future<'a>(&'a mut self, network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
+        -> impl Future<Item=(), Error=NetworkSendError> + 'a {
         let mqtt_state = self.mqtt_state.clone();
         let request_rx = self.userrequest_rx.by_ref();
 
@@ -224,6 +224,6 @@ mod tests {
     fn it_works() {
         pretty_env_logger::init();
         let connection = Connection::run(MqttOptions::default());
-        thread::sleep_ms(10000);
+        thread::sleep(Duration::from_secs(10));
     }
 }
