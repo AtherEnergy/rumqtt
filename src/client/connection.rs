@@ -28,7 +28,7 @@ use client::UserRequest;
 
 
 /// Composes a future which makes a new tcp connection to the broker.
-/// Note this doesn't actual connect to the broker
+/// Note that this doesn't actual connect to the broker
 fn tcp_connect_future(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
     TcpStream::connect(address)
         .map_err(ConnectError::from)
@@ -45,32 +45,37 @@ fn handshake_future(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = 
     framed.map_err(|err| ConnectError::from(err))
 }
 
+/// Future which does a network call to receive connack packet.
+/// TODO: Fix the panic. Disconnect the client
+fn receive_connack_future(framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+    framed
+        .into_future()
+        .map_err(|(err, _framed)| ConnectError::from(err))
+        .and_then(|(response, framed)| {
+            let mut mqtt_state = MqttState::new(mqttopts)
+
+            if let Some(Packet::Connack(connack)) = response {
+                match mqtt_state.handle_incoming_connack(connack) {
+                    Ok(v) => v,
+                    Err(e) => return future::err(e),
+                }
+            } else {
+                panic!("Expected connack packet. Got = {:?}", response);
+                future::ok((framed, mqtt_state))
+            }
+        )
+}
+
 /// Composes a new future which is a combination of tcp connect + handshake + connack receive.
 /// This function also runs to eventloop to create mqtt connection and returns `Framed`
 fn mqtt_connect(mqttopts: MqttOptions) -> impl Future<Item = (Framed<TcpStream, MqttCodec>, MqttState), Error = ConnectError> {
     let addr = &mqttopts.broker_addr.parse().unwrap();
 
     let mqtt_connect = tcp_connect_future(addr).and_then(|framed| {
-        handshake_future(framed).and_then(|framed| {
-            framed
-                .into_future()
-                .map_err(|(err, _framed)| ConnectError::from(err))
-                .and_then(|(response, framed)
-                | {
-                    let mut mqtt_state = MqttState::new(mqttopts);
-
-                    if let Some(Packet::Connack(connack)) = response {
-                        match mqtt_state.handle_incoming_connack(connack) {
-                            Ok(v) => v,
-                            Err(e) => return future::err(e),
-                        }
-                    } else {
-                        panic!("Expected connack packet. Got = {:?}", response);
-                    }
-
-                    future::ok((framed, mqtt_state))
-                })
-        })
+        handshake_future(framed)
+            .and_then(|framed| {
+                receive_connack_future(framed)
+            })
     });
 
     mqtt_connect
@@ -149,7 +154,7 @@ impl Connection {
                 }
 
                 future::ok(())
-        })
+            })
     }
 
     fn network_transmit_future<'a>(&'a mut self, network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
@@ -182,21 +187,6 @@ impl Connection {
             .forward(network_sink)
             .map(|_v| ())
     }
-
-//    fn network_send_future(&self,
-//                           request_rx: mpsc::Receiver<Packet>,
-//                           network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
-//                           -> impl Future<Item=(), Error=NetworkSendError> {
-//
-//        // NOTE: AndThen is a stream and ForEach is a future
-//        request_rx
-//            .map_err(|e| NetworkSendError::Blah)
-//            .and_then(move |packet| {
-//                future::ok(Packet::Pingreq)
-//            })
-//            .forward(network_sink)
-//            .map(|v| ())
-//    }
 }
 
 
