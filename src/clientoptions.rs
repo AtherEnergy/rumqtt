@@ -12,9 +12,9 @@ pub struct MqttOptions {
     pub client_id: Option<String>,
     pub credentials: Option<(String, String)>,
     pub ca: Option<PathBuf>,
-    // root cert for encryption & private key for signing jwt token,
+    // project name & private key for signing jwt token,
     // token expiry time
-    pub gcloud_iotcore_auth: Option<(PathBuf, i64)>,
+    pub gcloud_iotcore_auth: Option<(String, PathBuf, i64)>,
     pub client_certs: Option<(PathBuf, PathBuf)>,
     pub storepack_sz: usize,
     pub await_batch_size: u32,
@@ -139,9 +139,9 @@ impl MqttOptions {
         self
     }
 
-    pub fn set_gcloud_iotcore_auth<P>(mut self, key: P, expiry: i64) -> Self
+    pub fn set_gcloud_iotcore_auth<P>(mut self, project_name: &str, key: P, expiry: i64) -> Self
     where P: AsRef<Path> {
-        self.gcloud_iotcore_auth = Some((key.as_ref().to_path_buf(), expiry));
+        self.gcloud_iotcore_auth = Some((project_name.to_owned(), key.as_ref().to_path_buf(), expiry));
         self
     }
 

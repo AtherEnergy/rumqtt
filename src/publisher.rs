@@ -264,8 +264,8 @@ impl Publisher {
         let connect_timeout = Duration::new(20, 0);
         let stream = NetworkStream::connect_timeout(&self.opts.addr, self.opts.ca.clone(), self.opts.client_certs.clone(), host_name_verification, connect_timeout)?;
 
-        if let Some((ref key, expiry)) = self.opts.gcloud_iotcore_auth {
-            let password = gen_password(key, expiry);
+        if let Some((ref project_name, ref key, expiry)) = self.opts.gcloud_iotcore_auth {
+            let password = gen_password(project_name, key, expiry);
             self.opts.credentials = Some(("unused".to_owned(), password));
         }
 
@@ -537,7 +537,7 @@ impl Publisher {
 }
 
 // Generates a new password for mqtt client authentication
-pub fn gen_password<P>(key: P, expiry: i64) -> String
+pub fn gen_password<P>(aud: &str, key: P, expiry: i64) -> String
 where P: AsRef<Path> {
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
@@ -546,7 +546,7 @@ where P: AsRef<Path> {
     let claims = Claims {
         iat: iat,
         exp: exp,
-        aud: "crested-return-122311".to_string(),
+        aud: aud.to_string(),
     };
 
     let mut key_file = File::open(key).expect("Unable to open private keyfile for gcloud iot core auth");
