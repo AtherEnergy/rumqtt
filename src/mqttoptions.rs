@@ -1,7 +1,5 @@
 use mqtt3::{LastWill,
             Connect,
-            Connack,
-            Packet,
             Protocol};
 
 use std::time::Duration;

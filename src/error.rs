@@ -1,6 +1,7 @@
 use std::io::Error as IoError;
-use tokio::timer::DeadlineError;
 use mqtt3::Packet;
+use futures::sync::mpsc::SendError;
+use client::UserRequest;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -10,6 +11,8 @@ pub enum ClientError {
     PacketSizeLimitExceeded,
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
+    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
+    MpscSend(SendError<UserRequest>)
 }
 
 #[derive(Debug, Fail)]
@@ -78,5 +81,11 @@ impl From<IoError> for NetworkReceiveError {
 impl From<IoError> for NetworkSendError {
     fn from(err: IoError) -> NetworkSendError {
         NetworkSendError::Io(err)
+    }
+}
+
+impl From<SendError<UserRequest>> for ClientError {
+    fn from(err: SendError<UserRequest>) -> ClientError {
+        ClientError::MpscSend(err)
     }
 }

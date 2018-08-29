@@ -1,6 +1,10 @@
-use mqtt3::Packet;
 use std::sync::Arc;
-use mqtt3::Publish;
+use mqtt3::{Publish, PacketIdentifier, QoS};
+use futures::sync::mpsc;
+use futures::{Future, Sink};
+use crossbeam_channel;
+use error::ClientError;
+use MqttOptions;
 
 pub mod connection;
 pub mod mqttstate;
@@ -17,10 +21,50 @@ pub enum Notification {
 }
 
 pub enum Reply {
-    PubAck(u16),
+    PubAck(PacketIdentifier),
     None
 }
 
 pub enum UserRequest {
     MqttPublish(Publish)
+}
+
+pub struct MqttClient {
+    userrequest_tx: mpsc::Sender<UserRequest>,
+    notification_rx: crossbeam_channel::Receiver<Notification>,
+    max_packet_size: usize
+}
+
+impl MqttClient {
+    pub fn start(opts: MqttOptions) -> Self {
+         let (userrequest_tx, notification_rx) = connection::Connection::run(opts);
+
+        //TODO: Remove max packet size hardcode
+         MqttClient {
+             userrequest_tx,
+             notification_rx,
+             max_packet_size: 1000
+         }
+    }
+
+    pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError> {
+        let payload = payload.into();
+        if payload.len() > self.max_packet_size {
+            return Err(ClientError::PacketSizeLimitExceeded)
+        }
+
+        //TODO: Rename `pid` to `pkid` in mqtt311
+        let publish =  Publish {
+            dup: false,
+            qos,
+            retain: false,
+            topic_name: topic.into(),
+            pid: None,
+            payload: Arc::new(payload),
+        };
+
+        let tx = &mut self.userrequest_tx;
+        tx.send(UserRequest::MqttPublish(publish)).wait()?;
+        Ok(())
+    }
 }

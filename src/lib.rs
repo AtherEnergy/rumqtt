@@ -12,18 +12,9 @@ extern crate log;
 extern crate failure;
 extern crate pretty_env_logger;
 
-use futures::sync::mpsc;
-use tokio::runtime::current_thread;
-
 pub mod client;
 pub mod codec;
 pub mod error;
 pub mod mqttoptions;
 
 pub use mqttoptions::{MqttOptions, ReconnectOptions, SecurityOptions, ConnectionMethod};
-
-fn create_channel() {
-    // let (tx, rx) = mpsc::channel::<i32>(1);
-
-    // let f = rx.for
-}

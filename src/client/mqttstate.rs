@@ -2,12 +2,10 @@ use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::result::Result;
 
-use failure;
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
 use error::{ConnectError, NetworkSendError, NetworkReceiveError};
-use mqttoptions::{self, MqttOptions, SecurityOptions};
-use client::Notification;
-use client::Reply;
+use mqttoptions::{MqttOptions, SecurityOptions};
+use client::{Notification, Reply};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -94,10 +92,6 @@ impl MqttState {
         self.update_last_in_control_time();
 
         match packet {
-            Packet::Puback(PacketIdentifier(ack)) => {
-                //NOTE: handle unsolicited ack errors
-                Ok((Notification::PubAck(ack), Reply::None))
-            }
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
                 Ok((Notification::None, Reply::None))
@@ -107,7 +101,13 @@ impl MqttState {
                 let reply =  self.handle_incoming_publish(publish.clone());
                 Ok((notification, reply))
             }
-            Packet::Suback(_suback) => {
+            Packet::Suback(_pkid) => {
+                let notification = Notification::None;
+                let reply = Reply::None;
+                Ok((notification, reply))
+            }
+            Packet::Puback(pkid) => {
+                self.handle_incoming_puback(pkid)?;
                 let notification = Notification::None;
                 let reply = Reply::None;
                 Ok((notification, reply))
@@ -120,7 +120,7 @@ impl MqttState {
         let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
             keep_alive
         } else {
-            // rumqtt sets keep alive time to 2 minutes if user sets it to none.
+            // TODO: rumqtt sets keep alive time to 2 minutes if user sets it to none.
             // (get consensus)
             Duration::from_secs(120)
         };
@@ -128,7 +128,7 @@ impl MqttState {
         self.opts.keep_alive = Some(keep_alive);
         self.connection_status = MqttConnectionStatus::Handshake;
 
-        let (username, password) = match self.opts.security {
+        let (_username, _password) = match self.opts.security {
             SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
             _ => (None, None),
         };
@@ -210,7 +210,7 @@ impl MqttState {
         match qos {
             QoS::AtMostOnce => Reply::None,
             //TODO: Add method in mqtt3 to convert PacketIdentifier to u16
-            QoS::AtLeastOnce => Reply::PubAck(10),
+            QoS::AtLeastOnce => Reply::PubAck(pkid),
             QoS::ExactlyOnce => unimplemented!()
         }
     }
