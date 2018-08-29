@@ -1,5 +1,6 @@
 use std::io::Error as IoError;
 use tokio::timer::DeadlineError;
+use mqtt3::Packet;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -20,7 +21,11 @@ pub enum ConnectError {
     #[fail(display = "Empty dns list")]
     DnsListEmpty,
     #[fail(display = "Couldn't create mqtt connection in time")]
-    Timeout
+    Timeout,
+    #[fail(display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}", _0)]
+    NotConnackPacket(Packet),
+    #[fail(display = "Empty response")]
+    NoResponse,
 }
 
 #[derive(Debug, Fail)]
