@@ -98,6 +98,8 @@ struct Connection {
 
 
 impl Connection {
+    /// Takes mqtt options and tries to create initial connection on current thread and handles
+    /// connection events in a new thread if the initial connection is successful
     pub fn run(mqttopts: MqttOptions) -> crossbeam_channel::Receiver<Notification> {
         let (notification_tx, notificaiton_rx) = crossbeam_channel::bounded(10);
         let (networkreply_tx, networkreply_rx) = mpsc::channel::<Reply>(10);
@@ -132,6 +134,7 @@ impl Connection {
         notificaiton_rx
     }
 
+    /// Crates a future which handles incoming mqtt packets and notifies user over crossbeam channel
     fn network_receiver_future(&self,
                                notification_tx: crossbeam_channel::Sender<Notification>,
                                networkreply_tx: mpsc::Sender<Reply>,
@@ -154,8 +157,9 @@ impl Connection {
             })
     }
 
-    fn network_transmit_future<'a>(&'a mut self, network_sink: SplitSink<Framed<TcpStream, MqttCodec>>)
-        -> impl Future<Item=(), Error=NetworkSendError> + 'a {
+    /// Creates a future which handles all the network send requests
+    fn network_transmit_future<'a>(&'a mut self,
+                                   network_sink: SplitSink<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkSendError> + 'a {
         let mqtt_state = self.mqtt_state.clone();
         let request_rx = self.userrequest_rx.by_ref();
 
