@@ -13,6 +13,17 @@ pub enum ClientError {
 }
 
 #[derive(Debug, Fail)]
+pub enum MqttError {
+    #[fail(display = "Connection failed")]
+    ConnectError,
+    #[fail(display = "Network receive failed")]
+    NetworkReceiveError,
+    #[fail(display = "Network send failed")]
+    NetworkSendError
+}
+
+// TODO: Modify mqtt311 to return enums for mqtt connect error
+#[derive(Debug, Fail)]
 pub enum ConnectError {
     #[fail(display = "Mqtt connection failed. Error = {}", _0)]
     MqttConnectionRefused(u8),

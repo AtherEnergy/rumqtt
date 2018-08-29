@@ -6,7 +6,6 @@ use std::thread;
 use tokio::net::TcpStream;
 use tokio::timer::Deadline;
 use codec::MqttCodec;
-use error::ConnectError;
 use futures::{future, stream};
 use mqtt3::Packet;
 use mqttoptions::MqttOptions;
@@ -18,12 +17,11 @@ use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
 use client::mqttstate::MqttState;
-use error::NetworkReceiveError;
+use error::{ConnectError, NetworkReceiveError, NetworkSendError, MqttError};
 use tokio::timer::DeadlineError;
 use crossbeam_channel;
 use client::Notification;
 use client::Reply;
-use error::NetworkSendError;
 use client::UserRequest;
 
 
@@ -123,12 +121,20 @@ impl Connection {
 
             let network_receive_future = connection.network_receiver_future(notification_tx,
                                                                             networkreply_tx,
-                                                                            network_stream);
+                                                                            network_stream)
+                                                    .map_err(|e| {
+                                                        error!("Network receive error = {:?}", e);
+                                                        MqttError::NetworkReceiveError
+                                                    });
 
-            let network_transmit_future = connection.network_transmit_future(network_sink);
+            let network_transmit_future = connection.network_transmit_future(network_sink)
+                                                    .map_err(|e| {
+                                                        error!("Network send error = {:?}", e);
+                                                        MqttError::NetworkSendError
+                                                    });
 
-            let out = rt.block_on(network_transmit_future);
-            info!("Reactor result = {:?}", out);
+            let mqtt_future = network_transmit_future.select(network_receive_future);
+            let _ = rt.block_on(mqtt_future);
         });
 
         notificaiton_rx
