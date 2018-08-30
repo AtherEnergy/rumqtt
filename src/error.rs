@@ -1,7 +1,7 @@
 use std::io::Error as IoError;
 use mqtt3::Packet;
 use futures::sync::mpsc::SendError;
-use client::UserRequest;
+use client::{UserRequest, Reply};
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -47,7 +47,9 @@ pub enum NetworkReceiveError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Received unsolicited acknowledgment")]
-    Unsolicited
+    Unsolicited,
+    #[fail(display = "Failed sending request to sender thread. Error = {}", _0)]
+    MpscSend(SendError<Reply>)
 }
 
 #[derive(Debug, Fail)]

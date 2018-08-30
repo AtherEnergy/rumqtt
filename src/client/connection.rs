@@ -153,20 +153,22 @@ impl Connection {
         network_stream
             .map_err(|e| NetworkReceiveError::from(e))
             .for_each(move |packet| {
-                let (notification, reply) = match mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet) {
-                    Ok(v) => v,
-                    Err(e) => return future::err(e),
-                };
-
-                if !notification_tx.is_full() {
-                    notification_tx.send(notification);
-                }
-
+                let notification_reply_future = future::result(mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet));
                 //TODO: Can we prevent this clone?
+                // cloning crossbeam channel sender everytime is a problem accordig to docs
                 let networkreply_tx = networkreply_tx.clone();
-                networkreply_tx.send(reply);
+                let notification_tx = notification_tx.clone();
 
-                future::ok(())
+                notification_reply_future.and_then(move |(notification, reply)| {
+                    if !notification_tx.is_full() {
+                        notification_tx.send(notification);
+                    }
+                    networkreply_tx.send(reply)
+                                   .map(|_| ())
+                                   .map_err(|e| NetworkReceiveError::MpscSend(e))
+                }).or_else(|e| {
+                    future::err(e)
+                })
             })
     }
 
