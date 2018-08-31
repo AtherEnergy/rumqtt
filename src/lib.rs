@@ -18,3 +18,4 @@ pub mod error;
 pub mod mqttoptions;
 
 pub use mqttoptions::{MqttOptions, ReconnectOptions, SecurityOptions, ConnectionMethod};
+pub use client::MqttClient;

@@ -15,6 +15,7 @@ use std::time::Instant;
 use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::net::ToSocketAddrs;
 use client::mqttstate::MqttState;
 use error::{ConnectError, NetworkReceiveError, NetworkSendError, MqttError};
 use crossbeam_channel;
@@ -59,7 +60,8 @@ fn validate_and_handle_connack(mqtt_state: &mut MqttState, packet: Option<Packet
 
 /// Composes a new future which is a combination of tcp connect + mqtt handshake
 fn mqtt_connect(mqttopts: MqttOptions) -> impl Future<Item = (Framed<TcpStream, MqttCodec>, MqttState), Error = ConnectError> {
-    let addr = &mqttopts.broker_addr.parse().unwrap();
+    //TODO: Remove unwraps
+    let addr = &mqttopts.broker_addr.to_socket_addrs().unwrap().next().unwrap();
 
     let mqtt_connect = tcp_connect_future(addr).and_then(|framed| {
         let (mut mqtt_state, handshake_future) = handshake_future(framed, mqttopts);
@@ -106,16 +108,15 @@ impl Connection {
         let (networkreply_tx, networkreply_rx) = mpsc::channel::<Reply>(10);
         let (userrequest_tx, userrequest_rx) = mpsc::channel::<UserRequest>(10);
 
-
         let mqtt_connect_future = mqtt_connect(mqttopts);
         let mqtt_connect_deadline = Deadline::new(mqtt_connect_future,
                                                   Instant::now() + Duration::from_secs(30));
 
-        let mut rt = current_thread::Runtime::new().unwrap();
-        let (framed, mqtt_state) = rt.block_on(mqtt_connect_deadline).unwrap();
+        // let mut rt = current_thread::Runtime::new().unwrap();
+        let (framed, mqtt_state) = current_thread::block_on_all(mqtt_connect_deadline).unwrap();
 
         thread::spawn(move || {
-            let mut rt = current_thread::Runtime::new().unwrap();
+            // let mut rt = current_thread::Runtime::new().unwrap();
 
             let mqtt_state = Rc::new(RefCell::new(mqtt_state));
             let mut connection = Connection{mqtt_state, userrequest_rx};
@@ -136,8 +137,11 @@ impl Connection {
                                                         MqttError::NetworkSendError
                                                     });
 
-            let mqtt_future = network_transmit_future.select(network_receive_future);
-            let _ = rt.block_on(mqtt_future);
+            // let mqtt_future = network_transmit_future.select(network_receive_future);
+            // let _ = rt.block_on(mqtt_future);
+
+            let _out = current_thread::block_on_all(network_receive_future);
+            error!("@@@@@@@@@ Reactor Exited @@@@@@@@@");
         });
 
         (userrequest_tx, notificaiton_rx)
@@ -151,10 +155,14 @@ impl Connection {
         let mqtt_state = self.mqtt_state.clone();
 
         network_stream
-            .map_err(|e| NetworkReceiveError::from(e))
+            .map_err(|e| {
+                error!("Network receiver error = {:?}", e);
+                NetworkReceiveError::from(e)
+            })
             .for_each(move |packet| {
+                debug!("Incoming packet = {:?}", packet);
                 let notification_reply_future = future::result(mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet));
-                //TODO: Can we prevent this clone?
+                // TODO: Can we prevent this clone?
                 // cloning crossbeam channel sender everytime is a problem accordig to docs
                 let networkreply_tx = networkreply_tx.clone();
                 let notification_tx = notification_tx.clone();
