@@ -24,74 +24,9 @@ use client::Reply;
 use client::UserRequest;
 
 
-/// Composes a future which makes a new tcp connection to the broker.
-/// Note that this doesn't actual connect to the broker
-fn tcp_connect_future(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
-    TcpStream::connect(address)
-        .map_err(ConnectError::from)
-        .map(|stream| MqttCodec.framed(stream))
-}
-
-/// Composes a future which sends mqtt connect packet to the broker.
-/// Note that this doesn't actually send the connect packet.
-fn handshake_future(framed: Framed<TcpStream, MqttCodec>, 
-                    mqttoptions: MqttOptions) -> (MqttState, impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError>) {
-    let mut mqtt_state = MqttState::new(mqttoptions);
-    
-    let connect_packet = future::result(mqtt_state.handle_outgoing_connect());
-    let connect_future = connect_packet.and_then(|packet| {
-        framed.send(Packet::Connect(packet)).map_err(|e| ConnectError::from(e))
-    });
-    
-    (mqtt_state, connect_future)
-}
-
-
-/// Checks if incoming packet is mqtt connack packet and handles mqtt state
-fn validate_and_handle_connack(mqtt_state: &mut MqttState, packet: Option<Packet>) -> Result<(), ConnectError> {
-    match packet {
-        Some(Packet::Connack(connack)) => mqtt_state.handle_incoming_connack(connack)?,
-        Some(packet) => return Err(ConnectError::NotConnackPacket(packet)),
-        None => return Err(ConnectError::NoResponse)
-    };
-
-    Ok(())
-}
-
-/// Composes a new future which is a combination of tcp connect + mqtt handshake
-fn mqtt_connect(mqttopts: MqttOptions) -> impl Future<Item = (Framed<TcpStream, MqttCodec>, MqttState), Error = ConnectError> {
-    //TODO: Remove unwraps
-    let addr = &mqttopts.broker_addr.to_socket_addrs().unwrap().next().unwrap();
-
-    let mqtt_connect = tcp_connect_future(addr).and_then(|framed| {
-        let (mut mqtt_state, handshake_future) = handshake_future(framed, mqttopts);
-        handshake_future.and_then(move |framed| {
-            framed
-                .into_future()
-                .map_err(|(err, _framed)| ConnectError::from(err))
-                .and_then(|(response, framed)| {
-                    match validate_and_handle_connack(&mut mqtt_state, response) {
-                        Ok(_) => future::ok((framed, mqtt_state)),
-                        Err(e) => future::err(e)
-                    }
-                })
-        })
-    });
-
-    mqtt_connect
-}
-
-// TODO: Add a timeout to the whole tcp connect + mqtt connect + connack wait so that our client
-// TODO: won't be indefinitely blocked
-//let mqtt_connect_deadline = Deadline::new(mqtt_connect_deadline, Instant::now() + Duration::from_secs(30));
-//// tokio_current_thread::block_on_all(mqtt_connect_deadline);
-//let mut rt = current_thread::Runtime::new().unwrap();
-//rt.block_on(mqtt_connect_deadline)
-
-
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
-// https://github.com/tokio-rs/tokio-core/issues/182
+//  https://github.com/tokio-rs/tokio-core/issues/182
 
 
 pub struct Connection {
@@ -112,39 +47,105 @@ impl Connection {
         let mqtt_connect_deadline = Deadline::new(mqtt_connect_future,
                                                   Instant::now() + Duration::from_secs(30));
 
-        // let mut rt = current_thread::Runtime::new().unwrap();
-        let (framed, mqtt_state) = current_thread::block_on_all(mqtt_connect_deadline).unwrap();
+        let mqtt_state = Rc::new(RefCell::new(mqtt_state));
+        let mut connection = Connection{mqtt_state, userrequest_rx};
+        thread::spawn(move || loop {
 
-        thread::spawn(move || {
-            // let mut rt = current_thread::Runtime::new().unwrap();
+            // NOTE: We need to use same reactor across threads because io resources (framed) will
+            //       bind to reactor lazily.
+            //       You'll face `reactor gone` error if `framed` is used again with a new recator
+            let mut rt = current_thread::Runtime::new().unwrap();
+            let (framed, mqtt_state) = rt.block_on(mqtt_connect_deadline).unwrap();
 
-            let mqtt_state = Rc::new(RefCell::new(mqtt_state));
-            let mut connection = Connection{mqtt_state, userrequest_rx};
-            let (network_sink, network_stream) = framed.split();
+            
+            
+            let mqtt_future = connection.mqtt_future(notification_tx, networkreply_tx, networkreply_rx, framed);
+            let _ = rt.block_on(mqtt_future);
 
-
-            let network_receive_future = connection.network_receiver_future(notification_tx,
-                                                                            networkreply_tx,
-                                                                            network_stream)
-                                                    .map_err(|e| {
-                                                        error!("Network receive error = {:?}", e);
-                                                        MqttError::NetworkReceiveError
-                                                    });
-
-            let network_transmit_future = connection.network_transmit_future(networkreply_rx, network_sink)
-                                                    .map_err(|e| {
-                                                        error!("Network send error = {:?}", e);
-                                                        MqttError::NetworkSendError
-                                                    });
-
-            // let mqtt_future = network_transmit_future.select(network_receive_future);
-            // let _ = rt.block_on(mqtt_future);
-
-            let _out = current_thread::block_on_all(network_receive_future);
             error!("@@@@@@@@@ Reactor Exited @@@@@@@@@");
         });
 
         (userrequest_tx, notificaiton_rx)
+    }
+
+    /// Composes a future which makes a new tcp connection to the broker.
+    /// Note that this doesn't actual connect to the broker
+    fn tcp_connect_future(address: &SocketAddr) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+        TcpStream::connect(address)
+            .map_err(ConnectError::from)
+            .map(|stream| MqttCodec.framed(stream))
+    }
+
+    /// Composes a future which sends mqtt connect packet to the broker.
+    /// Note that this doesn't actually send the connect packet.
+    fn handshake_future(framed: Framed<TcpStream, MqttCodec>, 
+                        mqttoptions: MqttOptions) -> (MqttState, impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError>) {
+        let mut mqtt_state = MqttState::new(mqttoptions);
+
+        let connect_packet = future::result(mqtt_state.handle_outgoing_connect());
+        let connect_future = connect_packet.and_then(|packet| {
+            framed.send(Packet::Connect(packet)).map_err(|e| ConnectError::from(e))
+        });
+
+        (mqtt_state, connect_future)
+    }
+
+
+    /// Checks if incoming packet is mqtt connack packet and handles mqtt state
+    fn validate_and_handle_connack(mqtt_state: &mut MqttState, packet: Option<Packet>) -> Result<(), ConnectError> {
+        match packet {
+            Some(Packet::Connack(connack)) => mqtt_state.handle_incoming_connack(connack)?,
+            Some(packet) => return Err(ConnectError::NotConnackPacket(packet)),
+            None => return Err(ConnectError::NoResponse)
+        };
+
+        Ok(())
+    }
+
+    /// Composes a new future which is a combination of tcp connect + mqtt handshake
+    fn mqtt_connect(mqttopts: MqttOptions) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+        //TODO: Remove unwraps
+        let addr = &mqttopts.broker_addr.to_socket_addrs().unwrap().next().unwrap();
+
+        let mqtt_connect = tcp_connect_future(addr).and_then(|framed| {
+            let (mut mqtt_state, handshake_future) = handshake_future(framed, mqttopts);
+            handshake_future.and_then(move |framed| {
+                framed
+                    .into_future()
+                    .map_err(|(err, _framed)| ConnectError::from(err))
+                    .and_then(|(response, framed)| {
+                        match validate_and_handle_connack(&mut mqtt_state, response) {
+                            Ok(_) => future::ok((framed, mqtt_state)),
+                            Err(e) => future::err(e)
+                        }
+                    })
+            })
+        });
+
+        mqtt_connect
+    }
+
+    fn mqtt_future<'a>(&'a mut self, notification_tx: crossbeam_channel::Sender<Notification>
+                                   , networkreply_tx: mpsc::Sender<Reply>
+                                   , networkreply_rx: mpsc::Receiver<Reply>
+                                   , framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = (), Error = MqttError> + 'a {
+        
+        let (network_sink, network_stream) = framed.split();
+
+        let network_receive_future = self.network_receiver_future(notification_tx, networkreply_tx, network_stream)
+                                         .map_err(|e| {
+                                             error!("Network receive error = {:?}", e);
+                                             MqttError::NetworkReceiveError
+                                         });
+        
+        let network_transmit_future = self.network_transmit_future(networkreply_rx, network_sink)
+                                          .map_err(|e| {
+                                              error!("Network send error = {:?}", e);
+                                              MqttError::NetworkSendError
+                                          });
+        
+        let mqtt_future = network_transmit_future.select(network_receive_future); 
+        mqtt_future.map(|_| ()).map_err(|(err, _select)| err)
     }
 
     /// Crates a future which handles incoming mqtt packets and notifies user over crossbeam channel
