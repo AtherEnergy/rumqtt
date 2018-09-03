@@ -1,7 +1,7 @@
 use std::io::Error as IoError;
 use mqtt3::Packet;
 use futures::sync::mpsc::SendError;
-use client::{UserRequest, Reply};
+use client::{Request};
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -12,7 +12,7 @@ pub enum ClientError {
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<UserRequest>)
+    MpscSend(SendError<Request>)
 }
 
 #[derive(Debug, Fail)]
@@ -47,9 +47,7 @@ pub enum NetworkReceiveError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Received unsolicited acknowledgment")]
-    Unsolicited,
-    #[fail(display = "Failed sending request to sender thread. Error = {}", _0)]
-    MpscSend(SendError<Reply>)
+    Unsolicited
 }
 
 #[derive(Debug, Fail)]
@@ -86,8 +84,8 @@ impl From<IoError> for NetworkSendError {
     }
 }
 
-impl From<SendError<UserRequest>> for ClientError {
-    fn from(err: SendError<UserRequest>) -> ClientError {
+impl From<SendError<Request>> for ClientError {
+    fn from(err: SendError<Request>) -> ClientError {
         ClientError::MpscSend(err)
     }
 }

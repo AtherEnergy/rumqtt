@@ -20,18 +20,16 @@ pub enum Notification {
     None
 }
 
-pub enum Reply {
+/// Requests to network event loop
+pub enum Request {
+    Publish(Publish),
     PubAck(PacketIdentifier),
     Ping,
     None
 }
 
-pub enum UserRequest {
-    MqttPublish(Publish)
-}
-
 pub struct MqttClient {
-    userrequest_tx: mpsc::Sender<UserRequest>,
+    userrequest_tx: mpsc::Sender<Request>,
     notification_rx: crossbeam_channel::Receiver<Notification>,
     max_packet_size: usize
 }
@@ -65,7 +63,7 @@ impl MqttClient {
         };
 
         let tx = &mut self.userrequest_tx;
-        tx.send(UserRequest::MqttPublish(publish)).wait()?;
+        tx.send(Request::Publish(publish)).wait()?;
         Ok(())
     }
 }

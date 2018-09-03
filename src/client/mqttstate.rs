@@ -5,7 +5,7 @@ use std::result::Result;
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
 use error::{ConnectError, NetworkSendError, NetworkReceiveError};
 use mqttoptions::{MqttOptions, SecurityOptions};
-use client::{Notification, Reply};
+use client::{Notification, Request};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -84,13 +84,13 @@ impl MqttState {
     //
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Reply), NetworkReceiveError> {
+    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Request), NetworkReceiveError> {
         self.update_last_in_control_time();
 
         match packet {
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
-                Ok((Notification::None, Reply::None))
+                Ok((Notification::None, Request::None))
             }
             Packet::Publish(publish) => {
                 let notification = Notification::Publish(publish.payload.clone());
@@ -99,13 +99,13 @@ impl MqttState {
             }
             Packet::Suback(_pkid) => {
                 let notification = Notification::None;
-                let reply = Reply::None;
+                let reply = Request::None;
                 Ok((notification, reply))
             }
             Packet::Puback(pkid) => {
                 self.handle_incoming_puback(pkid)?;
                 let notification = Notification::None;
-                let reply = Reply::None;
+                let reply = Request::None;
                 Ok((notification, reply))
             }
             _ => unimplemented!()
@@ -199,14 +199,14 @@ impl MqttState {
 
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Reply {
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Request {
         let pkid = publish.pid.unwrap();
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => Reply::None,
+            QoS::AtMostOnce => Request::None,
             //TODO: Add method in mqtt3 to convert PacketIdentifier to u16
-            QoS::AtLeastOnce => Reply::PubAck(pkid),
+            QoS::AtLeastOnce => Request::PubAck(pkid),
             QoS::ExactlyOnce => unimplemented!()
         }
     }
