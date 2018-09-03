@@ -9,6 +9,6 @@ fn main() {
 
     let mqtt_client = MqttClient::start(mqtt_options);
 
-    thread::sleep_ms(10000);
+    thread::sleep_ms(100000);
     println!("Hello world");
 }

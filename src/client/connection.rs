@@ -12,6 +12,7 @@ use mqtt3::{Packet, PacketIdentifier};
 use mqttoptions::MqttOptions;
 use tokio_codec::{Decoder, Framed};
 use tokio::runtime::current_thread;
+use tokio::timer::Timeout;
 use std::time::Instant;
 use std::time::Duration;
 use std::rc::Rc;
@@ -58,20 +59,33 @@ impl Connection {
                 mqttoptions
             };
 
-            loop {
+            'reconnection: loop {
                 let mqtt_connect_future = connection.mqtt_connect();
-                let mqtt_connect_deadline = Deadline::new(mqtt_connect_future,
+                let mqtt_connect_deadline = Timeout::new(mqtt_connect_future,
                                                       Instant::now() + Duration::from_secs(30));
 
                 // NOTE: We need to use same reactor across threads because io resources (framed) will
                 //       bind to reactor lazily.
                 //       You'll face `reactor gone` error if `framed` is used again with a new recator
                 let mut rt = current_thread::Runtime::new().unwrap();
-                let framed = rt.block_on(mqtt_connect_deadline).unwrap();
-
+                let framed = match rt.block_on(mqtt_connect_deadline) {
+                    Ok(framed) => framed,
+                    Err(e) => {
+                        error!("Connection error = {:?}", e);
+                        thread::sleep_ms(2000);
+                        continue 'reconnection
+                    }
+                };
+                
+                debug!("Mqtt connection successful!!");
 
                 let mqtt_future = connection.mqtt_future(framed);
-                let _ = rt.block_on(mqtt_future);
+                
+                if let Err(e) = rt.block_on(mqtt_future) {
+                    error!("Mqtt eventloop error = {:?}", e);
+                    thread::sleep_ms(2000);
+                    continue 'reconnection
+                }
 
                 error!("@@@@@@@@@ Reactor Exited @@@@@@@@@");
             }
@@ -99,28 +113,27 @@ impl Connection {
         let tcp_connect_future = self.tcp_connect_future();
         let connect_packet = future::result(self.mqtt_state.borrow_mut().handle_outgoing_connect());
 
-        tcp_connect_future.and_then(move |framed| { // tcp connect
-            connect_packet.and_then(move |packet| { // send mqtt connect packet
-                framed.send(Packet::Connect(packet)).map_err(|e| ConnectError::from(e))
-            })
-            .and_then(move |framed| {
-                framed
-                    .into_future()
-                    .map_err(|(err, _framed)| ConnectError::from(err))
-                    .and_then(move |(response, framed)| { // receive mqtt connack packet
-                        let mut mqtt_state = mqtt_state.borrow_mut();
-                        match check_if_connack(response) {
-                            Ok(connack) => {
-                                if let Err(err) = mqtt_state.handle_incoming_connack(connack) {
-                                    return future::err(err)
-                                }
-                                future::ok(framed)
-                            }
-                            Err(e) => future::err(e)
-                        }
-                    })
-            })
+        tcp_connect_future.and_then(move |framed| connect_packet.and_then(move |packet| { // send mqtt connect packet
+            framed.send(Packet::Connect(packet)).map_err(|e| ConnectError::from(e))
         })
+        .and_then(move |framed| {
+            framed
+                .into_future()
+                .map_err(|(err, _framed)| ConnectError::from(err))
+                .and_then(move |(response, framed)| { // receive mqtt connack packet
+                    debug!("Mqtt connect response = {:?}", response);
+                    let mut mqtt_state = mqtt_state.borrow_mut();
+                    match check_if_connack(response) {
+                        Ok(connack) => {
+                            if let Err(err) = mqtt_state.handle_incoming_connack(connack) {
+                                return future::err(err)
+                            }
+                            future::ok(framed)
+                        }
+                        Err(e) => future::err(e)
+                    }
+                })
+        }))
     }
 
     fn mqtt_future<'a>(&'a mut self,
