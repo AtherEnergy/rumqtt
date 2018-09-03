@@ -62,7 +62,7 @@ impl Connection {
             'reconnection: loop {
                 let mqtt_connect_future = connection.mqtt_connect();
                 let mqtt_connect_deadline = Timeout::new(mqtt_connect_future,
-                                                      Instant::now() + Duration::from_secs(30));
+                                                      Duration::from_secs(30));
 
                 // NOTE: We need to use same reactor across threads because io resources (framed) will
                 //       bind to reactor lazily.
