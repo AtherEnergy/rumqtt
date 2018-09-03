@@ -84,7 +84,7 @@ impl MqttOptions {
 
         MqttOptions {
             broker_addr: addr.into(),
-            keep_alive: Some(Duration::from_secs(30)),
+            keep_alive: Some(Duration::from_secs(60)),
             clean_session: true,
             client_id: id.into(),
             connection_method: ConnectionMethod::Tcp,

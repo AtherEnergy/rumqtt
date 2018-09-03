@@ -21,8 +21,7 @@ pub(crate) struct MqttState {
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
     await_pingresp: bool,
-    pub last_out_control_time: Instant,
-    pub last_in_control_time: Instant,
+    last_network_activity: Instant,
     last_pkid: PacketIdentifier,
 
     // For QoS 1. Stores outgoing publishes
@@ -48,16 +47,13 @@ impl MqttState {
             opts,
             connection_status: MqttConnectionStatus::Disconnected,
             await_pingresp: false,
-            last_out_control_time: Instant::now(),
-            last_in_control_time: Instant::now(),
+            last_network_activity: Instant::now(),
             last_pkid: PacketIdentifier(0),
             outgoing_pub: VecDeque::new(),
         }
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkSendError> {
-        self.update_last_out_control_time();
-
         match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
@@ -216,23 +212,17 @@ impl MqttState {
     }
 
     // reset the last control packet sent time
-    pub fn update_last_out_control_time(&mut self) {
-        self.last_out_control_time = Instant::now();
-    }
-
-    // reset the last control packet sent time
     pub fn update_last_in_control_time(&mut self) {
-        self.last_in_control_time = Instant::now();
+        self.last_network_activity = Instant::now();
     }
 
     // check if pinging is required based on last flush time
     pub fn is_ping_required(&self) -> bool {
         if let Some(keep_alive) = self.opts.keep_alive  {
-            let out_elapsed = self.last_out_control_time.elapsed();
-            let in_elapsed = self.last_in_control_time.elapsed();
+            let in_elapsed = self.last_network_activity.elapsed();
 
-            debug!("Last outgoing before {:?} seconds. Last incoming packet before {:?} seconds", out_elapsed.as_secs(), in_elapsed.as_secs());
-            out_elapsed >= keep_alive || in_elapsed >= keep_alive
+            debug!("Last incoming packet (network activity) before {:?} seconds", in_elapsed.as_secs());
+            in_elapsed >= keep_alive
         } else {
             false
         }
@@ -312,8 +302,7 @@ impl MqttState {
 
     fn clear_session_info(&mut self) {
         self.outgoing_pub.clear();
-        self.last_out_control_time = Instant::now();
-        self.last_in_control_time = Instant::now();
+        self.last_network_activity = Instant::now();
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation

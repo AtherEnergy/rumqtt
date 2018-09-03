@@ -21,11 +21,14 @@ the connection is successful
 ```
 
 ##### Detect halfopen connections. 
-    * Halfopen connections can't be detected during read.
+    * Halfopen connections can't be detected during idle read.
+    * But if the read() call reads data implies the connection is live.
+    * Update network activity with read calls and only ping when necessary.
     * Write operation won't error out until the tcp write buffer is full
-    * Before ping timer sends a ping, it should verify if it has received previous ping response
     * Don't update `last network activity` when tcp writes are successful. \
       They'll be successful when the buffers aren't full even when the network is down.
-    * Update network activity based on incoming packets.
+    * Finally to dectect half open connections, ping when there is no network activity and
+      the next ping should verify previous ping response and disconnect if it didn't receive any
+
 
 

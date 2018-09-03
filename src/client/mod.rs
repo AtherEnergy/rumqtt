@@ -22,6 +22,7 @@ pub enum Notification {
 
 pub enum Reply {
     PubAck(PacketIdentifier),
+    Ping,
     None
 }
 
