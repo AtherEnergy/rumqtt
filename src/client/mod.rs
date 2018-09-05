@@ -9,6 +9,7 @@ use MqttOptions;
 pub mod connection;
 pub mod mqttstate;
 
+#[derive(Debug)]
 pub enum Notification {
     Publish(Arc<Vec<u8>>),
     PubAck(u16),
@@ -30,20 +31,20 @@ pub enum Request {
 
 pub struct MqttClient {
     userrequest_tx: mpsc::Sender<Request>,
-    notification_rx: crossbeam_channel::Receiver<Notification>,
     max_packet_size: usize
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions) -> Self {
+    pub fn start(opts: MqttOptions) -> (Self, crossbeam_channel::Receiver<Notification>) {
          let (userrequest_tx, notification_rx) = connection::Connection::run(opts);
 
         //TODO: Remove max packet size hardcode
-         MqttClient {
+        let client = MqttClient {
              userrequest_tx,
-             notification_rx,
              max_packet_size: 1000
-         }
+        };
+
+        (client, notification_rx)
     }
 
     pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError> {
