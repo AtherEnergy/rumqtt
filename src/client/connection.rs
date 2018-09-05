@@ -10,7 +10,7 @@ use mqtt3::Packet;
 use mqttoptions::MqttOptions;
 use tokio_codec::{Decoder, Framed};
 use tokio::runtime::current_thread;
-use tokio::timer::Timeout;
+use tokio::timer::{Timeout, Interval};
 use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -134,11 +134,13 @@ impl Connection {
 
         let (network_sink, network_stream) = framed.split();
 
+        let keep_alive_stream = self.network_ping_stream();
         let network_reply_stream = self.network_reply_stream(network_stream);
         let network_request_stream = self.network_request_stream();
 
         network_request_stream
             .select(network_reply_stream)
+            .select(keep_alive_stream)
             .forward(network_sink)
             .map(|(_selct, _splitsink)| ())
     }
@@ -159,17 +161,28 @@ impl Connection {
             })
             .and_then(move |packet| {
                 debug!("Incoming packet = {:?}", packet);
-                let notification_reply_future = future::result(mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet));
+                let network_reply_future = future::result(mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet));
                 let notification_tx = notification_tx.clone();
-                
-                notification_reply_future.and_then(move |(notification, reply)| {
-                    if !notification_tx.is_full() {
-                        notification_tx.send(notification);
-                    }
-                    future::ok(reply.into())
-                }).or_else(|e| {
-                    future::err(e)
-                })
+
+                network_reply_future
+                    .and_then(move |(notification, reply)| {
+                        if !notification_tx.is_full() {
+                            notification_tx.send(notification);
+                        }
+                        future::ok(reply)
+                    })
+                    .or_else(|e| {
+                        future::err(e)
+                    })
+            })
+            .skip_while(|reply| {
+                match reply {
+                    Request::None => future::ok(true),
+                    _ => future::ok(false)
+                }
+            })
+            .and_then(move |packet| {
+                future::ok(packet.into())
             })
     }
 
@@ -205,6 +218,23 @@ impl Connection {
                     }
                     Err(e) => future::err(e)
                 }
+            })
+    }
+
+    fn network_ping_stream(&self) -> impl Stream<Item=Packet, Error=NetworkError> {
+        // TODO: Make keep_alive mandatory
+        let keep_alive = self.mqttoptions.keep_alive.unwrap();
+        let mqtt_state = self.mqtt_state.clone();
+        let ping_interval = Interval::new_interval(keep_alive);
+
+        ping_interval
+            .map_err(|e| e.into())
+            .skip_while(move |_v| {
+                let mqtt_state = mqtt_state.borrow();
+                future::ok(!mqtt_state.is_ping_required())
+            })
+            .and_then(|_v| {
+                future::ok(Packet::Pingreq)
             })
     }
 }

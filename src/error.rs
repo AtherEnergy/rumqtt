@@ -1,6 +1,7 @@
 use std::io::Error as IoError;
 use mqtt3::Packet;
 use futures::sync::mpsc::SendError;
+use tokio::timer;
 use client::{Request};
 
 #[derive(Debug, Fail)]
@@ -54,9 +55,12 @@ pub enum NetworkError {
     PacketSizeLimitExceeded,
     #[fail(display = "Received unsolicited acknowledgment")]
     Unsolicited,
+    #[fail(display = "Tokio timer error = {}", _0)]
+    Timer(timer::Error),
     #[fail(display = "Dummy error for converting () to network error")]
-    Blah
+    Blah,
 }
+
 
 impl From<IoError> for ConnectError {
     fn from(err: IoError) -> ConnectError {
@@ -73,5 +77,11 @@ impl From<IoError> for NetworkError {
 impl From<SendError<Request>> for ClientError {
     fn from(err: SendError<Request>) -> ClientError {
         ClientError::MpscSend(err)
+    }
+}
+
+impl From<timer::Error> for NetworkError {
+    fn from(err: timer::Error) -> NetworkError {
+        NetworkError::Timer(err)
     }
 }
