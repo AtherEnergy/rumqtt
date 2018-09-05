@@ -19,10 +19,8 @@ pub enum ClientError {
 pub enum MqttError {
     #[fail(display = "Connection failed")]
     ConnectError,
-    #[fail(display = "Network receive failed")]
-    NetworkReceiveError,
-    #[fail(display = "Network send failed")]
-    NetworkSendError
+    #[fail(display = "Network call failed")]
+    NetworkError
 }
 
 // TODO: Modify mqtt311 to return enums for mqtt connect error
@@ -43,15 +41,7 @@ pub enum ConnectError {
 }
 
 #[derive(Debug, Fail)]
-pub enum NetworkReceiveError {
-    #[fail(display = "Io failed. Error = {}", _0)]
-    Io(IoError),
-    #[fail(display = "Received unsolicited acknowledgment")]
-    Unsolicited
-}
-
-#[derive(Debug, Fail)]
-pub enum NetworkSendError {
+pub enum NetworkError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Last ping response not received")]
@@ -62,6 +52,8 @@ pub enum NetworkSendError {
     Timeout,
     #[fail(display = "Packet limit size exceeded")]
     PacketSizeLimitExceeded,
+    #[fail(display = "Received unsolicited acknowledgment")]
+    Unsolicited,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah
 }
@@ -72,15 +64,9 @@ impl From<IoError> for ConnectError {
     }
 }
 
-impl From<IoError> for NetworkReceiveError {
-    fn from(err: IoError) -> NetworkReceiveError {
-        NetworkReceiveError::Io(err)
-    }
-}
-
-impl From<IoError> for NetworkSendError {
-    fn from(err: IoError) -> NetworkSendError {
-        NetworkSendError::Io(err)
+impl From<IoError> for NetworkError {
+    fn from(err: IoError) -> NetworkError {
+        NetworkError::Io(err)
     }
 }
 
