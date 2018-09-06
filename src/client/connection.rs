@@ -1,7 +1,7 @@
 use mqtt3::Connack;
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
-use futures::stream::{SplitSink, SplitStream};
+use futures::stream::SplitStream;
 use std::thread;
 use tokio::net::TcpStream;
 use codec::MqttCodec;
@@ -166,10 +166,14 @@ impl Connection {
 
                 network_reply_future
                     .and_then(move |(notification, reply)| {
-                        if !notification_tx.is_full() {
-                            notification_tx.send(notification);
+                        match notification {
+                            Notification::None => future::ok(reply),
+                            _ if !notification_tx.is_full() => {
+                                notification_tx.send(notification);
+                                future::ok(reply)
+                            }
+                            _ => future::ok(reply)
                         }
-                        future::ok(reply)
                     })
                     .or_else(|e| {
                         future::err(e)
