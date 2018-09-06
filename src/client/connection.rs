@@ -1,29 +1,25 @@
 use mqtt3::Connack;
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
-use futures::stream::{SplitSink, SplitStream};
-use std::net::SocketAddr;
+use futures::stream::SplitStream;
 use std::thread;
 use tokio::net::TcpStream;
-use tokio::timer::Deadline;
 use codec::MqttCodec;
 use futures::{future, stream};
-use mqtt3::{Packet, PacketIdentifier};
+use mqtt3::Packet;
 use mqttoptions::MqttOptions;
 use tokio_codec::{Decoder, Framed};
 use tokio::runtime::current_thread;
-use tokio::timer::Timeout;
-use std::time::Instant;
+use tokio::timer::{Timeout, Interval};
 use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::net::ToSocketAddrs;
 use client::mqttstate::MqttState;
-use error::{ConnectError, NetworkReceiveError, NetworkSendError, MqttError};
+use error::{ConnectError, NetworkError};
 use crossbeam_channel;
 use client::Notification;
-use client::Reply;
-use client::UserRequest;
+use client::Request;
 
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
@@ -33,9 +29,7 @@ use client::UserRequest;
 
 pub struct Connection {
     mqtt_state: Rc<RefCell<MqttState>>,
-    userrequest_rx: mpsc::Receiver<UserRequest>,
-    networkreply_tx: mpsc::Sender<Reply>,
-    networkreply_rx: mpsc::Receiver<Reply>,
+    userrequest_rx: mpsc::Receiver<Request>,
     notification_tx: crossbeam_channel::Sender<Notification>,
     mqttoptions: MqttOptions
 }
@@ -43,18 +37,16 @@ pub struct Connection {
 impl Connection {
     /// Takes mqtt options and tries to create initial connection on current thread and handles
     /// connection events in a new thread if the initial connection is successful
-    pub fn run(mqttoptions: MqttOptions) -> (mpsc::Sender<UserRequest>, crossbeam_channel::Receiver<Notification>) {
+    pub fn run(mqttoptions: MqttOptions) -> (mpsc::Sender<Request>, crossbeam_channel::Receiver<Notification>) {
         let (notification_tx, notificaiton_rx) = crossbeam_channel::bounded(10);
-        let (networkreply_tx, networkreply_rx) = mpsc::channel::<Reply>(10);
-        let (userrequest_tx, userrequest_rx) = mpsc::channel::<UserRequest>(10);
+        let (userrequest_tx, userrequest_rx) = mpsc::channel::<Request>(10);
 
         thread::spawn(move || {
             
             let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
             let mut connection = Connection {
-                mqtt_state, userrequest_rx, 
-                networkreply_tx, 
-                networkreply_rx, 
+                mqtt_state,
+                userrequest_rx,
                 notification_tx,
                 mqttoptions
             };
@@ -80,7 +72,7 @@ impl Connection {
                 debug!("Mqtt connection successful!!");
 
                 let mqtt_future = connection.mqtt_future(framed);
-                
+
                 if let Err(e) = rt.block_on(mqtt_future) {
                     error!("Mqtt eventloop error = {:?}", e);
                     thread::sleep_ms(2000);
@@ -122,6 +114,7 @@ impl Connection {
                 .map_err(|(err, _framed)| ConnectError::from(err))
                 .and_then(move |(response, framed)| { // receive mqtt connack packet
                     debug!("Mqtt connect response = {:?}", response);
+
                     let mut mqtt_state = mqtt_state.borrow_mut();
                     match check_if_connack(response) {
                         Ok(connack) => {
@@ -137,87 +130,90 @@ impl Connection {
     }
 
     fn mqtt_future<'a>(&'a mut self,
-                       framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = (), Error = MqttError> + 'a {
-        
+                       framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = (), Error = NetworkError> + 'a {
+
         let (network_sink, network_stream) = framed.split();
 
-        let network_receive_future = self.network_receiver_future(network_stream)
-                                         .map_err(|e| {
-                                             error!("Network receive error = {:?}", e);
-                                             MqttError::NetworkReceiveError
-                                         });
-        
-        let network_transmit_future = self.network_transmit_future(network_sink)
-                                          .map_err(|e| {
-                                              error!("Network send error = {:?}", e);
-                                              MqttError::NetworkSendError
-                                          });
-        
-        let mqtt_future = network_transmit_future.select(network_receive_future); 
-        mqtt_future.map(|_| ()).map_err(|(err, _select)| err)
+        let keep_alive_stream = self.network_ping_stream();
+        let network_reply_stream = self.network_reply_stream(network_stream);
+        let network_request_stream = self.network_request_stream();
+
+        network_request_stream
+            .select(network_reply_stream)
+            .select(keep_alive_stream)
+            .forward(network_sink)
+            .map(|(_selct, _splitsink)| ())
     }
 
-    /// Crates a future which handles incoming mqtt packets and notifies user over crossbeam channel
-    fn network_receiver_future(&self,
-                               network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkReceiveError> {
+    /// Handles all incoming network packets (including sending notifications to user over crossbeam
+    /// channel) and creates a stream of packets to send on network
+    fn network_reply_stream(&self,
+                            network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Stream<Item=Packet, Error=NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
         
         // TODO: Can we prevent this clone?
         // cloning crossbeam channel sender everytime is a problem accordig to docs
-        let networkreply_tx = self.networkreply_tx.clone();
         let notification_tx = self.notification_tx.clone();
         network_stream
             .map_err(|e| {
                 error!("Network receiver error = {:?}", e);
-                NetworkReceiveError::from(e)
+                NetworkError::from(e)
             })
-            .for_each(move |packet| {
+            .and_then(move |packet| {
                 debug!("Incoming packet = {:?}", packet);
-                let notification_reply_future = future::result(mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet));
-                let networkreply_tx = networkreply_tx.clone();
+                let network_reply_future = future::result(mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet));
                 let notification_tx = notification_tx.clone();
-                
-                notification_reply_future.and_then(move |(notification, reply)| {
-                    if !notification_tx.is_full() {
-                        notification_tx.send(notification);
-                    }
-                    networkreply_tx.send(reply)
-                                   .map(|_| ())
-                                   .map_err(|e| NetworkReceiveError::MpscSend(e))
-                }).or_else(|e| {
-                    future::err(e)
-                })
+
+                network_reply_future
+                    .and_then(move |(notification, reply)| {
+                        match notification {
+                            Notification::None => future::ok(reply),
+                            _ if !notification_tx.is_full() => {
+                                notification_tx.send(notification);
+                                future::ok(reply)
+                            }
+                            _ => future::ok(reply)
+                        }
+                    })
+                    .or_else(|e| {
+                        future::err(e)
+                    })
+            })
+            .skip_while(|reply| {
+                match reply {
+                    Request::None => future::ok(true),
+                    _ => future::ok(false)
+                }
+            })
+            .and_then(move |packet| {
+                future::ok(packet.into())
             })
     }
 
-    /// Creates a future which handles all the network send requests
-    fn network_transmit_future<'a>(&'a mut self,
-                                   network_sink: SplitSink<Framed<TcpStream, MqttCodec>>) -> impl Future<Item=(), Error=NetworkSendError> + 'a {
+    /// Handles all incoming user and session requests and creates a stream of packets to send
+    /// on network
+    fn network_request_stream<'a>(&'a mut self) -> impl Stream<Item=Packet, Error=NetworkError> + 'a {
         let mqtt_state = self.mqtt_state.clone();
+
         let userrequest_rx = self.userrequest_rx.by_ref()
-                                                .map(|userrequest| userrequest.into())
-                                                .map_err(|e| {
-                                                    error!("User request error = {:?}", e);
-                                                    NetworkSendError::Blah
-                                                });
-        let networkreply_rx = self.networkreply_rx.by_ref()
-                                                  .map(|reply| reply.into())
-                                                  .map_err(|e| {
-                                                      error!("Network reply error = {:?}", e);
-                                                      NetworkSendError::Blah
-                                                  });;
+            .map(|userrequest| userrequest.into())
+            .map_err(|e| {
+                error!("User request error = {:?}", e);
+                NetworkError::Blah
+            });
+
 
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
         let last_session_publishes = stream::iter_ok::<_, ()>(last_session_publishes)
                                             .map_err(|e| {
                                                 error!("Last session publish stream error = {:?}", e);
-                                                NetworkSendError::Blah
+                                                NetworkError::Blah
                                             });
 
         // NOTE: AndThen is a stream and ForEach is a future
+        // TODO: Check if 'chain' puts all its elements before userrequests
         userrequest_rx
             .chain(last_session_publishes)
-            .select(networkreply_rx)
             .and_then(move |packet: Packet| {
                 match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet) {
                     Ok(packet) => {
@@ -227,8 +223,23 @@ impl Connection {
                     Err(e) => future::err(e)
                 }
             })
-            .forward(network_sink)
-            .map(|_v| ())
+    }
+
+    fn network_ping_stream(&self) -> impl Stream<Item=Packet, Error=NetworkError> {
+        // TODO: Make keep_alive mandatory
+        let keep_alive = self.mqttoptions.keep_alive.unwrap();
+        let mqtt_state = self.mqtt_state.clone();
+        let ping_interval = Interval::new_interval(keep_alive);
+
+        ping_interval
+            .map_err(|e| e.into())
+            .skip_while(move |_v| {
+                let mqtt_state = mqtt_state.borrow();
+                future::ok(!mqtt_state.is_ping_required())
+            })
+            .and_then(|_v| {
+                future::ok(Packet::Pingreq)
+            })
     }
 }
 
@@ -254,18 +265,12 @@ fn packet_info(packet: &Packet) -> String {
     }
 }
 
-impl From<UserRequest> for Packet {
-    fn from(item: UserRequest) -> Self {
+impl From<Request> for Packet {
+    fn from(item: Request) -> Self {
         match item {
-            UserRequest::MqttPublish(publish) => Packet::Publish(publish),
-        }
-    }
-}
-
-impl From<Reply> for Packet {
-    fn from(item: Reply) -> Self {
-        match item {
-            Reply::PubAck(pkid) => Packet::Puback(pkid),
+            Request::Publish(publish) => Packet::Publish(publish),
+            Request::PubAck(pkid) => Packet::Puback(pkid),
+            Request::Ping => Packet::Pingreq,
             _ => unimplemented!()
         }
     }

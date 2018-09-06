@@ -1,7 +1,8 @@
 use std::io::Error as IoError;
 use mqtt3::Packet;
 use futures::sync::mpsc::SendError;
-use client::{UserRequest, Reply};
+use tokio::timer;
+use client::{Request};
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -12,17 +13,15 @@ pub enum ClientError {
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<UserRequest>)
+    MpscSend(SendError<Request>)
 }
 
 #[derive(Debug, Fail)]
 pub enum MqttError {
     #[fail(display = "Connection failed")]
     ConnectError,
-    #[fail(display = "Network receive failed")]
-    NetworkReceiveError,
-    #[fail(display = "Network send failed")]
-    NetworkSendError
+    #[fail(display = "Network call failed")]
+    NetworkError
 }
 
 // TODO: Modify mqtt311 to return enums for mqtt connect error
@@ -43,17 +42,7 @@ pub enum ConnectError {
 }
 
 #[derive(Debug, Fail)]
-pub enum NetworkReceiveError {
-    #[fail(display = "Io failed. Error = {}", _0)]
-    Io(IoError),
-    #[fail(display = "Received unsolicited acknowledgment")]
-    Unsolicited,
-    #[fail(display = "Failed sending request to sender thread. Error = {}", _0)]
-    MpscSend(SendError<Reply>)
-}
-
-#[derive(Debug, Fail)]
-pub enum NetworkSendError {
+pub enum NetworkError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Last ping response not received")]
@@ -64,9 +53,14 @@ pub enum NetworkSendError {
     Timeout,
     #[fail(display = "Packet limit size exceeded")]
     PacketSizeLimitExceeded,
+    #[fail(display = "Received unsolicited acknowledgment")]
+    Unsolicited,
+    #[fail(display = "Tokio timer error = {}", _0)]
+    Timer(timer::Error),
     #[fail(display = "Dummy error for converting () to network error")]
-    Blah
+    Blah,
 }
+
 
 impl From<IoError> for ConnectError {
     fn from(err: IoError) -> ConnectError {
@@ -74,20 +68,20 @@ impl From<IoError> for ConnectError {
     }
 }
 
-impl From<IoError> for NetworkReceiveError {
-    fn from(err: IoError) -> NetworkReceiveError {
-        NetworkReceiveError::Io(err)
+impl From<IoError> for NetworkError {
+    fn from(err: IoError) -> NetworkError {
+        NetworkError::Io(err)
     }
 }
 
-impl From<IoError> for NetworkSendError {
-    fn from(err: IoError) -> NetworkSendError {
-        NetworkSendError::Io(err)
-    }
-}
-
-impl From<SendError<UserRequest>> for ClientError {
-    fn from(err: SendError<UserRequest>) -> ClientError {
+impl From<SendError<Request>> for ClientError {
+    fn from(err: SendError<Request>) -> ClientError {
         ClientError::MpscSend(err)
+    }
+}
+
+impl From<timer::Error> for NetworkError {
+    fn from(err: timer::Error) -> NetworkError {
+        NetworkError::Timer(err)
     }
 }

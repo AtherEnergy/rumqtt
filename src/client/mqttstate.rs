@@ -3,9 +3,9 @@ use std::collections::VecDeque;
 use std::result::Result;
 
 use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
-use error::{ConnectError, NetworkSendError, NetworkReceiveError};
+use error::{ConnectError, NetworkError};
 use mqttoptions::{MqttOptions, SecurityOptions};
-use client::{Notification, Reply};
+use client::{Notification, Request};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -53,7 +53,7 @@ impl MqttState {
         }
     }
 
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkSendError> {
+    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkError> {
         match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
@@ -84,13 +84,13 @@ impl MqttState {
     //
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Reply), NetworkReceiveError> {
+    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Request), NetworkError> {
         self.update_last_in_control_time();
 
         match packet {
             Packet::Pingresp => {
                 self.handle_incoming_pingresp();
-                Ok((Notification::None, Reply::None))
+                Ok((Notification::None, Request::None))
             }
             Packet::Publish(publish) => {
                 let notification = Notification::Publish(publish.payload.clone());
@@ -99,13 +99,13 @@ impl MqttState {
             }
             Packet::Suback(_pkid) => {
                 let notification = Notification::None;
-                let reply = Reply::None;
+                let reply = Request::None;
                 Ok((notification, reply))
             }
             Packet::Puback(pkid) => {
                 self.handle_incoming_puback(pkid)?;
                 let notification = Notification::None;
-                let reply = Reply::None;
+                let reply = Request::None;
                 Ok((notification, reply))
             }
             _ => unimplemented!()
@@ -169,9 +169,9 @@ impl MqttState {
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
-    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkSendError> {
+    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
         if publish.payload.len() > self.opts.max_packet_size {
-            return Err(NetworkSendError::PacketSizeLimitExceeded)
+            return Err(NetworkError::PacketSizeLimitExceeded)
         }
 
         let publish = match publish.qos {
@@ -183,30 +183,30 @@ impl MqttState {
         if self.connection_status == MqttConnectionStatus::Connected {
             Ok(publish)
         } else {
-            Err(NetworkSendError::InvalidState)
+            Err(NetworkError::InvalidState)
         }
     }
 
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(), NetworkReceiveError> {
+    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(), NetworkError> {
         if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             let _publish  = self.outgoing_pub.remove(index).expect("Wrong index");
             Ok(())
         } else {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
-            Err(NetworkReceiveError::Unsolicited)
+            Err(NetworkError::Unsolicited)
         }
     }
 
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Reply {
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Request {
         let pkid = publish.pid.unwrap();
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => Reply::None,
+            QoS::AtMostOnce => Request::None,
             //TODO: Add method in mqtt3 to convert PacketIdentifier to u16
-            QoS::AtLeastOnce => Reply::PubAck(pkid),
+            QoS::AtLeastOnce => Request::PubAck(pkid),
             QoS::ExactlyOnce => unimplemented!()
         }
     }
@@ -232,14 +232,7 @@ impl MqttState {
     // is received and return the status which tells if
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<(), NetworkSendError> {
-        // let keep_alive = self.opts.keep_alive.expect("No keep alive");
-
-        // let elapsed = self.last_out_control_time.elapsed();
-        // if elapsed >= keep_alive {
-        //     error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error", elapsed.as_secs(), keep_alive);
-        //     return Err( NetworkSendError::Timeout);
-        // }
+    pub fn handle_outgoing_ping(&mut self) -> Result<(), NetworkError> {
         // @ Prevents half open connections. Tcp writes will buffer up
         // with out throwing any error (till a timeout) when internet
         // is down. Even though broker closes the socket after timeout,
@@ -252,7 +245,7 @@ impl MqttState {
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
             error!("Error awaiting for last ping response");
-            return Err(NetworkSendError::AwaitPingResp);
+            return Err(NetworkError::AwaitPingResp);
         }
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -260,7 +253,7 @@ impl MqttState {
             Ok(())
         } else {
             error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
-            Err(NetworkSendError::InvalidState)
+            Err(NetworkError::InvalidState)
         }
     }
 
@@ -268,7 +261,7 @@ impl MqttState {
         self.await_pingresp = false;
     }
 
-    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkSendError> {
+    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -277,7 +270,7 @@ impl MqttState {
             Ok(subscription)
         } else {
             error!("State = {:?}. Shouldn't subscribe in this state", self.connection_status);
-            Err(NetworkSendError::InvalidState)
+            Err(NetworkError::InvalidState)
         }
     }
 
@@ -325,7 +318,7 @@ mod test {
     use super::{MqttState, MqttConnectionStatus};
     use mqtt3::*;
     use mqttoptions::MqttOptions;
-    use error::NetworkSendError;
+    use error::NetworkError;
 
     #[test]
     fn next_pkid_roll() {
@@ -399,7 +392,7 @@ mod test {
         };
 
         match mqtt.handle_outgoing_publish(publish) {
-            Err(NetworkSendError::InvalidState) => (),
+            Err(NetworkError::InvalidState) => (),
             _ => panic!("Should throw packet size limit error")
         }
     }
@@ -419,7 +412,7 @@ mod test {
         };
 
         match mqtt.handle_outgoing_publish(publish) {
-            Err(NetworkSendError::PacketSizeLimitExceeded) => (),
+            Err(NetworkError::PacketSizeLimitExceeded) => (),
             _ => panic!("Should throw packet size limit error")
         }
     }
@@ -474,7 +467,7 @@ mod test {
         mqtt.opts.keep_alive = Some(Duration::from_secs(5));
         thread::sleep(Duration::from_secs(5));
         match mqtt.handle_outgoing_ping() {
-            Err(NetworkSendError::InvalidState) => (),
+            Err(NetworkError::InvalidState) => (),
             _ => panic!("Should throw timeout error")
 
         }
@@ -494,7 +487,7 @@ mod test {
 
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {
-            Err(NetworkSendError::AwaitPingResp) => (),
+            Err(NetworkError::AwaitPingResp) => (),
             _ => panic!("Should throw timeout error")
 
         }
@@ -509,7 +502,7 @@ mod test {
         thread::sleep(Duration::from_secs(7));
 
         match mqtt.handle_outgoing_ping() {
-            Err(NetworkSendError::Timeout) => (),
+            Err(NetworkError::Timeout) => (),
             _ => panic!("Should throw timeout error")
 
         }

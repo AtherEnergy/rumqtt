@@ -9,6 +9,7 @@ use MqttOptions;
 pub mod connection;
 pub mod mqttstate;
 
+#[derive(Debug)]
 pub enum Notification {
     Publish(Arc<Vec<u8>>),
     PubAck(u16),
@@ -20,32 +21,30 @@ pub enum Notification {
     None
 }
 
-pub enum Reply {
+/// Requests to network event loop
+pub enum Request {
+    Publish(Publish),
     PubAck(PacketIdentifier),
     Ping,
     None
 }
 
-pub enum UserRequest {
-    MqttPublish(Publish)
-}
-
 pub struct MqttClient {
-    userrequest_tx: mpsc::Sender<UserRequest>,
-    notification_rx: crossbeam_channel::Receiver<Notification>,
+    userrequest_tx: mpsc::Sender<Request>,
     max_packet_size: usize
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions) -> Self {
+    pub fn start(opts: MqttOptions) -> (Self, crossbeam_channel::Receiver<Notification>) {
          let (userrequest_tx, notification_rx) = connection::Connection::run(opts);
 
         //TODO: Remove max packet size hardcode
-         MqttClient {
+        let client = MqttClient {
              userrequest_tx,
-             notification_rx,
              max_packet_size: 1000
-         }
+        };
+
+        (client, notification_rx)
     }
 
     pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError> {
@@ -65,7 +64,7 @@ impl MqttClient {
         };
 
         let tx = &mut self.userrequest_tx;
-        tx.send(UserRequest::MqttPublish(publish)).wait()?;
+        tx.send(Request::Publish(publish)).wait()?;
         Ok(())
     }
 }
