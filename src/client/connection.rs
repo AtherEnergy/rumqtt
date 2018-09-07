@@ -179,10 +179,10 @@ impl Connection {
                         future::err(e)
                     })
             })
-            .skip_while(|reply| {
+            .filter(|reply| {
                 match reply {
-                    Request::None => future::ok(true),
-                    _ => future::ok(false)
+                    Request::None => false,
+                    _ => true
                 }
             })
             .and_then(move |packet| {
@@ -243,9 +243,9 @@ impl Connection {
 
         ping_interval
             .map_err(|e| e.into())
-            .skip_while(move |_v| {
+            .filter(move |_v| {
                 let mqtt_state = mqtt_state.borrow();
-                future::ok(!mqtt_state.is_ping_required())
+                mqtt_state.is_ping_required()
             })
             .and_then(|_v| {
                 future::ok(Packet::Pingreq)

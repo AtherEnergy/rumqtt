@@ -68,7 +68,8 @@ impl MqttState {
                 Ok(Packet::Subscribe(subscription))
             }
             Packet::Disconnect => {
-                self.handle_disconnect();
+                self.handle_disconnect()?;
+                // NOTE: Dummy
                 Ok(Packet::Disconnect)
             },
             Packet::Puback(pkid) => Ok(Packet::Puback(pkid)),
@@ -211,7 +212,7 @@ impl MqttState {
     pub fn is_ping_required(&self) -> bool {
         let in_elapsed = self.last_network_activity.elapsed();
 
-        debug!("Last incoming packet (network activity) before {:?} seconds", in_elapsed.as_secs());
+        debug!("Last incoming packet (network activity) before {:?} seconds. Keep alive = {:?}", in_elapsed.as_secs(), self.opts.keep_alive);
         in_elapsed >= self.opts.keep_alive
     }
 
@@ -270,18 +271,13 @@ impl MqttState {
     //     }
     // }
 
-    pub fn handle_disconnect(&mut self) {
-        debug!("Sending disconnect packet to broker. Awaiting qos 1 publishes = {:?}", self.outgoing_pub);
-        self.await_pingresp = false;
+    pub fn handle_disconnect(&mut self) -> Result<(), NetworkError> {
         self.connection_status = MqttConnectionStatus::Disconnected;
-
-        // remove all the state
-        if self.opts.clean_session {
-            self.clear_session_info();
-        }
+        Err(NetworkError::UserDisconnect)
     }
 
     fn clear_session_info(&mut self) {
+        self.await_pingresp = false;
         self.outgoing_pub.clear();
         self.last_network_activity = Instant::now();
     }
