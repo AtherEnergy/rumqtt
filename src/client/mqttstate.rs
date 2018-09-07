@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::collections::VecDeque;
 use std::result::Result;
 
