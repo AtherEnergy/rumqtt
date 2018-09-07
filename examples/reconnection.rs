@@ -5,16 +5,15 @@ use std::thread;
 
 fn main() {
     pretty_env_logger::init();
-    let mqtt_options = MqttOptions::new("test-id", "localhost:1883");
+    let mqtt_options = MqttOptions::new("test-id-1", "localhost:1883");
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
 
     thread::spawn(move || {
-        for i in 0..100 {
-            let payload = format!("publish {}", i);
-            thread::sleep_ms(300);
-            mqtt_client.publish("hello/world",QoS::AtLeastOnce, payload).unwrap();
-        }
+        let mqtt_options =
+            MqttOptions::new("test-id-2", "localhost:1883")
+                        .set_keep_alive(120);
+        mqtt_client.reconnect(mqtt_options).unwrap();
     });
 
     for notification in notifications {

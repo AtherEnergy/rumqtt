@@ -68,4 +68,10 @@ impl MqttClient {
         tx.send(Request::Publish(publish)).wait()?;
         Ok(())
     }
+
+    pub fn reconnect(&mut self, mqttoptions: MqttOptions) -> Result<(), ClientError> {
+        let tx = &mut self.userrequest_tx;
+        tx.send(Request::Reconnect(mqttoptions)).wait()?;
+        Ok(())
+    }
 }
