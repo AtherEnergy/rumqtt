@@ -16,7 +16,7 @@ enum MqttConnectionStatus {
 
 #[derive(Debug)]
 pub(crate) struct MqttState {
-    opts: MqttOptions,
+    pub opts: MqttOptions,
 
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
@@ -94,7 +94,7 @@ impl MqttState {
             }
             Packet::Publish(publish) => {
                 let notification = Notification::Publish(publish.payload.clone());
-                let reply =  self.handle_incoming_publish(publish.clone());
+                let reply = self.handle_incoming_publish(publish.clone());
                 Ok((notification, reply))
             }
             Packet::Suback(_pkid) => {
@@ -113,15 +113,6 @@ impl MqttState {
     }
 
     pub fn handle_outgoing_connect(&mut self) -> Result<Connect, ConnectError> {
-        let keep_alive = if let Some(keep_alive) = self.opts.keep_alive {
-            keep_alive
-        } else {
-            // TODO: rumqtt sets keep alive time to 2 minutes if user sets it to none.
-            // (get consensus)
-            Duration::from_secs(120)
-        };
-
-        self.opts.keep_alive = Some(keep_alive);
         self.connection_status = MqttConnectionStatus::Handshake;
 
         let (_username, _password) = match self.opts.security {
@@ -218,14 +209,10 @@ impl MqttState {
 
     // check if pinging is required based on last flush time
     pub fn is_ping_required(&self) -> bool {
-        if let Some(keep_alive) = self.opts.keep_alive  {
-            let in_elapsed = self.last_network_activity.elapsed();
+        let in_elapsed = self.last_network_activity.elapsed();
 
-            debug!("Last incoming packet (network activity) before {:?} seconds", in_elapsed.as_secs());
-            in_elapsed >= keep_alive
-        } else {
-            false
-        }
+        debug!("Last incoming packet (network activity) before {:?} seconds", in_elapsed.as_secs());
+        in_elapsed >= self.opts.keep_alive
     }
 
     // check when the last control packet/pingreq packet
@@ -464,7 +451,7 @@ mod test {
         // 1. test for invalid state
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
+        mqtt.opts.keep_alive = Duration::from_secs(5);
         thread::sleep(Duration::from_secs(5));
         match mqtt.handle_outgoing_ping() {
             Err(NetworkError::InvalidState) => (),
@@ -477,7 +464,7 @@ mod test {
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
+        mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(5));
 
@@ -497,7 +484,7 @@ mod test {
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
+        mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(7));
 
@@ -512,7 +499,7 @@ mod test {
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
         let mut mqtt = MqttState::new(opts);
-        mqtt.opts.keep_alive = Some(Duration::from_secs(5));
+        mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(5));
 

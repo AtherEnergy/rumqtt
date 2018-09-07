@@ -26,6 +26,7 @@ pub enum Request {
     Publish(Publish),
     PubAck(PacketIdentifier),
     Ping,
+    Reconnect(MqttOptions),
     None
 }
 
