@@ -41,7 +41,7 @@ pub struct MqttOptions {
     /// broker address that you want to connect to
     pub broker_addr: String,
     /// keep alive time to send pingreq to broker when the connection is idle
-    pub keep_alive: Option<Duration>,
+    pub keep_alive: Duration,
     /// clean (or) persistent session
     pub clean_session: bool,
     /// client identifier
@@ -62,7 +62,7 @@ impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
             broker_addr: "127.0.0.1:1883".into(),
-            keep_alive: Some(Duration::from_secs(30)),
+            keep_alive: Duration::from_secs(30),
             clean_session: true,
             client_id: "test-client".into(),
             connection_method: ConnectionMethod::Tcp,
@@ -84,7 +84,7 @@ impl MqttOptions {
 
         MqttOptions {
             broker_addr: addr.into(),
-            keep_alive: Some(Duration::from_secs(60)),
+            keep_alive: Duration::from_secs(60),
             clean_session: true,
             client_id: id.into(),
             connection_method: ConnectionMethod::Tcp,
@@ -102,7 +102,7 @@ impl MqttOptions {
             panic!("Keep alives should be >= 10 secs");
         }
 
-        self.keep_alive = Some(Duration::from_secs(secs as u64));
+        self.keep_alive = Duration::from_secs(secs as u64);
         self
     }
 
@@ -162,19 +162,15 @@ impl MqttOptions {
             SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
             _ => (None, None),
         };
-        let keep_alive: u16;
-        match self.keep_alive {
-            Some(ka) => keep_alive = ka.as_secs() as u16,
-            _ => keep_alive = 60 as u16,
-        };
+
         Connect {
             protocol: Protocol::MQTT(4),
-            keep_alive: keep_alive,
+            keep_alive: self.keep_alive.as_secs() as u16,
             client_id: self.client_id.clone(),
             clean_session: self.clean_session,
             last_will: self.last_will.clone(),
-            username: username,
-            password: password,
+            username,
+            password,
         }
     }
 }

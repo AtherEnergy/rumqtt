@@ -26,6 +26,7 @@ pub enum Request {
     Publish(Publish),
     PubAck(PacketIdentifier),
     Ping,
+    Reconnect(MqttOptions),
     None
 }
 
@@ -65,6 +66,12 @@ impl MqttClient {
 
         let tx = &mut self.userrequest_tx;
         tx.send(Request::Publish(publish)).wait()?;
+        Ok(())
+    }
+
+    pub fn reconnect(&mut self, mqttoptions: MqttOptions) -> Result<(), ClientError> {
+        let tx = &mut self.userrequest_tx;
+        tx.send(Request::Reconnect(mqttoptions)).wait()?;
         Ok(())
     }
 }

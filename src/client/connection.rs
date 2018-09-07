@@ -196,12 +196,22 @@ impl Connection {
         let mqtt_state = self.mqtt_state.clone();
 
         let userrequest_rx = self.userrequest_rx.by_ref()
-            .map(|userrequest| userrequest.into())
             .map_err(|e| {
                 error!("User request error = {:?}", e);
                 NetworkError::Blah
+            })
+            .and_then(move |userrequest| {
+                match userrequest {
+                    Request::Reconnect(mqttoptions) => {
+                        let mut mqtt_state = mqtt_state.borrow_mut();
+                        mqtt_state.opts = mqttoptions;
+                        future::err(NetworkError::UserReconnect)
+                    },
+                    _  => future::ok(userrequest.into())
+                }
             });
 
+        let mqtt_state = self.mqtt_state.clone();
 
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
         let last_session_publishes = stream::iter_ok::<_, ()>(last_session_publishes)
@@ -209,6 +219,7 @@ impl Connection {
                                                 error!("Last session publish stream error = {:?}", e);
                                                 NetworkError::Blah
                                             });
+
 
         // NOTE: AndThen is a stream and ForEach is a future
         // TODO: Check if 'chain' puts all its elements before userrequests
@@ -226,8 +237,7 @@ impl Connection {
     }
 
     fn network_ping_stream(&self) -> impl Stream<Item=Packet, Error=NetworkError> {
-        // TODO: Make keep_alive mandatory
-        let keep_alive = self.mqttoptions.keep_alive.unwrap();
+        let keep_alive = self.mqttoptions.keep_alive;
         let mqtt_state = self.mqtt_state.clone();
         let ping_interval = Interval::new_interval(keep_alive);
 

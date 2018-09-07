@@ -57,6 +57,8 @@ pub enum NetworkError {
     Unsolicited,
     #[fail(display = "Tokio timer error = {}", _0)]
     Timer(timer::Error),
+    #[fail(display = "User requested for reconnect")]
+    UserReconnect,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }
