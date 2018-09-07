@@ -271,6 +271,7 @@ impl MqttState {
     // }
 
     pub fn handle_disconnect(&mut self) {
+        debug!("Sending disconnect packet to broker. Awaiting qos 1 publishes = {:?}", self.outgoing_pub);
         self.await_pingresp = false;
         self.connection_status = MqttConnectionStatus::Disconnected;
 

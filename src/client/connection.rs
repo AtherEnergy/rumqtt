@@ -281,6 +281,7 @@ impl From<Request> for Packet {
             Request::Publish(publish) => Packet::Publish(publish),
             Request::PubAck(pkid) => Packet::Puback(pkid),
             Request::Ping => Packet::Pingreq,
+            Request::Disconnect => Packet::Disconnect,
             _ => unimplemented!()
         }
     }

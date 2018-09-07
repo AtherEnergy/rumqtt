@@ -17,7 +17,6 @@ pub enum Notification {
     PubRel(u16),
     PubComp(u16),
     SubAck(u16),
-    Disconnect,
     None
 }
 
@@ -27,6 +26,7 @@ pub enum Request {
     PubAck(PacketIdentifier),
     Ping,
     Reconnect(MqttOptions),
+    Disconnect,
     None
 }
 
@@ -69,9 +69,10 @@ impl MqttClient {
         Ok(())
     }
 
-    pub fn reconnect(&mut self, mqttoptions: MqttOptions) -> Result<(), ClientError> {
+
+    pub fn disconnect(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.userrequest_tx;
-        tx.send(Request::Reconnect(mqttoptions)).wait()?;
+        tx.send(Request::Disconnect).wait()?;
         Ok(())
     }
 }
