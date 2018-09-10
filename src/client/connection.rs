@@ -164,10 +164,7 @@ impl Connection {
 
                 network_reply_future
                     .and_then(move |(notification, reply)| {
-                        if !notification_tx.is_full() {
-                            notification_tx.send(notification);
-                        }
-
+                        handle_notification(notification, &notification_tx);
                         future::ok(reply)
                     })
                     .or_else(|e| {
@@ -239,6 +236,15 @@ fn validate_userrequest(userrequest: Request,
             future::err(NetworkError::UserReconnect)
         },
         _  => future::ok(userrequest.into())
+    }
+}
+
+fn handle_notification(notification: Notification,
+                       notification_tx: &crossbeam_channel::Sender<Notification>) {
+    match notification {
+        Notification::None => (),
+        _ if !notification_tx.is_full() => notification_tx.send(notification),
+        _ => ()
     }
 }
 
