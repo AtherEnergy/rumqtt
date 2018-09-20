@@ -1,4 +1,3 @@
-use mqtt3::Connack;
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
 use futures::stream::SplitStream;
@@ -51,39 +50,43 @@ impl Connection {
                 mqttoptions
             };
 
-            'reconnection: loop {
-                let mqtt_connect_future = connection.mqtt_connect();
-                let mqtt_connect_deadline = Timeout::new(mqtt_connect_future,
-                                                      Duration::from_secs(30));
-
-                // NOTE: We need to use same reactor across threads because io resources (framed) will
-                //       bind to reactor lazily.
-                //       You'll face `reactor gone` error if `framed` is used again with a new recator
-                let mut rt = current_thread::Runtime::new().unwrap();
-                let framed = match rt.block_on(mqtt_connect_deadline) {
-                    Ok(framed) => framed,
-                    Err(e) => {
-                        error!("Connection error = {:?}", e);
-                        thread::sleep_ms(2000);
-                        continue 'reconnection
-                    }
-                };
-                
-                debug!("Mqtt connection successful!!");
-
-                let mqtt_future = connection.mqtt_future(framed);
-
-                if let Err(e) = rt.block_on(mqtt_future) {
-                    error!("Mqtt eventloop error = {:?}", e);
-                    thread::sleep_ms(2000);
-                    continue 'reconnection
-                }
-
-                error!("@@@@@@@@@ Reactor Exited @@@@@@@@@");
-            }
+            connection.mqtt_eventloop()
         });
 
         (userrequest_tx, notificaiton_rx)
+    }
+
+    fn mqtt_eventloop(&mut self) {
+        'reconnection: loop {
+            let mqtt_connect_future = self.mqtt_connect();
+            let mqtt_connect_deadline = Timeout::new(mqtt_connect_future,
+                                                     Duration::from_secs(30));
+
+            // NOTE: We need to use same reactor across threads because io resources (framed) will
+            //       bind to reactor lazily.
+            //       You'll face `reactor gone` error if `framed` is used again with a new recator
+            let mut rt = current_thread::Runtime::new().unwrap();
+            let framed = match rt.block_on(mqtt_connect_deadline) {
+                Ok(framed) => framed,
+                Err(e) => {
+                    error!("Connection error = {:?}", e);
+                    thread::sleep_ms(2000);
+                    continue 'reconnection
+                }
+            };
+
+            debug!("Mqtt connection successful!!");
+
+            let mqtt_future = self.mqtt_future(framed);
+
+            if let Err(e) = rt.block_on(mqtt_future) {
+                error!("Mqtt eventloop error = {:?}", e);
+                thread::sleep_ms(2000);
+                continue 'reconnection
+            }
+
+            error!("@@@@@@@@@ Reactor Exited @@@@@@@@@");
+        }
     }
 
     /// Resolves dns with blocking API and composes a future
@@ -105,28 +108,23 @@ impl Connection {
         let tcp_connect_future = self.tcp_connect_future();
         let connect_packet = future::result(self.mqtt_state.borrow_mut().handle_outgoing_connect());
 
-        tcp_connect_future.and_then(move |framed| connect_packet.and_then(move |packet| { // send mqtt connect packet
-            framed.send(Packet::Connect(packet)).map_err(|e| ConnectError::from(e))
-        })
-        .and_then(move |framed| {
-            framed
-                .into_future()
-                .map_err(|(err, _framed)| ConnectError::from(err))
-                .and_then(move |(response, framed)| { // receive mqtt connack packet
-                    debug!("Mqtt connect response = {:?}", response);
-
-                    let mut mqtt_state = mqtt_state.borrow_mut();
-                    match check_if_connack(response) {
-                        Ok(connack) => {
-                            if let Err(err) = mqtt_state.handle_incoming_connack(connack) {
-                                return future::err(err)
-                            }
-                            future::ok(framed)
-                        }
-                        Err(e) => future::err(e)
-                    }
+        tcp_connect_future
+            .and_then(move |framed| {
+                connect_packet.and_then(move |packet| { // send mqtt connect packet
+                    framed
+                        .send(Packet::Connect(packet))
+                        .map_err(|e| ConnectError::from(e))
+                }).and_then(move |framed| {
+                    framed
+                        .into_future()
+                        .map_err(|(err, _framed)| ConnectError::from(err))
+                        .and_then(move |(response, framed)| { // receive mqtt connack packet
+                            debug!("Mqtt connect response = {:?}", response);
+                            let mut mqtt_state = mqtt_state.borrow_mut();
+                            check_and_validate_connack(response, framed, &mut mqtt_state)
+                        })
                 })
-        }))
+            })
     }
 
     fn mqtt_future<'a>(&'a mut self,
@@ -166,25 +164,14 @@ impl Connection {
 
                 network_reply_future
                     .and_then(move |(notification, reply)| {
-                        match notification {
-                            Notification::None => future::ok(reply),
-                            _ if !notification_tx.is_full() => {
-                                notification_tx.send(notification);
-                                future::ok(reply)
-                            }
-                            _ => future::ok(reply)
-                        }
+                        handle_notification(notification, &notification_tx);
+                        future::ok(reply)
                     })
                     .or_else(|e| {
                         future::err(e)
                     })
             })
-            .filter(|reply| {
-                match reply {
-                    Request::None => false,
-                    _ => true
-                }
-            })
+            .filter(|reply| should_forward_packet(reply))
             .and_then(move |packet| {
                 future::ok(packet.into())
             })
@@ -201,14 +188,8 @@ impl Connection {
                 NetworkError::Blah
             })
             .and_then(move |userrequest| {
-                match userrequest {
-                    Request::Reconnect(mqttoptions) => {
-                        let mut mqtt_state = mqtt_state.borrow_mut();
-                        mqtt_state.opts = mqttoptions;
-                        future::err(NetworkError::UserReconnect)
-                    },
-                    _  => future::ok(userrequest.into())
-                }
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                validate_userrequest(userrequest, &mut mqtt_state)
             });
 
         let mqtt_state = self.mqtt_state.clone();
@@ -226,13 +207,7 @@ impl Connection {
         userrequest_rx
             .chain(last_session_publishes)
             .and_then(move |packet: Packet| {
-                match mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet) {
-                    Ok(packet) => {
-                        debug!("Sending packet. {}", packet_info(&packet));
-                        future::ok(packet)
-                    }
-                    Err(e) => future::err(e)
-                }
+                future::result(mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet))
             })
     }
 
@@ -253,13 +228,48 @@ impl Connection {
     }
 }
 
+fn validate_userrequest(userrequest: Request,
+                        mqtt_state: &mut MqttState) -> impl Future<Item = Packet, Error = NetworkError> {
+    match userrequest {
+        Request::Reconnect(mqttoptions) => {
+            mqtt_state.opts = mqttoptions;
+            future::err(NetworkError::UserReconnect)
+        },
+        _  => future::ok(userrequest.into())
+    }
+}
+
+fn handle_notification(notification: Notification,
+                       notification_tx: &crossbeam_channel::Sender<Notification>) {
+    match notification {
+        Notification::None => (),
+        _ if !notification_tx.is_full() => notification_tx.send(notification),
+        _ => ()
+    }
+}
+
 /// Checks if incoming packet is mqtt connack packet. Useful after mqtt
 /// connect when we are waiting for connack but not any other packet.
-pub fn check_if_connack(packet: Option<Packet>) -> Result<Connack, ConnectError> {        
+fn check_and_validate_connack(packet: Option<Packet>,
+                              framed: Framed<TcpStream, MqttCodec>,
+                              mqtt_state: &mut MqttState) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
     match packet {
-        Some(Packet::Connack(connack)) => Ok(connack),
-        Some(packet) => return Err(ConnectError::NotConnackPacket(packet)),
-        None => return Err(ConnectError::NoResponse)
+        Some(Packet::Connack(connack)) => {
+            if let Err(err) = mqtt_state.handle_incoming_connack(connack) {
+                future::err(err)
+            } else {
+                future::ok(framed)
+            }
+        }
+        Some(packet) => future::err(ConnectError::NotConnackPacket(packet)),
+        None => future::err(ConnectError::NoResponse)
+    }
+}
+
+fn should_forward_packet(reply: &Request) -> bool {
+    match reply {
+        Request::None => false,
+        _ => true
     }
 }
 
