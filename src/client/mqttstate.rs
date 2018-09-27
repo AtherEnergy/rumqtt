@@ -192,13 +192,15 @@ impl MqttState {
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
     pub fn handle_incoming_publish(&mut self, publish: Publish) -> Request {
-        let pkid = publish.pid.unwrap();
         let qos = publish.qos;
 
         match qos {
             QoS::AtMostOnce => Request::None,
             //TODO: Add method in mqtt3 to convert PacketIdentifier to u16
-            QoS::AtLeastOnce => Request::PubAck(pkid),
+            QoS::AtLeastOnce => {
+                let pkid = publish.pid.unwrap();
+                Request::PubAck(pkid)
+            },
             QoS::ExactlyOnce => unimplemented!()
         }
     }

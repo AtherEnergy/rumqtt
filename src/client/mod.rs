@@ -5,6 +5,8 @@ use futures::{Future, Sink};
 use crossbeam_channel;
 use error::ClientError;
 use MqttOptions;
+use mqtt3::Subscribe;
+use mqtt3::SubscribeTopic;
 
 pub mod connection;
 pub mod mqttstate;
@@ -23,6 +25,7 @@ pub enum Notification {
 /// Requests to network event loop
 pub enum Request {
     Publish(Publish),
+    Subscribe(Subscribe),
     PubAck(PacketIdentifier),
     Ping,
     Reconnect(MqttOptions),
@@ -69,6 +72,14 @@ impl MqttClient {
         Ok(())
     }
 
+    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
+        let topic = SubscribeTopic{topic_path: topic.into(), qos: qos};
+        let subscribe = Subscribe {pid: PacketIdentifier::zero(), topics: vec![topic]};
+
+        let tx = &mut self.userrequest_tx;
+        tx.send(Request::Subscribe(subscribe)).wait()?;
+        Ok(())
+    }
 
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.userrequest_tx;

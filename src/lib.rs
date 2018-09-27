@@ -18,5 +18,5 @@ pub mod error;
 pub mod mqttoptions;
 
 pub use mqttoptions::{MqttOptions, ReconnectOptions, SecurityOptions, ConnectionMethod};
-pub use mqtt3::QoS;
 pub use client::MqttClient;
+pub use mqtt3::QoS;

@@ -292,6 +292,7 @@ impl From<Request> for Packet {
             Request::PubAck(pkid) => Packet::Puback(pkid),
             Request::Ping => Packet::Pingreq,
             Request::Disconnect => Packet::Disconnect,
+            Request::Subscribe(subscribe) => Packet::Subscribe(subscribe),
             _ => unimplemented!()
         }
     }
