@@ -180,7 +180,7 @@ check_server() {
 check_client() {
     cd $OUT/client
 
-    openssl x509 -noout -text -in certs/client.cert.pem
+    openssl x509 -noout -text -in certs/$1.cert.pem
     cd $HOME
 }
 
@@ -204,10 +204,17 @@ verify_client() {
 
 test() {
     # -verify in server makes sure that client sends its certificate
-    echo "copy below command in a seperate terminal"
-    info "openssl s_server -accept 12345 -verify -tls1_2 -cert out/server/certs/server.cert.pem -key out/server/private/server.key.pem -CAfile out/intermediate/certs/ca-chain.cert.pem"
-    echo "NOTE: return status should be 0"
-    read -p "enter client id that you want to connect to server: " client_id
+    info "
+    copy below command in a seperate terminal
+    openssl s_server -accept 12345 -verify \\
+                                   -tls1_2 \\
+                                   -cert out/server/certs/server.cert.pem \\
+                                   -key out/server/private/server.key.pem \\
+                                   -CAfile out/intermediate/certs/ca-chain.cert.pem
+
+    NOTE: return status should be 0 and you'll see send text on the server side
+    "
+    read -p "Press a key after starting the server" choice
     openssl s_client -connect 0.0.0.0:12345 -tls1_2 -cert out/client/certs/$1.cert.pem -key out/client/private/$1.key.pem -CAfile out/intermediate/certs/ca-chain.cert.pem
 }
 
@@ -230,35 +237,33 @@ case $1 in
         validate_client_args $2
         gen_client_cert_key $2
         exit
-    ;;
+        ;;
 
     -s|--server)
-    validate_server_args $2
-    gen_server_cert_key $2
-    exit
-    ;;    
-
+        validate_server_args $2
+        gen_server_cert_key $2
+        exit
+        ;;
     # generate new root & intermediate certificates
     -r|--root)
-    read -p "Are you sure you want to remove old root & intermediate certs & start from scratch (y/n)?" choice
-    case "$choice" in 
-    y|Y ) 
-        echo "yes"
-        clean
-        gen_root_key_cert
-        gen_inter_key_cert
-        exit
+        read -p "Are you sure you want to remove old root & intermediate certs & start from scratch (y/n)?" choice
+        case "$choice" in
+        y|Y )
+            echo "yes"
+            clean
+            gen_root_key_cert
+            gen_inter_key_cert
+            exit
+            ;;
+        n|N )
+            echo "exiting"
+            exit
+            ;;
+        * )
+            echo "invalid"
+            ;;
+        esac
         ;;
-    n|N ) 
-        echo "exiting"
-        exit
-        ;;
-    * ) 
-        echo "invalid"
-        ;;
-    esac
-    ;;
-
     -c1|--check-root)
         check_root
         exit
@@ -290,17 +295,19 @@ case $1 in
         ;;
 
     -v4|--verify-client)
-        verify_client
+        validate_client_args $2
+        verify_client $2
         exit
         ;;
     --test)
-        test
+        validate_client_args $2
+        test $2
         exit
         ;;
 
     # show help
     * )
-    help
-    exit
-    ;;
+        help
+        exit
+        ;;
 esac
