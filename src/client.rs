@@ -21,7 +21,7 @@ impl MqttClient {
     /// Returns 'Request' and handles reqests from it.
     /// Also handles network events, reconnections and retransmissions.
     pub fn start(opts: MqttOptions, callbacks: Option<MqttCallback>) -> Result<Self> {
-        let (nw_request_tx, nw_request_rx) = sync_channel::<PublishRequest>(100);
+        let (nw_request_tx, nw_request_rx) = sync_channel::<PublishRequest>(1);
         let mut connection = Publisher::connect(opts.clone(), nw_request_rx, callbacks)?;
 
         // This thread handles network reads (coz they are blocking) and
