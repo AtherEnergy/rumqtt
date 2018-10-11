@@ -19,5 +19,4 @@ mqtt-protocol = "0.3"
 openssl = { version = "0.9" }
 
 [dev-dependencies]
-clippy = "0"
 env_logger = "0.3"

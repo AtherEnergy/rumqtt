@@ -830,6 +830,7 @@ mod test {
             no_of_reconnections: 0,
             // Threadpool
             pool: ThreadPool::new(1),
+            dont_reconnect: false,
         };
         conn
     }

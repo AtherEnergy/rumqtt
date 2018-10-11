@@ -12,14 +12,18 @@ matrix:
     - os: osx
 #before_install:
 #  scripts/travis_setup.sh
+addons:
+  apt:
+    sources:
+    - sourceline: 'ppa:mosquitto-dev/mosquitto-ppa'
+    packages:
+    - mosquitto
 install:
-- sudo apt-add-repository ppa:mosquitto-dev/mosquitto-ppa -y
-- sudo apt-get -qq update
-- sudo apt-get install -y mosquitto
 - curl https://sh.rustup.rs -sSf | sh -s -- -y
 - export PATH="$HOME/.cargo/bin:$PATH"
 - rustup toolchain install stable
 - rustup default stable
+- rustup component add clippy-preview
 - rustc -V
 - cargo -V
 branches:
