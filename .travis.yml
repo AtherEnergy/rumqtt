@@ -23,6 +23,7 @@ install:
 - export PATH="$HOME/.cargo/bin:$PATH"
 - rustup toolchain install stable
 - rustup default stable
+- rustup component add clippy-preview
 - rustc -V
 - cargo -V
 branches:
