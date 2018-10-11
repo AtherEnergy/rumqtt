@@ -386,7 +386,7 @@ impl Publisher {
 
         if self.state == MqttState::Connected {
             self.write_packet(packet)?;
-            info!("Published. Pkid = {:?}, Payload Size = {:?}", publish_message.pkid, payload_len);
+            info!("Published. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish_message.topic, publish_message.pkid, payload_len);
             self.publish_batch_count += 1;
         } else {
             error!("State = {:?}. Should'nt publish in this state", self.state);
