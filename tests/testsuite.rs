@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 extern crate log;
 extern crate env_logger;
 
-const BROKER_ADDRESS: &'static str = "dev-mqtt-broker.atherengineering.in:1883";
-const MOSQUITTO_ADDR: &'static str = "test.mosquitto.org:1883";
+const BROKER_ADDRESS: &'static str = "127.0.0.1:1883";
+const MOSQUITTO_ADDR: &'static str = "127.0.0.1:1883";
 
 /// Shouldn't try to reconnect if there is a connection problem
 /// during initial tcp connect.
@@ -45,7 +45,7 @@ fn connect_timeout_failure() {
 fn inital_mqtt_connect_failure() {
     let client_options = MqttOptions::new()
         .set_reconnect(5)
-        .set_broker("test.mosquitto.org:8883");
+        .set_broker("127.0.0.1:8883");
 
     // Connects to a broker and returns a `request`
     let client = MqttClient::start(client_options, None).expect("Couldn't start");
@@ -214,7 +214,7 @@ fn retained_messages() {
         .set_client_id("test-retain-client")
         .set_clean_session(true)
         .set_broker(BROKER_ADDRESS);
-    // NOTE: QoS 2 messages aren't being retained in "test.mosquitto.org"
+    // NOTE: QoS 2 messages aren't being retained in "127.0.0.1"
     // broker
 
     let count = Arc::new(AtomicUsize::new(0));
@@ -286,7 +286,7 @@ fn qos0_stress_publish() {
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         client.publish("test/qos0/stress", QoS::Level0, payload.clone().into_bytes()).unwrap();
-        thread::sleep(Duration::new(0, 10000));
+        thread::sleep(Duration::from_micros(1));
     }
 
     thread::sleep(Duration::new(10, 0));
@@ -322,6 +322,7 @@ fn simple_qos1_stress_publish() {
     for i in 0..1000 {
         let payload = format!("{}. hello rust", i);
         client.publish("test/qos1/stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::from_micros(1));
     }
 
     thread::sleep(Duration::new(10, 0));
@@ -364,6 +365,7 @@ fn qos1_stress_publish_with_reconnections() {
             let _ = client.disconnect();
         }
         client.publish("test/qos1/reconnection_stress", QoS::Level1, payload.clone().into_bytes()).unwrap();
+        thread::sleep(Duration::from_micros(1));
     }
 
     thread::sleep(Duration::new(30, 0));

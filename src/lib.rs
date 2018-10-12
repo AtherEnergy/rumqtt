@@ -25,7 +25,7 @@
 //!                                   .set_keep_alive(5)
 //!                                   .set_reconnect(3)
 //!                                   .set_client_id("rumqtt-docs")
-//!                                   .set_broker("test.mosquitto.org:1883");
+//!                                   .set_broker("127.0.0.1:1883");
 //! // Create a new `MqttClient` object from `MqttOptions`
 //!
 //! // Set callback for receiving incoming messages.

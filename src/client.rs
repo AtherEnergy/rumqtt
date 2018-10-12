@@ -211,7 +211,7 @@ mod test {
     #[should_panic]
     fn request_queue_blocks_when_buffer_full() {
         env_logger::init().unwrap();
-        let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
+        let client_options = MqttOptions::new().set_broker("127.0.0.1:1883");
         match mock_start(client_options, true) {
             Ok(mut mq_client) => {
                 for _ in 0..65536 {
@@ -226,7 +226,7 @@ mod test {
     #[should_panic]
     fn publish_should_not_happen_rxdrop() {
         env_logger::init().unwrap();
-        let client_options = MqttOptions::new().set_broker("test.mosquitto.org:1883");
+        let client_options = MqttOptions::new().set_broker("127.0.0.1:1883");
         match mock_start(client_options, false) {
             Ok(mut mq_client) => {
                 for _ in 0..65536 {
