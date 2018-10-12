@@ -264,8 +264,8 @@ impl Connection {
                         self.stream.shutdown(Shutdown::Both)?
                     },
                     NetworkRequest::Disconnect => {
-                        self.dont_reconnect = true;
-                        self.disconnect()?
+                        self.disconnect();
+                        self.stream.shutdown(Shutdown::Both)?
                     },
                     NetworkRequest::Publish(m) => self.publish(m)?,
                     NetworkRequest::Subscribe(s) => {
@@ -803,7 +803,7 @@ mod test {
             unreachable!("Cannot lookup address");
         }
 
-        let addr = lookup_ipv4("test.mosquitto.org:1883");
+        let addr = lookup_ipv4("127.0.0.1:1883");
         let (_, rx) = sync_channel(10);
         let opts = MqttOptions::new();
         let domain = opts.addr.split(":").map(str::to_string).next().unwrap_or_default();
