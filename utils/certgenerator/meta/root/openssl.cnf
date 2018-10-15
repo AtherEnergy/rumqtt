@@ -84,7 +84,7 @@ localityName_default            = Victoria Layout
 0.organizationName_default      = Blah Blah Pvt Ltd
 organizationalUnitName_default  = Software Team
 commonName_default              = CA Root
-emailAddress_default            = abc@def.com
+emailAddress_default            = root@atherenergy.com
 
 [ v3_ca ]
 # Extensions for a typical CA (`man x509v3_config`).

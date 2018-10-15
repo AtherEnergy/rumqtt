@@ -148,7 +148,7 @@ validate_server_args () {
 
 validate_client_args () {
     if [ -z "$1" ]; then
-        echo -e "\nPlease call '$0 --client {client_id}' to run this command!\n"
+        echo -e "\nThis command requires client id as \n"
         exit 1
     fi
 }
