@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 #[cfg(feature = "rustls")]
 pub mod stream {
     use tokio::net::TcpStream;
-    use tokio_tls::TlsStream;
+    use tokio_rustls::{TlsStream, rustls::ClientSession};
     use tokio_rustls::{rustls::internal::pemfile, rustls::ClientConfig, TlsConnector};
     use std::fs::File;
     use std::io::BufReader;
@@ -26,7 +26,7 @@ pub mod stream {
 
     pub enum NetworkStream {
         Tcp(TcpStream),
-        Tls(TlsStream<TcpStream>)
+        Tls(TlsStream<TcpStream, ClientSession>)
     }
 
     impl NetworkStream {
@@ -74,48 +74,56 @@ pub mod stream {
         fn create_stream(&mut self) -> Result<TlsConnector, ConnectError>{
             let mut config = ClientConfig::new();
 
-            match self.certificate_authority {
+            match self.certificate_authority.clone() {
                 Some(certificate_authority) => {
                     let mut ca = BufReader::new(File::open(certificate_authority)?);
-                    config.root_store.add_pem_file(&mut ca)?
+                    config.root_store.add_pem_file(&mut ca).unwrap();
                 }
                 None => return Err(ConnectError::NoCertificateAuthority)
             }
 
 
-            match (self.client_cert, self.client_private_key) {
+            match (self.client_cert.clone(), self.client_private_key.clone()) {
                 (Some(cert), Some(key)) => {
                     let mut cert = BufReader::new(File::open(cert)?);
                     let mut keys = BufReader::new(File::open(key)?);
 
-                    let certs = pemfile::certs(&mut cert)?;
-                    let keys =  pemfile::rsa_private_keys(&mut keys)?;
+                    let certs = pemfile::certs(&mut cert).unwrap();
+                    let keys =  pemfile::rsa_private_keys(&mut keys).unwrap();
 
                     config.set_single_client_cert(certs, keys[0].clone());
                 }
+                _ => unimplemented!()
             };
 
             Ok(TlsConnector::from(Arc::new(config)))
         }
 
-        pub fn connect(mut self, host: &str, port: u16) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
+        pub fn connect(mut self, host: &'static str, port: u16) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
+
+            // let host = host.to_owned();
             let domain = DNSNameRef::try_from_ascii_str(host).unwrap();
             let addr = lookup_ipv4(host, port);
 
+            let tls_connector = self.create_stream();
+
             TcpStream::connect(&addr)
-                .map_err(ConnectError::from)
-                .and_then(|stream| {
-                    match self.create_stream() {
-                        Ok(tls_connector) => Either::A(tls_connector.connect(domain, stream)),
-                        Err(ConnectError::NoCertificateAuthority) => Either::B(stream),
+                .and_then(move |stream| {
+                    match tls_connector {
+                        Ok(tls_connector) => Either::B(tls_connector.connect(domain, stream)),
+                        Err(ConnectError::NoCertificateAuthority) => Either::B(future::ok(stream)),
                         Err(e) => unimplemented!()
                     }
                 })
+                .map_err(ConnectError::from)
                 .and_then(|stream| {
-                    match stream {
-                        Either::A(tcp) => MqttCodec.framed(NetworkStream::Tcp(tcp)),
-                        Either::B(tls) => MqttCodec.framed(NetworkStream::Tls(tls)),
-                    }
+//                    match stream {
+//                        Either::A(tcp) => MqttCodec.framed(NetworkStream::Tcp(tcp)),
+//                        Either::B(tls) => MqttCodec.framed(NetworkStream::Tls(tls)),
+//                    }
+
+                    let stream = NetworkStream::Tls(stream);
+                    future::ok(MqttCodec.framed(stream))
                 })
         }
     }
