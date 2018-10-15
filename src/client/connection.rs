@@ -2,12 +2,10 @@ use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
 use futures::stream::SplitStream;
 use std::thread;
-use tokio::net::TcpStream;
 use codec::MqttCodec;
 use futures::{future, stream};
 use mqtt3::Packet;
 use mqttoptions::MqttOptions;
-use tokio_codec::{Decoder, Framed};
 use tokio::runtime::current_thread;
 use tokio::timer::{Timeout, Interval};
 use std::time::Duration;
@@ -19,6 +17,8 @@ use error::{ConnectError, NetworkError};
 use crossbeam_channel;
 use client::Notification;
 use client::Request;
+use client::network::stream::NetworkStream;
+use tokio_codec::Framed;
 
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
@@ -92,18 +92,16 @@ impl Connection {
     /// Resolves dns with blocking API and composes a future
     /// which makes a new tcp or tls connection to the broker.
     /// Note that this doesn't actual connect to the broker
-    fn tcp_connect_future(&self) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+    fn tcp_connect_future(&self) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
         // TODO: Remove unwraps
         // TODO: This call will also do dns resolution. Find a way to add timeout to this call
         let address = self.mqttoptions.broker_addr.to_socket_addrs().unwrap().next().unwrap();
 
-        TcpStream::connect(&address)
-            .map_err(ConnectError::from)
-            .map(|stream| MqttCodec.framed(stream))
+        NetworkStream::connect(address)
     }
 
     /// Composes a new future which is a combination of tcp connect + mqtt handshake
-    fn mqtt_connect(&self) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+    fn mqtt_connect(&self) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
         let mqtt_state = self.mqtt_state.clone();
         let tcp_connect_future = self.tcp_connect_future();
         let connect_packet = future::result(self.mqtt_state.borrow_mut().handle_outgoing_connect());
@@ -128,7 +126,7 @@ impl Connection {
     }
 
     fn mqtt_future<'a>(&'a mut self,
-                       framed: Framed<TcpStream, MqttCodec>) -> impl Future<Item = (), Error = NetworkError> + 'a {
+                       framed: Framed<NetworkStream, MqttCodec>) -> impl Future<Item = (), Error = NetworkError> + 'a {
 
         let (network_sink, network_stream) = framed.split();
 
@@ -146,7 +144,7 @@ impl Connection {
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
     /// channel) and creates a stream of packets to send on network
     fn network_reply_stream(&self,
-                            network_stream: SplitStream<Framed<TcpStream, MqttCodec>>) -> impl Stream<Item=Packet, Error=NetworkError> {
+                            network_stream: SplitStream<Framed<NetworkStream, MqttCodec>>) -> impl Stream<Item=Packet, Error=NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
         
         // TODO: Can we prevent this clone?
@@ -251,8 +249,8 @@ fn handle_notification(notification: Notification,
 /// Checks if incoming packet is mqtt connack packet. Useful after mqtt
 /// connect when we are waiting for connack but not any other packet.
 fn check_and_validate_connack(packet: Option<Packet>,
-                              framed: Framed<TcpStream, MqttCodec>,
-                              mqtt_state: &mut MqttState) -> impl Future<Item = Framed<TcpStream, MqttCodec>, Error = ConnectError> {
+                              framed: Framed<NetworkStream, MqttCodec>,
+                              mqtt_state: &mut MqttState) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
     match packet {
         Some(Packet::Connack(connack)) => {
             if let Err(err) = mqtt_state.handle_incoming_connack(connack) {

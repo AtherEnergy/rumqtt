@@ -39,6 +39,8 @@ pub enum ConnectError {
     NotConnackPacket(Packet),
     #[fail(display = "Empty response")]
     NoResponse,
+    #[fail(display = "Builder doesn't contain certificate authority")]
+    NoCertificateAuthority,
 }
 
 #[derive(Debug, Fail)]

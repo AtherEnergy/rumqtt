@@ -10,6 +10,7 @@ use mqtt3::SubscribeTopic;
 
 pub mod connection;
 pub mod mqttstate;
+pub mod network;
 
 #[derive(Debug)]
 pub enum Notification {

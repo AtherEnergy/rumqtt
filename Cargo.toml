@@ -7,6 +7,7 @@ authors = ["raviteja <k.teza1@gmail.com>"]
 tokio = "0.1"
 tokio-io = "0.1"
 tokio-codec = "0.1"
+tokio-tls = "0.2"
 bytes = "0.4"
 futures = "0.1"
 crossbeam-channel = "0.2"
@@ -14,3 +15,20 @@ log = "0.4"
 failure = "0.1"
 pretty_env_logger = "0.2"
 mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
+
+[dependencies.native-tls]
+version = "0.2"
+optional = true
+
+[dependencies.tokio-rustls]
+version = "0.8"
+optional = true
+
+[dependencies.webpki]
+version = "0.18"
+optional = true
+
+[features]
+default = ["rustls"]
+rustls = ["tokio-rustls", "webpki"]
+nativetls = ["native-tls"]
