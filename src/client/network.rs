@@ -1,31 +1,31 @@
 use std::io::{self, Read, Write};
 
-use tokio_io::{AsyncRead, AsyncWrite};
-use futures::Poll;
 use client::network::stream::NetworkStream;
+use futures::Poll;
 use std::net::SocketAddr;
+use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
-    use tokio::net::TcpStream;
-    use tokio_rustls::{TlsStream, rustls::ClientSession};
-    use tokio_rustls::{rustls::internal::pemfile, rustls::ClientConfig, TlsConnector};
+    use client::network::lookup_ipv4;
+    use codec::MqttCodec;
+    use error::ConnectError;
+    use futures::future;
+    use futures::{future::Either, Future};
     use std::fs::File;
     use std::io::BufReader;
     use std::path::Path;
-    use std::sync::Arc;
-    use futures::{Future, future::Either};
-    use error::ConnectError;
-    use tokio_codec::{Decoder, Framed};
-    use codec::MqttCodec;
     use std::path::PathBuf;
-    use futures::future;
+    use std::sync::Arc;
+    use tokio::net::TcpStream;
+    use tokio_codec::{Decoder, Framed};
+    use tokio_rustls::{rustls::internal::pemfile, rustls::ClientConfig, TlsConnector};
+    use tokio_rustls::{rustls::ClientSession, TlsStream};
     use webpki::DNSNameRef;
-    use client::network::lookup_ipv4;
 
     pub enum NetworkStream {
         Tcp(TcpStream),
-        Tls(TlsStream<TcpStream, ClientSession>)
+        Tls(TlsStream<TcpStream, ClientSession>),
     }
 
     impl NetworkStream {
@@ -41,7 +41,7 @@ pub mod stream {
     pub struct NetworkStreamBuilder {
         certificate_authority: Option<PathBuf>,
         client_cert: Option<PathBuf>,
-        client_private_key: Option<PathBuf>
+        client_private_key: Option<PathBuf>,
     }
 
     impl NetworkStreamBuilder {
@@ -51,7 +51,11 @@ pub mod stream {
             self
         }
 
-        pub fn add_client_auth<P: AsRef<Path>>(mut self, cert: P, private_key: P) -> NetworkStreamBuilder {
+        pub fn add_client_auth<P: AsRef<Path>>(
+            mut self,
+            cert: P,
+            private_key: P,
+        ) -> NetworkStreamBuilder {
             let cert = cert.as_ref().to_path_buf();
             let private_key = private_key.as_ref().to_path_buf();
 
@@ -60,7 +64,7 @@ pub mod stream {
             self
         }
 
-        fn create_stream(&mut self) -> Result<TlsConnector, ConnectError>{
+        fn create_stream(&mut self) -> Result<TlsConnector, ConnectError> {
             let mut config = ClientConfig::new();
 
             match self.certificate_authority.clone() {
@@ -68,9 +72,8 @@ pub mod stream {
                     let mut ca = BufReader::new(File::open(certificate_authority)?);
                     config.root_store.add_pem_file(&mut ca).unwrap();
                 }
-                None => return Err(ConnectError::NoCertificateAuthority)
+                None => return Err(ConnectError::NoCertificateAuthority),
             }
-
 
             match (self.client_cert.clone(), self.client_private_key.clone()) {
                 (Some(cert), Some(key)) => {
@@ -78,19 +81,22 @@ pub mod stream {
                     let mut keys = BufReader::new(File::open(key)?);
 
                     let certs = pemfile::certs(&mut cert).unwrap();
-                    let keys =  pemfile::rsa_private_keys(&mut keys).unwrap();
+                    let keys = pemfile::rsa_private_keys(&mut keys).unwrap();
 
                     config.set_single_client_cert(certs, keys[0].clone());
                 }
-                (None , None) => (),
-                _ => unimplemented!()
+                (None, None) => (),
+                _ => unimplemented!(),
             };
 
             Ok(TlsConnector::from(Arc::new(config)))
         }
 
-        pub fn connect(mut self, host: &str, port: u16) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
-
+        pub fn connect(
+            mut self,
+            host: &str,
+            port: u16,
+        ) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
             // let host = host.to_owned();
             let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
             let addr = lookup_ipv4(host, port);
@@ -119,14 +125,13 @@ pub mod stream {
 
                     Either::B(tcp)
                 }
-                _ => unimplemented!()
+                _ => unimplemented!(),
             };
 
             network_future
         }
     }
 }
-
 
 #[cfg(feature = "nativetls")]
 mod stream {
@@ -135,14 +140,11 @@ mod stream {
 
     pub enum NetworkStream {
         Tcp(TcpStream),
-        Tls(TlsStream<TcpStream>)
+        Tls(TlsStream<TcpStream>),
     }
 
-    impl NetworkStream {
-
-    }
+    impl NetworkStream {}
 }
-
 
 fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
     use std::net::ToSocketAddrs;
@@ -182,8 +184,8 @@ impl Write for NetworkStream {
     }
 }
 
-impl AsyncRead for NetworkStream{}
-impl AsyncWrite for NetworkStream{
+impl AsyncRead for NetworkStream {}
+impl AsyncWrite for NetworkStream {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         match *self {
             NetworkStream::Tcp(ref mut s) => s.shutdown(),

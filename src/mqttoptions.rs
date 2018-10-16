@@ -1,9 +1,7 @@
-use mqtt3::{LastWill,
-            Connect,
-            Protocol};
+use mqtt3::{Connect, LastWill, Protocol};
 
-use std::time::Duration;
 use error::ConnectError;
+use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
 #[derive(Copy, Clone, Debug)]
@@ -31,7 +29,7 @@ pub enum SecurityOptions {
     #[cfg(feature = "jwt")]
     /// Authenticate against a Google Cloud IoT Core project with the triple
     /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
-    GcloudIot((String, Vec<u8>, i64))
+    GcloudIot((String, Vec<u8>, i64)),
 }
 
 #[derive(Clone, Debug)]
@@ -167,7 +165,9 @@ impl MqttOptions {
 
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
         let (username, password) = match self.security.clone() {
-            SecurityOptions::UsernamePassword((username, password)) => (Some(username), Some(password)),
+            SecurityOptions::UsernamePassword((username, password)) => {
+                (Some(username), Some(password))
+            }
             #[cfg(feature = "jwt")]
             SecurityOptions::GcloudIot((projectname, key, expiry)) => {
                 let username = Some("unused".to_owned());
@@ -200,17 +200,21 @@ struct Claims {
 
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
-pub fn gen_iotcore_password(project: String, key: Vec<u8>, expiry: i64) -> Result<String, ConnectError> {
-    use jsonwebtoken::{encode, Header, Algorithm};
+pub fn gen_iotcore_password(
+    project: String,
+    key: Vec<u8>,
+    expiry: i64,
+) -> Result<String, ConnectError> {
     use chrono::{self, Utc};
+    use jsonwebtoken::{encode, Algorithm, Header};
 
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();
     let exp = time
-                    .checked_add_signed(chrono::Duration::minutes(expiry))
-                    .expect("Unable to create expiry")
-                    .timestamp();
+        .checked_add_signed(chrono::Duration::minutes(expiry))
+        .expect("Unable to create expiry")
+        .timestamp();
 
     let claims = Claims {
         iat,

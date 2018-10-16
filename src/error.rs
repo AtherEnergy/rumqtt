@@ -1,10 +1,10 @@
-use std::io::Error as IoError;
-use mqtt3::Packet;
+use client::Request;
 use futures::sync::mpsc::SendError;
-use tokio::timer;
-use client::{Request};
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
+use mqtt3::Packet;
+use std::io::Error as IoError;
+use tokio::timer;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -14,8 +14,11 @@ pub enum ClientError {
     PacketSizeLimitExceeded,
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
-    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<Request>)
+    #[fail(
+        display = "Failed sending request to connection thread. Error = {}",
+        _0
+    )]
+    MpscSend(SendError<Request>),
 }
 
 #[derive(Debug, Fail)]
@@ -23,7 +26,7 @@ pub enum MqttError {
     #[fail(display = "Connection failed")]
     ConnectError,
     #[fail(display = "Network call failed")]
-    NetworkError
+    NetworkError,
 }
 
 // TODO: Modify mqtt311 to return enums for mqtt connect error
@@ -40,7 +43,10 @@ pub enum ConnectError {
     DnsListEmpty,
     #[fail(display = "Couldn't create mqtt connection in time")]
     Timeout,
-    #[fail(display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}", _0)]
+    #[fail(
+        display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}",
+        _0
+    )]
     NotConnackPacket(Packet),
     #[fail(display = "Empty response")]
     NoResponse,
@@ -71,7 +77,6 @@ pub enum NetworkError {
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }
-
 
 impl From<IoError> for ConnectError {
     fn from(err: IoError) -> ConnectError {

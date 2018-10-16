@@ -1,21 +1,21 @@
 extern crate bytes;
+#[cfg(feature = "jwt")]
+extern crate chrono;
+extern crate crossbeam_channel;
 extern crate futures;
+#[cfg(feature = "jwt")]
+extern crate jsonwebtoken;
 extern crate mqtt3;
+#[cfg(feature = "nativetls")]
+extern crate native_tls;
 extern crate tokio;
 extern crate tokio_codec;
 extern crate tokio_io;
-extern crate crossbeam_channel;
-extern crate tokio_tls;
 #[cfg(feature = "rustls")]
 extern crate tokio_rustls;
+extern crate tokio_tls;
 #[cfg(feature = "rustls")]
 extern crate webpki;
-#[cfg(feature = "nativetls")]
-extern crate native_tls;
-#[cfg(feature = "jwt")]
-extern crate jsonwebtoken;
-#[cfg(feature = "jwt")]
-extern crate chrono;
 #[macro_use]
 extern crate serde_derive;
 
@@ -30,6 +30,6 @@ pub mod codec;
 pub mod error;
 pub mod mqttoptions;
 
-pub use mqttoptions::{MqttOptions, ReconnectOptions, SecurityOptions, ConnectionMethod};
 pub use client::MqttClient;
 pub use mqtt3::QoS;
+pub use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions, SecurityOptions};

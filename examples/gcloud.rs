@@ -1,10 +1,10 @@
-extern crate rumqtt;
-extern crate  pretty_env_logger;
 extern crate envy;
+extern crate pretty_env_logger;
+extern crate rumqtt;
 #[macro_use]
 extern crate serde_derive;
 
-use rumqtt::{MqttOptions, MqttClient, QoS, SecurityOptions, ConnectionMethod};
+use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
 use std::thread;
 
 #[derive(Deserialize, Debug)]
@@ -18,9 +18,12 @@ fn main() {
     pretty_env_logger::init();
     let config: Config = envy::from_env().unwrap();
 
-    let client_id = "projects/".to_owned() + &config.project +
-        "/locations/us-central1/registries/" + &config.registry +
-        "/devices/" + &config.id;
+    let client_id = "projects/".to_owned()
+        + &config.project
+        + "/locations/us-central1/registries/"
+        + &config.registry
+        + "/devices/"
+        + &config.id;
 
     let security_options = SecurityOptions::GcloudIot((
         config.project,
@@ -37,12 +40,14 @@ fn main() {
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
-    thread::spawn(move || for i in 0..100 {
-        let payload = format!("publish {}", i);
-        thread::sleep_ms(1000);
-        mqtt_client
-            .publish(topic.clone(), QoS::AtLeastOnce, payload)
-            .unwrap();
+    thread::spawn(move || {
+        for i in 0..100 {
+            let payload = format!("publish {}", i);
+            thread::sleep_ms(1000);
+            mqtt_client
+                .publish(topic.clone(), QoS::AtLeastOnce, payload)
+                .unwrap();
+        }
     });
 
     for notification in notifications {

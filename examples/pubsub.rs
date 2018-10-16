@@ -1,7 +1,7 @@
+extern crate pretty_env_logger;
 extern crate rumqtt;
-extern crate  pretty_env_logger;
 
-use rumqtt::{MqttOptions, MqttClient, QoS};
+use rumqtt::{MqttClient, MqttOptions, QoS};
 use std::thread;
 
 fn main() {
@@ -14,12 +14,14 @@ fn main() {
         .subscribe("hello/world", QoS::AtMostOnce)
         .unwrap();
 
-    thread::spawn(move || for i in 0..100 {
-        let payload = format!("publish {}", i);
-        thread::sleep_ms(1000);
-        mqtt_client
-            .publish("hello/world", QoS::AtMostOnce, payload)
-            .unwrap();
+    thread::spawn(move || {
+        for i in 0..100 {
+            let payload = format!("publish {}", i);
+            thread::sleep_ms(1000);
+            mqtt_client
+                .publish("hello/world", QoS::AtMostOnce, payload)
+                .unwrap();
+        }
     });
 
     for notification in notifications {
