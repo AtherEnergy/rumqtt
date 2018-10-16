@@ -14,3 +14,4 @@ out
 .rnd
 **/*.rs.bk
 Cargo.lock
+examples/certs

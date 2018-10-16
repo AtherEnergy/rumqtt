@@ -28,7 +28,29 @@ optional = true
 version = "0.18"
 optional = true
 
+[dependencies.jsonwebtoken]
+version = "5.0.1"
+optional = true
+
+[dependencies.chrono]
+version = "0.4"
+optional = true
+
+[dependencies.serde]
+version = "1"
+optional = true
+
+[dependencies.serde_derive]
+version = "1"
+optional = true
+
+[dev-dependencies]
+envy = "0.3"
+serde = "1"
+serde_derive = "1"
+
 [features]
-default = ["rustls"]
+default = ["rustls", "jwt"]
 rustls = ["tokio-rustls", "webpki"]
+jwt = ["jsonwebtoken", "chrono", "serde", "serde_derive"]
 nativetls = ["native-tls"]

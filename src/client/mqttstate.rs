@@ -121,7 +121,7 @@ impl MqttState {
             _ => (None, None),
         };
 
-        Ok(self.opts.connect_packet())
+        self.opts.connect_packet()
     }
 
     pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {

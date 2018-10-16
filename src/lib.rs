@@ -12,6 +12,12 @@ extern crate tokio_rustls;
 extern crate webpki;
 #[cfg(feature = "nativetls")]
 extern crate native_tls;
+#[cfg(feature = "jwt")]
+extern crate jsonwebtoken;
+#[cfg(feature = "jwt")]
+extern crate chrono;
+#[macro_use]
+extern crate serde_derive;
 
 #[macro_use]
 extern crate log;

@@ -3,6 +3,8 @@ use mqtt3::Packet;
 use futures::sync::mpsc::SendError;
 use tokio::timer;
 use client::{Request};
+#[cfg(feature = "jwt")]
+use jsonwebtoken;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -29,6 +31,9 @@ pub enum MqttError {
 pub enum ConnectError {
     #[fail(display = "Mqtt connection failed. Error = {}", _0)]
     MqttConnectionRefused(u8),
+    #[cfg(feature = "jwt")]
+    #[fail(display = "Mqtt connection failed. Error = {}", _0)]
+    Jwt(jsonwebtoken::errors::Error),
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
     #[fail(display = "Empty dns list")]
@@ -71,6 +76,12 @@ pub enum NetworkError {
 impl From<IoError> for ConnectError {
     fn from(err: IoError) -> ConnectError {
         ConnectError::Io(err)
+    }
+}
+
+impl From<jsonwebtoken::errors::Error> for ConnectError {
+    fn from(err: jsonwebtoken::errors::Error) -> ConnectError {
+        ConnectError::Jwt(err)
     }
 }
 

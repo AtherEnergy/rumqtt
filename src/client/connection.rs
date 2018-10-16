@@ -5,7 +5,7 @@ use std::thread;
 use codec::MqttCodec;
 use futures::{future, stream};
 use mqtt3::Packet;
-use mqttoptions::MqttOptions;
+use mqttoptions::{MqttOptions, ConnectionMethod};
 use tokio::runtime::current_thread;
 use tokio::timer::{Timeout, Interval};
 use std::time::Duration;
@@ -95,9 +95,28 @@ impl Connection {
     fn tcp_connect_future(&self) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
         // TODO: Remove unwraps
         // TODO: This call will also do dns resolution. Find a way to add timeout to this call
-        let address = self.mqttoptions.broker_addr.to_socket_addrs().unwrap().next().unwrap();
+//        let address = self.mqttoptions.broker_addr.to_socket_addrs().unwrap().next().unwrap();
+//
+//        NetworkStream::connect(address)
+        let host = &self.mqttoptions.broker_addr;
+        let port = self.mqttoptions.port;
+        let connection_method = self.mqttoptions.connection_method.clone();
+        let builder = NetworkStream::builder();
 
-        NetworkStream::connect(address)
+        let builder = match connection_method {
+            ConnectionMethod::Tls(ca, Some((cert, key))) => {
+                builder
+                    .add_certificate_authority(ca)
+                    .add_client_auth(cert, key)
+            }
+            ConnectionMethod::Tls(ca, None) => {
+                builder
+                    .add_certificate_authority(ca)
+            }
+            ConnectionMethod::Tcp => builder
+        };
+
+        builder.connect(host, port)
     }
 
     /// Composes a new future which is a combination of tcp connect + mqtt handshake

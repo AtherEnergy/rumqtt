@@ -30,22 +30,12 @@ pub mod stream {
     }
 
     impl NetworkStream {
-        pub fn connect(addr: SocketAddr) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
-            TcpStream::connect(&addr)
-                .map_err(ConnectError::from)
-                .map(|stream| {
-                    let stream = NetworkStream::Tcp(stream);
-                    MqttCodec.framed(stream)
-                })
-        }
-
-        pub fn config<P: AsRef<Path>>(ca: P) {
-            let certfile = File::open(&ca).expect("Cannot open CA file");
-            let mut ca = BufReader::new(certfile);
-
-            let mut config = ClientConfig::new();
-            config.root_store.add_pem_file(&mut ca).unwrap();
-            let config = TlsConnector::from(Arc::new(config));
+        pub fn builder() -> NetworkStreamBuilder {
+            NetworkStreamBuilder {
+                certificate_authority: None,
+                client_cert: None,
+                client_private_key: None,
+            }
         }
     }
 
@@ -93,38 +83,47 @@ pub mod stream {
 
                     config.set_single_client_cert(certs, keys[0].clone());
                 }
+                (None , None) => (),
                 _ => unimplemented!()
             };
 
             Ok(TlsConnector::from(Arc::new(config)))
         }
 
-        pub fn connect(mut self, host: &'static str, port: u16) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
+        pub fn connect(mut self, host: &str, port: u16) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
 
             // let host = host.to_owned();
-            let domain = DNSNameRef::try_from_ascii_str(host).unwrap();
+            let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
             let addr = lookup_ipv4(host, port);
 
             let tls_connector = self.create_stream();
 
-            TcpStream::connect(&addr)
-                .and_then(move |stream| {
-                    match tls_connector {
-                        Ok(tls_connector) => Either::B(tls_connector.connect(domain, stream)),
-                        Err(ConnectError::NoCertificateAuthority) => Either::B(future::ok(stream)),
-                        Err(e) => unimplemented!()
-                    }
-                })
-                .map_err(ConnectError::from)
-                .and_then(|stream| {
-//                    match stream {
-//                        Either::A(tcp) => MqttCodec.framed(NetworkStream::Tcp(tcp)),
-//                        Either::B(tls) => MqttCodec.framed(NetworkStream::Tls(tls)),
-//                    }
+            let network_future = match tls_connector {
+                Ok(tls_connector) => {
+                    let tls = TcpStream::connect(&addr)
+                        .and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
+                        .map_err(ConnectError::from)
+                        .and_then(|stream| {
+                            let stream = NetworkStream::Tls(stream);
+                            future::ok(MqttCodec.framed(stream))
+                        });
 
-                    let stream = NetworkStream::Tls(stream);
-                    future::ok(MqttCodec.framed(stream))
-                })
+                    Either::A(tls)
+                }
+                Err(ConnectError::NoCertificateAuthority) => {
+                    let tcp = TcpStream::connect(&addr)
+                        .and_then(|stream| {
+                            let stream = NetworkStream::Tcp(stream);
+                            future::ok(MqttCodec.framed(stream))
+                        })
+                        .map_err(ConnectError::from);
+
+                    Either::B(tcp)
+                }
+                _ => unimplemented!()
+            };
+
+            network_future
         }
     }
 }
