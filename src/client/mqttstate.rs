@@ -308,7 +308,7 @@ mod test {
 
     #[test]
     fn next_pkid_roll() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         let mut pkt_id = PacketIdentifier(0);
         for _ in 0..65536 {
@@ -319,7 +319,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_handle_should_set_pkid_correctly_and_add_publish_to_queue_correctly() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.connection_status = MqttConnectionStatus::Connected;
 
@@ -365,7 +365,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_handle_should_throw_error_in_invalid_state() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         let publish = Publish {
@@ -385,7 +385,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_handle_should_throw_error_when_packetsize_exceeds_max() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         let publish = Publish {
@@ -405,7 +405,7 @@ mod test {
 
     #[test]
     fn incoming_puback_should_remove_correct_publish_from_queue() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         // QoS1 Publish
         let publish = Publish {
@@ -448,7 +448,7 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_during_invalid_state() {
         // 1. test for invalid state
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         thread::sleep(Duration::from_secs(5));
@@ -461,7 +461,7 @@ mod test {
 
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
@@ -481,7 +481,7 @@ mod test {
 
     // #[test]
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
@@ -496,7 +496,7 @@ mod test {
 
     #[test]
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
@@ -512,7 +512,7 @@ mod test {
 
     #[test]
     fn disconnect_handle_should_reset_everything_in_clean_session() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
         // QoS1 Publish
@@ -537,7 +537,7 @@ mod test {
 
     #[test]
     fn disconnect_handle_should_reset_everything_except_queues_in_persistent_session() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
         mqtt.opts.clean_session = false;
@@ -563,7 +563,7 @@ mod test {
 
     #[test]
     fn connection_status_is_valid_while_handling_connect_and_connack_packets() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
@@ -589,7 +589,7 @@ mod test {
 
     #[test]
     fn connack_handle_should_not_return_list_of_incomplete_messages_to_be_sent_in_clean_session() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         let publish = Publish {
@@ -617,8 +617,8 @@ mod test {
 
     #[test]
     fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
-        let mqtt_opts = MqttOptions::new("test-id", "127.0.0.1:1883");
-        let mut mqtt = MqttState::new(mqtt_opts);
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
+        let mut mqtt = MqttState::new(opts);
         mqtt.opts.clean_session = false;
 
         let publish = Publish {
@@ -653,7 +653,7 @@ mod test {
             qos: QoS::ExactlyOnce,
             retain: true,
         };
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883")
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883)
             .set_clean_session(true)
             .set_keep_alive(50)
             .set_last_will(lwt.clone())

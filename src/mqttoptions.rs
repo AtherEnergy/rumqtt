@@ -3,7 +3,6 @@ use mqtt3::{LastWill,
             Protocol};
 
 use std::time::Duration;
-use std::path::Path;
 use error::ConnectError;
 
 /// Control how the connection is re-established if it is lost.
@@ -202,9 +201,6 @@ struct Claims {
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
 pub fn gen_iotcore_password(project: String, key: Vec<u8>, expiry: i64) -> Result<String, ConnectError> {
-    use std::fs::File;
-    use std::io::Read;
-
     use jsonwebtoken::{encode, Header, Algorithm};
     use chrono::{self, Utc};
 

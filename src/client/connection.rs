@@ -11,7 +11,6 @@ use tokio::timer::{Timeout, Interval};
 use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::net::ToSocketAddrs;
 use client::mqttstate::MqttState;
 use error::{ConnectError, NetworkError};
 use crossbeam_channel;

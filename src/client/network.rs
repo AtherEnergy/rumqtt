@@ -16,7 +16,6 @@ pub mod stream {
     use std::sync::Arc;
     use futures::{Future, future::Either};
     use error::ConnectError;
-    use std::net::SocketAddr;
     use tokio_codec::{Decoder, Framed};
     use codec::MqttCodec;
     use std::path::PathBuf;
