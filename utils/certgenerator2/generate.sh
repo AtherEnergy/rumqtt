@@ -1,13 +1,13 @@
 #! /bin/bash
 
 # https://jamielinux.com/docs/openssl-certificate-authority/create-the-root-pair.html
+# https://deliciousbrains.com/ssl-certificate-authority-for-local-https-development/
 
 set -e
 
 
 HOME=$PWD
 OUT=$PWD/out
-META=$PWD/meta
 META_ROOT=$PWD/meta/root
 META_INTERMEDIATE=$PWD/meta/intermediate
 COLOR='\033[0;34m'
@@ -18,7 +18,6 @@ help() {
     echo "Example usage: $0 --server {domain_name}"
     echo
     echo "   --root           | -r                     Delete all the existing certificates and generate new root & intermediate certificates"
-    echo "   --inter          | -i                     Generate new intermediate certificates"
     echo "   --server         | -s                     Generate new server certificates using existing intermediate certs"
     echo "   --client         | -c                     Generate new client certificates using existing intermediate certs"
     echo "   --check-root     | -c1                    Check root ca certificate"
@@ -45,21 +44,13 @@ info() {
 gen_root_key_cert() {
     mkdir -p $OUT/root
     cd $OUT/root
-    mkdir certs crl newcerts private
-    chmod 700 private
-    touch index.txt
-    echo 1000 > serial
 
+    # generate private key
     openssl genrsa -aes256 -out private/ca.key.pem 4096
     chmod 400 private/ca.key.pem
 
-    # 'req -new -x509' creates new self signed certificate (root ca here)
-    openssl req                      \
-            -config $META/rootca.cnf \
-            -key private/ca.key.pem  \
-            -new -x509 -days 7300    \
-            -out certs/ca.cert.pem
-    
+    openssl req -config $META_ROOT/openssl.cnf -key private/ca.key.pem \
+            -new -x509 -days 7300 -sha256 -extensions v3_ca -out certs/ca.cert.pem
     chmod 444 certs/ca.cert.pem
     cd $HOME
 }
@@ -73,26 +64,19 @@ gen_inter_key_cert() {
     echo 1000 > serial
     echo 1000 > crlnumber
 
+
     info "generating intermediate key. set key password"
     openssl genrsa -aes256 -out private/intermediate.key.pem 4096
     chmod 400 private/intermediate.key.pem
 
     info "creating signing request for intermediate cert generation. \
           \nuse defaults. requires intermediate key password"
-    openssl req                                 \
-            -config $META/interca.cnf           \
-            -new -sha256                        \
-            -key private/intermediate.key.pem   \
-            -out csr/intermediate.csr.pem
+    openssl req -config $META_INTERMEDIATE/openssl.cnf -new -sha256 -key private/intermediate.key.pem -out csr/intermediate.csr.pem
 
-    info "signing csr to generate intermediate ca certificate. requires root key password"
-
-    openssl ca                                          \
-            -config $META/rootca.cnf                    \
-            -extensions v3_intermediate_ca -days 3650   \
-            -notext -md sha256                          \
-            -in csr/intermediate.csr.pem                \
-            -out certs/intermediate.cert.pem
+    # intermediate ca should be requires root key & config
+    info "generating intermediate ca certificate. requires root key password"
+    openssl ca -config $META_ROOT/openssl.cnf -extensions v3_intermediate_ca -days 3650 -notext -md sha256 \
+               -in csr/intermediate.csr.pem -out certs/intermediate.cert.pem
 
     chmod 444 certs/intermediate.cert.pem
 
@@ -258,7 +242,7 @@ case $1 in
         gen_server_cert_key $2
         exit
         ;;
-    # Clean and generate new root certificate authority
+    # generate new root & intermediate certificates
     -r|--root)
         read -p "Are you sure you want to remove old root & intermediate certs & start from scratch (y/n)?" choice
         case "$choice" in
@@ -266,6 +250,7 @@ case $1 in
             echo "yes"
             clean
             gen_root_key_cert
+            gen_inter_key_cert
             exit
             ;;
         n|N )
@@ -276,10 +261,6 @@ case $1 in
             echo "invalid"
             ;;
         esac
-        ;;
-    -i|--inter)
-        gen_inter_key_cert
-        exit
         ;;
     -c1|--check-root)
         check_root
