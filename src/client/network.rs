@@ -22,6 +22,7 @@ pub mod stream {
     use tokio_rustls::{rustls::internal::pemfile, rustls::ClientConfig, TlsConnector};
     use tokio_rustls::{rustls::ClientSession, TlsStream};
     use webpki::DNSNameRef;
+    use std::io::Cursor;
 
     pub enum NetworkStream {
         Tcp(TcpStream),
@@ -39,28 +40,20 @@ pub mod stream {
     }
 
     pub struct NetworkStreamBuilder {
-        certificate_authority: Option<PathBuf>,
-        client_cert: Option<PathBuf>,
-        client_private_key: Option<PathBuf>,
+        certificate_authority: Option<Vec<u8>>,
+        client_cert: Option<Vec<u8>>,
+        client_private_key: Option<Vec<u8>>,
     }
 
     impl NetworkStreamBuilder {
-        pub fn add_certificate_authority<P: AsRef<Path>>(mut self, ca: P) -> NetworkStreamBuilder {
-            let ca = ca.as_ref().to_path_buf();
-            self.certificate_authority = Some(ca);
+        pub fn add_certificate_authority(mut self, ca: &[u8]) -> NetworkStreamBuilder {
+            self.certificate_authority = Some(ca.to_vec());
             self
         }
 
-        pub fn add_client_auth<P: AsRef<Path>>(
-            mut self,
-            cert: P,
-            private_key: P,
-        ) -> NetworkStreamBuilder {
-            let cert = cert.as_ref().to_path_buf();
-            let private_key = private_key.as_ref().to_path_buf();
-
-            self.client_cert = Some(cert);
-            self.client_private_key = Some(private_key);
+        pub fn add_client_auth(mut self, cert: &[u8], private_key: &[u8]) -> NetworkStreamBuilder {
+            self.client_cert = Some(cert.to_vec());
+            self.client_private_key = Some(private_key.to_vec());
             self
         }
 
@@ -68,8 +61,8 @@ pub mod stream {
             let mut config = ClientConfig::new();
 
             match self.certificate_authority.clone() {
-                Some(certificate_authority) => {
-                    let mut ca = BufReader::new(File::open(certificate_authority)?);
+                Some(ca) => {
+                    let mut ca = BufReader::new(Cursor::new(ca));
                     config.root_store.add_pem_file(&mut ca).unwrap();
                 }
                 None => return Err(ConnectError::NoCertificateAuthority),
@@ -77,8 +70,8 @@ pub mod stream {
 
             match (self.client_cert.clone(), self.client_private_key.clone()) {
                 (Some(cert), Some(key)) => {
-                    let mut cert = BufReader::new(File::open(cert)?);
-                    let mut keys = BufReader::new(File::open(key)?);
+                    let mut cert = BufReader::new(Cursor::new(cert));
+                    let mut keys = BufReader::new(Cursor::new(key));
 
                     let certs = pemfile::certs(&mut cert).unwrap();
                     let keys = pemfile::rsa_private_keys(&mut keys).unwrap();

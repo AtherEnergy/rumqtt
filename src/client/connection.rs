@@ -107,9 +107,9 @@ impl Connection {
 
         let builder = match connection_method {
             ConnectionMethod::Tls(ca, Some((cert, key))) => builder
-                .add_certificate_authority(ca)
-                .add_client_auth(cert, key),
-            ConnectionMethod::Tls(ca, None) => builder.add_certificate_authority(ca),
+                .add_certificate_authority(&ca)
+                .add_client_auth(&cert, &key),
+            ConnectionMethod::Tls(ca, None) => builder.add_certificate_authority(&ca),
             ConnectionMethod::Tcp => builder,
         };
 

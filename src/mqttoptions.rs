@@ -36,7 +36,7 @@ pub enum SecurityOptions {
 pub enum ConnectionMethod {
     Tcp,
     // ca and, optionally, a pair of client cert and client key
-    Tls(String, Option<(String, String)>),
+    Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
 #[derive(Clone, Debug)]
