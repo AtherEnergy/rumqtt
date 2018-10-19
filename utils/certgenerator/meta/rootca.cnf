@@ -54,6 +54,8 @@ string_mask         = utf8only
 default_md          = sha256
 
 # Extension to add when the -x509 option is used.
+# In our case this option is triggered when generating
+# self signed certificate
 x509_extensions     = v3_ca
 
 [ req_distinguished_name ]
@@ -84,6 +86,7 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
 
 [ v3_intermediate_ca ]
 # Extensions for a typical intermediate CA (`man x509v3_config`).
+# Used when signing intermediate ca csr to generate certificate
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always,issuer
 basicConstraints = critical, CA:true, pathlen:0

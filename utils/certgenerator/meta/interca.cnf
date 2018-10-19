@@ -7,7 +7,7 @@ default_ca = CA_default
 
 [ CA_default ]
 # Directory and file locations.
-dir               = .
+dir               = ../intermediate
 certs             = $dir/certs
 crl_dir           = $dir/crl
 new_certs_dir     = $dir/newcerts
@@ -33,6 +33,8 @@ cert_opt          = ca_default
 default_days      = 375
 preserve          = no
 policy            = policy_loose
+copy_extensions   = copyall
+
 
 [ policy_loose ]
 # Allow the intermediate CA to sign a more diverse range of certificates.
@@ -54,9 +56,6 @@ string_mask         = utf8only
 # SHA-1 is deprecated, so use SHA-2 instead.
 default_md          = sha256
 
-# Extension to add when the -x509 option is used.
-x509_extensions     = v3_ca
-
 
 [ req_distinguished_name ]
 # See <https://en.wikipedia.org/wiki/Certificate_signing_request>.
@@ -77,16 +76,24 @@ organizationalUnitName_default  = Software Team
 commonName_default              = CA Intermediate
 emailAddress_default            = inter@atherenergy.com
 
-[ v3_ca ]
-# Extensions for a typical CA (`man x509v3_config`).
+[ usr_cert ]
+# Extensions for client certificates (`man x509v3_config`).
+# Used when signing client csr to generate certificate
+basicConstraints = CA:FALSE
+nsCertType = client, email
+nsComment = "OpenSSL Generated Client Certificate"
 subjectKeyIdentifier = hash
-authorityKeyIdentifier = keyid:always,issuer
-basicConstraints = critical, CA:true
-keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+authorityKeyIdentifier = keyid,issuer
+keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth, emailProtection
 
-[ v3_intermediate_ca ]
-# Extensions for a typical intermediate CA (`man x509v3_config`).
+[ server_cert ]
+# Extensions for server certificates (`man x509v3_config`).
+# Used when signing server csr to generate certificate
+basicConstraints = CA:FALSE
+nsCertType = server
+nsComment = "OpenSSL Generated Server Certificate"
 subjectKeyIdentifier = hash
-authorityKeyIdentifier = keyid:always,issuer
-basicConstraints = critical, CA:true, pathlen:0
-keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+authorityKeyIdentifier = keyid,issuer:always
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth

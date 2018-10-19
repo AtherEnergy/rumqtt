@@ -1,7 +1,9 @@
 #! /bin/bash
 
+# references
+#-------------
 # https://jamielinux.com/docs/openssl-certificate-authority/create-the-root-pair.html
-
+# https://www.geocerts.com/ssl-tools
 set -e
 
 
@@ -21,13 +23,13 @@ help() {
     echo "   --inter          | -i                     Generate new intermediate certificates"
     echo "   --server         | -s                     Generate new server certificates using existing intermediate certs"
     echo "   --client         | -c                     Generate new client certificates using existing intermediate certs"
-    echo "   --check-root     | -c1                    Check root ca certificate"
-    echo "   --check-inter    | -c2                    Check intermedaite ca certificate"
-    echo "   --check-server   | -c3                    Check server certificate"
-    echo "   --check-client   | -c4                    Check client certificate"
-    echo "   --verify-inter   | -v2                    Verify inermediate ca certificate"
-    echo "   --verify-server  | -v3                    Verify server certificate"
-    echo "   --verify-client  | -v4                    Verify client certificate"
+    echo "   --check-root     | -cr                    Check root ca certificate"
+    echo "   --check-inter    | -ci                    Check intermedaite ca certificate"
+    echo "   --check-server   | -cs                    Check server certificate"
+    echo "   --check-client   | -cc                    Check client certificate"
+    echo "   --verify-inter   | -vi                    Verify inermediate ca certificate"
+    echo "   --verify-server  | -vs                    Verify server certificate"
+    echo "   --verify-client  | -vc                    Verify client certificate"
     echo "   --test                                    Instructions for starting test server & client"
     
     echo
@@ -109,6 +111,8 @@ gen_server_cert_key() {
     mkdir certs crl csr private
     chmod 700 private
 
+    openssl ca -config $META/interca.cnf -revoke certs/server.cert.pem || true
+
     info "generating server key"
     openssl genrsa -out private/server.key.pem 2048
     chmod 400 private/server.key.pem
@@ -116,12 +120,29 @@ gen_server_cert_key() {
     info "creating signing request for server cert generation", \
          "NOTE: for server, common name should be fully qualified domain name"
 
-    openssl req -config $META_INTERMEDIATE/openssl.cnf -key private/server.key.pem -new -sha256 -out csr/server.csr.pem \
-                -subj "/C=IN/ST=Karnataka/L=Victoria Layout/O=Blah Blah Pvt Ltd/OU=Software Team/CN=$1"
+    # NOTE: SAN is important for string tls stacks like rustls. SAN in csr
+    # doesn't guarantee SAN in the certificate. Intermediate ca conf should
+    # be configured to allow SAN extension. This is bypassed with `copyall`
+    # for now but that is not safe. Clean this up later
+    # we can use the tools here to verify -> https://www.geocerts.com/ssl-tools
+    openssl req                                             \
+            -new -sha256                                    \
+            -key private/server.key.pem                     \
+            -out csr/server.csr.pem                         \
+            -reqexts SAN                                    \
+            -config <(cat /etc/ssl/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:$1")) \
+            -subj "/C=IN/ST=Karnataka/L=Victoria Layout/O=Blah Blah Pvt Ltd/OU=Software Team/CN=$1"
 
-    info "generating server certificate signed with intermediate ca"
-    openssl ca -config $META_INTERMEDIATE/openssl.cnf -extensions server_cert -days 375 -notext -md sha256 \
-               -in csr/server.csr.pem -out certs/server.cert.pem
+
+
+    info "signing csr with intermediate ca to generate server certificate"
+    openssl ca                                  \
+            -config $META/interca.cnf           \
+            -extensions server_cert -days 375   \
+            -notext -md sha256                  \
+            -in csr/server.csr.pem              \
+            -out certs/server.cert.pem
+
 
     chmod 444 certs/server.cert.pem
     cd $HOME
@@ -141,12 +162,18 @@ gen_client_cert_key() {
     info "creating signing request for client cert generation", \
          "NOTE: for client, common name should be a unique name"
 
-    openssl req -config $META_INTERMEDIATE/openssl.cnf -key private/$1.key.pem -new -sha256 -out csr/$1.csr.pem \
-                -subj "/C=IN/ST=Karnataka/L=Victoria Layout/O=Blah Blah Pvt Ltd/OU=Software Team/CN=$1"
+    openssl req                                 \
+            -key private/$1.key.pem             \
+            -new -sha256 -out csr/$1.csr.pem    \
+            -subj "/C=IN/ST=Karnataka/L=Victoria Layout/O=Blah Blah Pvt Ltd/OU=Software Team/CN=$1"
 
     info "generating client certificate signed with intermediate ca"
-    openssl ca -config $META_INTERMEDIATE/openssl.cnf -extensions usr_cert -days 375 -notext -md sha256 \
-               -in csr/$1.csr.pem -out certs/$1.cert.pem
+    openssl ca                                          \
+            -config $META/interca.cnf                   \
+            -extensions usr_cert -days 375              \
+            -notext -md sha256                          \
+            -in csr/$1.csr.pem                          \
+            -out certs/$1.cert.pem
 
     chmod 444 certs/$1.cert.pem
     cd $HOME
@@ -187,6 +214,9 @@ check_inter() {
 
 check_server() {
     cd $OUT/server
+    info "checking server csr"
+    openssl req -in csr/server.csr.pem -noout -text
+    info "checking server certificate"
     openssl x509 -noout -text -in certs/server.cert.pem
     cd $HOME
 }
@@ -232,9 +262,16 @@ test() {
     openssl s_client -connect 0.0.0.0:12345 -tls1_2 -cert out/client/certs/$1.cert.pem -key out/client/private/$1.key.pem -CAfile out/intermediate/certs/ca-chain.cert.pem
 }
 
-clean ()
+clean_root ()
 {
-    rm -rf out
+    rm -rf $OUT
+}
+
+clean_inter ()
+{
+    rm -rf $OUT/intermediate
+    rm -rf $OUT/server
+    rm -rf $OUT/client
 }
 
 
@@ -264,7 +301,7 @@ case $1 in
         case "$choice" in
         y|Y )
             echo "yes"
-            clean
+            clean_root
             gen_root_key_cert
             exit
             ;;
@@ -278,40 +315,54 @@ case $1 in
         esac
         ;;
     -i|--inter)
-        gen_inter_key_cert
-        exit
+        read -p "Are you sure you want to remove old intermediate ca files and create brand new intermediate ca?" choice
+        case "$choice" in
+        y|Y )
+            echo "yes"
+            clean_inter
+            gen_inter_key_cert
+            exit
+            ;;
+        n|N )
+            echo "exiting"
+            exit
+            ;;
+        * )
+            echo "invalid"
+            ;;
+        esac
         ;;
-    -c1|--check-root)
+    -cr|--check-root)
         check_root
         exit
         ;;
 
-    -c2|--check-inter)
+    -ci|--check-inter)
         check_inter
         exit
         ;;
 
-    -c3|--check-server)
+    -cs|--check-server)
         check_server
         exit
         ;;
 
-    -c4|--check-client)
+    -cc|--check-client)
         check_client
         exit
         ;;
 
-    -v2|--verify-inter)
+    -vi|--verify-inter)
         verify_inter
         exit
         ;;
 
-    -v3|--verify-server)
+    -vs|--verify-server)
         verify_server
         exit
         ;;
 
-    -v4|--verify-client)
+    -vc|--verify-client)
         validate_client_args $2
         verify_client $2
         exit
