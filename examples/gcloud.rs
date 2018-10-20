@@ -33,11 +33,12 @@ fn main() {
 
     let security_options = SecurityOptions::GcloudIot((
         config.project,
-        include_bytes!("certs/rsa_private.der").to_vec(),
+        include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
         60,
     ));
 
-    let connection_method = ConnectionMethod::Tls("roots.pem".to_owned(), None);
+    let ca = include_bytes!("gcloudfiles/roots.pem").to_vec();
+    let connection_method = ConnectionMethod::Tls(ca, None);
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
         .set_keep_alive(10)

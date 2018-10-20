@@ -12,11 +12,11 @@ pub enum ReconnectOptions {
     /// successfully at least once.
     ///
     /// Before a reconnection attempt, sleep for the specified amount of seconds.
-    AfterFirstSuccess(u16),
+    AfterFirstSuccess(u64),
     /// Always reconnect automatically.
     ///
     /// Before a reconnection attempt, sleep for the specified amount of seconds.
-    Always(u16),
+    Always(u64),
 }
 
 /// Client authentication option for mqtt connect packet

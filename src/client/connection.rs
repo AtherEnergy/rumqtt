@@ -10,7 +10,7 @@ use futures::sync::mpsc;
 use futures::{future, stream};
 use futures::{Future, Sink, Stream};
 use mqtt3::Packet;
-use mqttoptions::{ConnectionMethod, MqttOptions};
+use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::thread;
@@ -58,6 +58,9 @@ impl Connection {
     }
 
     fn mqtt_eventloop(&mut self) {
+        let mut connection_count = 1;
+        let reconnect_option = self.mqttoptions.reconnect;
+
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
             let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, Duration::from_secs(30));
@@ -67,10 +70,18 @@ impl Connection {
             //       You'll face `reactor gone` error if `framed` is used again with a new recator
             let mut rt = current_thread::Runtime::new().unwrap();
             let framed = match rt.block_on(mqtt_connect_deadline) {
-                Ok(framed) => framed,
+                Ok(framed) => {
+                    connection_count += 1;
+                    framed
+                }
                 Err(e) => {
                     error!("Connection error = {:?}", e);
-                    thread::sleep_ms(2000);
+                    match reconnect_option {
+                        ReconnectOptions::AfterFirstSuccess(_) if connection_count == 1 => break,
+                        ReconnectOptions::AfterFirstSuccess(time) => thread::sleep(Duration::from_secs(time)),
+                        ReconnectOptions::Always(time) => thread::sleep(Duration::from_secs(time)),
+                        ReconnectOptions::Never => break,
+                    }
                     continue 'reconnection;
                 }
             };
@@ -81,11 +92,16 @@ impl Connection {
 
             if let Err(e) = rt.block_on(mqtt_future) {
                 error!("Mqtt eventloop error = {:?}", e);
-                thread::sleep_ms(2000);
+                match reconnect_option {
+                    ReconnectOptions::AfterFirstSuccess(_) if connection_count == 1 => break,
+                    ReconnectOptions::AfterFirstSuccess(time) => thread::sleep(Duration::from_secs(time)),
+                    ReconnectOptions::Always(time) => thread::sleep(Duration::from_secs(time)),
+                    ReconnectOptions::Never => break,
+                }
                 continue 'reconnection;
             }
 
-            error!("@@@@@@@@@ Reactor Exited @@@@@@@@@");
+            error!("Reactor Exited !!!!!!!!!!!");
         }
     }
 

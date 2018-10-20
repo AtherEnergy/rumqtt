@@ -12,10 +12,7 @@ pub mod stream {
     use error::ConnectError;
     use futures::future;
     use futures::{future::Either, Future};
-    use std::fs::File;
     use std::io::BufReader;
-    use std::path::Path;
-    use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::net::TcpStream;
     use tokio_codec::{Decoder, Framed};
