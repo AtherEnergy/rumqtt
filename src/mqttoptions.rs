@@ -1,7 +1,6 @@
-use mqtt3::{LastWill,
-            Connect,
-            Protocol};
+use mqtt3::{Connect, LastWill, Protocol};
 
+use error::ConnectError;
 use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
@@ -20,26 +19,31 @@ pub enum ReconnectOptions {
     Always(u16),
 }
 
-/// Configure server authentication.
+/// Client authentication option for mqtt connect packet
 #[derive(Clone, Debug)]
 pub enum SecurityOptions {
     /// No authentication.
     None,
     /// Use the specified `(username, password)` tuple to authenticate.
-    UsernamePassword((String, String))
+    UsernamePassword((String, String)),
+    #[cfg(feature = "jwt")]
+    /// Authenticate against a Google Cloud IoT Core project with the triple
+    /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
+    GcloudIot((String, Vec<u8>, i64)),
 }
 
 #[derive(Clone, Debug)]
 pub enum ConnectionMethod {
     Tcp,
     // ca and, optionally, a pair of client cert and client key
-    Tls(String, Option<(String, String)>),
+    Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
     pub broker_addr: String,
+    pub port: u16,
     /// keep alive time to send pingreq to broker when the connection is idle
     pub keep_alive: Duration,
     /// clean (or) persistent session
@@ -61,7 +65,8 @@ pub struct MqttOptions {
 impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
-            broker_addr: "127.0.0.1:1883".into(),
+            broker_addr: "127.0.0.1".into(),
+            port: 1883,
             keep_alive: Duration::from_secs(30),
             clean_session: true,
             client_id: "test-client".into(),
@@ -75,7 +80,7 @@ impl Default for MqttOptions {
 }
 
 impl MqttOptions {
-    pub fn new<S: Into<String>, T: Into<String>>(id: S, addr: T) -> MqttOptions {
+    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         // TODO: Validate if addr is proper address type
         let id = id.into();
         if id.starts_with(" ") || id.is_empty() {
@@ -83,7 +88,8 @@ impl MqttOptions {
         }
 
         MqttOptions {
-            broker_addr: addr.into(),
+            broker_addr: host.into(),
+            port,
             keep_alive: Duration::from_secs(60),
             clean_session: true,
             client_id: id.into(),
@@ -157,13 +163,21 @@ impl MqttOptions {
         self
     }
 
-    pub fn connect_packet(&self) -> Connect {
-        let (username, password) = match self.security {
-            SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
-            _ => (None, None),
+    pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
+        let (username, password) = match self.security.clone() {
+            SecurityOptions::UsernamePassword((username, password)) => {
+                (Some(username), Some(password))
+            }
+            #[cfg(feature = "jwt")]
+            SecurityOptions::GcloudIot((projectname, key, expiry)) => {
+                let username = Some("unused".to_owned());
+                let password = Some(gen_iotcore_password(projectname, key, expiry)?);
+                (username, password)
+            }
+            SecurityOptions::None => (None, None),
         };
 
-        Connect {
+        let connect = Connect {
             protocol: Protocol::MQTT(4),
             keep_alive: self.keep_alive.as_secs() as u16,
             client_id: self.client_id.clone(),
@@ -171,8 +185,44 @@ impl MqttOptions {
             last_will: self.last_will.clone(),
             username,
             password,
-        }
+        };
+
+        Ok(connect)
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    iat: i64,
+    exp: i64,
+    aud: String,
+}
+
+#[cfg(feature = "jwt")]
+// Generates a new password for mqtt client authentication
+pub fn gen_iotcore_password(
+    project: String,
+    key: Vec<u8>,
+    expiry: i64,
+) -> Result<String, ConnectError> {
+    use chrono::{self, Utc};
+    use jsonwebtoken::{encode, Algorithm, Header};
+
+    let time = Utc::now();
+    let jwt_header = Header::new(Algorithm::RS256);
+    let iat = time.timestamp();
+    let exp = time
+        .checked_add_signed(chrono::Duration::minutes(expiry))
+        .expect("Unable to create expiry")
+        .timestamp();
+
+    let claims = Claims {
+        iat,
+        exp,
+        aud: project,
+    };
+
+    Ok(encode(&jwt_header, &claims, &key)?)
 }
 
 #[cfg(test)]
@@ -182,7 +232,7 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1:1883")
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883)
             .set_reconnect_opts(ReconnectOptions::Always(10))
             .set_clean_session(true);
     }
@@ -190,7 +240,7 @@ mod test {
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1:1883")
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883)
             .set_reconnect_opts(ReconnectOptions::Always(10))
             .set_clean_session(true);
     }

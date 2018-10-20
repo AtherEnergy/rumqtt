@@ -1,11 +1,13 @@
-use std::time::Instant;
 use std::collections::VecDeque;
 use std::result::Result;
+use std::time::Instant;
 
-use mqtt3::{Packet, Publish, PacketIdentifier, Connect, Connack, ConnectReturnCode, QoS, Subscribe};
-use error::{ConnectError, NetworkError};
-use mqttoptions::{MqttOptions, SecurityOptions};
 use client::{Notification, Request};
+use error::{ConnectError, NetworkError};
+use mqtt3::{
+    Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe,
+};
+use mqttoptions::{MqttOptions, SecurityOptions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -58,7 +60,7 @@ impl MqttState {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
                 Ok(Packet::Publish(publish))
-            },
+            }
             Packet::Pingreq => {
                 let _ping = self.handle_outgoing_ping()?;
                 Ok(Packet::Pingreq)
@@ -71,7 +73,7 @@ impl MqttState {
                 self.handle_disconnect()?;
                 // NOTE: Dummy
                 Ok(Packet::Disconnect)
-            },
+            }
             Packet::Puback(pkid) => Ok(Packet::Puback(pkid)),
             Packet::Suback(suback) => Ok(Packet::Suback(suback)),
             _ => unimplemented!(),
@@ -85,7 +87,10 @@ impl MqttState {
     //
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_mqtt_packet(
+        &mut self,
+        packet: Packet,
+    ) -> Result<(Notification, Request), NetworkError> {
         self.update_last_in_control_time();
 
         match packet {
@@ -109,7 +114,7 @@ impl MqttState {
                 let reply = Request::None;
                 Ok((notification, reply))
             }
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 
@@ -117,11 +122,13 @@ impl MqttState {
         self.connection_status = MqttConnectionStatus::Handshake;
 
         let (_username, _password) = match self.opts.security {
-            SecurityOptions::UsernamePassword((ref username, ref password)) => (Some(username.to_owned()), Some(password.to_owned())),
+            SecurityOptions::UsernamePassword((ref username, ref password)) => {
+                (Some(username.to_owned()), Some(password.to_owned()))
+            }
             _ => (None, None),
         };
 
-        Ok(self.opts.connect_packet())
+        self.opts.connect_packet()
     }
 
     pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
@@ -131,7 +138,9 @@ impl MqttState {
             Err(ConnectError::MqttConnectionRefused(response.to_u8()))
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-            if self.opts.clean_session { self.clear_session_info(); }
+            if self.opts.clean_session {
+                self.clear_session_info();
+            }
 
             Ok(())
         }
@@ -142,7 +151,11 @@ impl MqttState {
             VecDeque::new()
         } else {
             //TODO: Write unittest for checking state during reconnection
-            self.outgoing_pub.clone().into_iter().map(|publish| Packet::Publish(publish)).collect()
+            self.outgoing_pub
+                .clone()
+                .into_iter()
+                .map(|publish| Packet::Publish(publish))
+                .collect()
         }
     }
 
@@ -163,13 +176,13 @@ impl MqttState {
     /// outgoing publish queue
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
         if publish.payload.len() > self.opts.max_packet_size {
-            return Err(NetworkError::PacketSizeLimitExceeded)
+            return Err(NetworkError::PacketSizeLimitExceeded);
         }
 
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce => self.add_packet_id_and_save(publish),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         };
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -181,7 +194,7 @@ impl MqttState {
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(), NetworkError> {
         if let Some(index) = self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
-            let _publish  = self.outgoing_pub.remove(index).expect("Wrong index");
+            let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
             Ok(())
         } else {
             error!("Unsolicited PUBLISH packet: {:?}", pkid);
@@ -200,8 +213,8 @@ impl MqttState {
             QoS::AtLeastOnce => {
                 let pkid = publish.pid.unwrap();
                 Request::PubAck(pkid)
-            },
-            QoS::ExactlyOnce => unimplemented!()
+            }
+            QoS::ExactlyOnce => unimplemented!(),
         }
     }
 
@@ -214,7 +227,11 @@ impl MqttState {
     pub fn is_ping_required(&self) -> bool {
         let in_elapsed = self.last_network_activity.elapsed();
 
-        debug!("Last incoming packet (network activity) before {:?} seconds. Keep alive = {:?}", in_elapsed.as_secs(), self.opts.keep_alive);
+        debug!(
+            "Last incoming packet (network activity) before {:?} seconds. Keep alive = {:?}",
+            in_elapsed.as_secs(),
+            self.opts.keep_alive
+        );
         in_elapsed >= self.opts.keep_alive
     }
 
@@ -242,7 +259,10 @@ impl MqttState {
             self.await_pingresp = true;
             Ok(())
         } else {
-            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
+            error!(
+                "State = {:?}. Shouldn't ping in this state",
+                self.connection_status
+            );
             Err(NetworkError::InvalidState)
         }
     }
@@ -251,7 +271,10 @@ impl MqttState {
         self.await_pingresp = false;
     }
 
-    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {
+    pub fn handle_outgoing_subscribe(
+        &mut self,
+        mut subscription: Subscribe,
+    ) -> Result<Subscribe, NetworkError> {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -259,11 +282,13 @@ impl MqttState {
 
             Ok(subscription)
         } else {
-            error!("State = {:?}. Shouldn't subscribe in this state", self.connection_status);
+            error!(
+                "State = {:?}. Shouldn't subscribe in this state",
+                self.connection_status
+            );
             Err(NetworkError::InvalidState)
         }
     }
-
 
     // pub fn handle_incoming_suback(&mut self, ack: Suback) -> Result<(), SubackError> {
     //     if ack.return_codes.iter().any(|v| *v == SubscribeReturnCodes::Failure) {
@@ -301,14 +326,14 @@ mod test {
     use std::thread;
     use std::time::Duration;
 
-    use super::{MqttState, MqttConnectionStatus};
+    use super::{MqttConnectionStatus, MqttState};
+    use error::NetworkError;
     use mqtt3::*;
     use mqttoptions::MqttOptions;
-    use error::NetworkError;
 
     #[test]
     fn next_pkid_roll() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         let mut pkt_id = PacketIdentifier(0);
         for _ in 0..65536 {
@@ -319,7 +344,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_handle_should_set_pkid_correctly_and_add_publish_to_queue_correctly() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.connection_status = MqttConnectionStatus::Connected;
 
@@ -338,7 +363,6 @@ mod test {
         assert_eq!(publish_out.unwrap().pid, None);
         // publish shouldn't added to queue
         assert_eq!(mqtt.outgoing_pub.len(), 0);
-
 
         // QoS1 Publish
         let publish = Publish {
@@ -365,7 +389,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_handle_should_throw_error_in_invalid_state() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         let publish = Publish {
@@ -379,13 +403,13 @@ mod test {
 
         match mqtt.handle_outgoing_publish(publish) {
             Err(NetworkError::InvalidState) => (),
-            _ => panic!("Should throw packet size limit error")
+            _ => panic!("Should throw packet size limit error"),
         }
     }
 
     #[test]
     fn outgoing_publish_handle_should_throw_error_when_packetsize_exceeds_max() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         let publish = Publish {
@@ -399,13 +423,13 @@ mod test {
 
         match mqtt.handle_outgoing_publish(publish) {
             Err(NetworkError::PacketSizeLimitExceeded) => (),
-            _ => panic!("Should throw packet size limit error")
+            _ => panic!("Should throw packet size limit error"),
         }
     }
 
     #[test]
     fn incoming_puback_should_remove_correct_publish_from_queue() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         // QoS1 Publish
         let publish = Publish {
@@ -448,20 +472,19 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_during_invalid_state() {
         // 1. test for invalid state
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         thread::sleep(Duration::from_secs(5));
         match mqtt.handle_outgoing_ping() {
             Err(NetworkError::InvalidState) => (),
-            _ => panic!("Should throw timeout error")
-
+            _ => panic!("Should throw timeout error"),
         }
     }
 
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
@@ -474,14 +497,13 @@ mod test {
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {
             Err(NetworkError::AwaitPingResp) => (),
-            _ => panic!("Should throw timeout error")
-
+            _ => panic!("Should throw timeout error"),
         }
     }
 
     // #[test]
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
@@ -489,14 +511,13 @@ mod test {
 
         match mqtt.handle_outgoing_ping() {
             Err(NetworkError::Timeout) => (),
-            _ => panic!("Should throw timeout error")
-
+            _ => panic!("Should throw timeout error"),
         }
     }
 
     #[test]
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.keep_alive = Duration::from_secs(5);
         mqtt.connection_status = MqttConnectionStatus::Connected;
@@ -512,7 +533,7 @@ mod test {
 
     #[test]
     fn disconnect_handle_should_reset_everything_in_clean_session() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
         // QoS1 Publish
@@ -537,7 +558,7 @@ mod test {
 
     #[test]
     fn disconnect_handle_should_reset_everything_except_queues_in_persistent_session() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
         mqtt.opts.clean_session = false;
@@ -563,7 +584,7 @@ mod test {
 
     #[test]
     fn connection_status_is_valid_while_handling_connect_and_connack_packets() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
@@ -572,7 +593,7 @@ mod test {
 
         let connack = Connack {
             session_present: false,
-            code: ConnectReturnCode::Accepted
+            code: ConnectReturnCode::Accepted,
         };
 
         let _ = mqtt.handle_incoming_connack(connack);
@@ -580,7 +601,7 @@ mod test {
 
         let connack = Connack {
             session_present: false,
-            code: ConnectReturnCode::BadUsernamePassword
+            code: ConnectReturnCode::BadUsernamePassword,
         };
 
         let _ = mqtt.handle_incoming_connack(connack);
@@ -589,7 +610,7 @@ mod test {
 
     #[test]
     fn connack_handle_should_not_return_list_of_incomplete_messages_to_be_sent_in_clean_session() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883");
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
         let publish = Publish {
@@ -607,7 +628,7 @@ mod test {
 
         let connack = Connack {
             session_present: false,
-            code: ConnectReturnCode::Accepted
+            code: ConnectReturnCode::Accepted,
         };
 
         mqtt.handle_incoming_connack(connack).unwrap();
@@ -617,8 +638,8 @@ mod test {
 
     #[test]
     fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
-        let mqtt_opts = MqttOptions::new("test-id", "127.0.0.1:1883");
-        let mut mqtt = MqttState::new(mqtt_opts);
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
+        let mut mqtt = MqttState::new(opts);
         mqtt.opts.clean_session = false;
 
         let publish = Publish {
@@ -636,7 +657,7 @@ mod test {
 
         let connack = Connack {
             session_present: false,
-            code: ConnectReturnCode::Accepted
+            code: ConnectReturnCode::Accepted,
         };
 
         let pubs = mqtt.handle_reconnection();
@@ -653,23 +674,29 @@ mod test {
             qos: QoS::ExactlyOnce,
             retain: true,
         };
-        let opts = MqttOptions::new("test-id", "127.0.0.1:1883")
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883)
             .set_clean_session(true)
             .set_keep_alive(50)
             .set_last_will(lwt.clone())
-            .set_security_opts(UsernamePassword((String::from("USER"), String::from("PASS"))));
+            .set_security_opts(UsernamePassword((
+                String::from("USER"),
+                String::from("PASS"),
+            )));
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         let pkt = mqtt.handle_outgoing_connect().unwrap();
-        assert_eq!(pkt, Connect {
-            protocol: Protocol::MQTT(4),
-            keep_alive: 50,
-            clean_session: true,
-            client_id: String::from("test-id"),
-            username: Some(String::from("USER")),
-            password: Some(String::from("PASS")),
-            last_will: Some(lwt.clone())
-        });
+        assert_eq!(
+            pkt,
+            Connect {
+                protocol: Protocol::MQTT(4),
+                keep_alive: 50,
+                clean_session: true,
+                client_id: String::from("test-id"),
+                username: Some(String::from("USER")),
+                password: Some(String::from("PASS")),
+                last_will: Some(lwt.clone())
+            }
+        );
     }
 }
