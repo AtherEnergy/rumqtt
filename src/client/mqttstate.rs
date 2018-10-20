@@ -69,11 +69,6 @@ impl MqttState {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Ok(Packet::Subscribe(subscription))
             }
-            Packet::Disconnect => {
-                self.handle_disconnect()?;
-                // NOTE: Dummy
-                Ok(Packet::Disconnect)
-            }
             Packet::Puback(pkid) => Ok(Packet::Puback(pkid)),
             Packet::Suback(suback) => Ok(Packet::Suback(suback)),
             _ => unimplemented!(),
@@ -138,9 +133,7 @@ impl MqttState {
             Err(ConnectError::MqttConnectionRefused(response.to_u8()))
         } else {
             self.connection_status = MqttConnectionStatus::Connected;
-            if self.opts.clean_session {
-                self.clear_session_info();
-            }
+            self.handle_previous_session();
 
             Ok(())
         }
@@ -298,14 +291,13 @@ impl MqttState {
     //     }
     // }
 
-    pub fn handle_disconnect(&mut self) -> Result<(), NetworkError> {
-        self.connection_status = MqttConnectionStatus::Disconnected;
-        Err(NetworkError::UserDisconnect)
-    }
-
-    fn clear_session_info(&mut self) {
+    fn handle_previous_session(&mut self) {
         self.await_pingresp = false;
-        self.outgoing_pub.clear();
+        
+        if self.opts.clean_session {
+            self.outgoing_pub.clear();
+        }
+
         self.last_network_activity = Instant::now();
     }
 
@@ -501,7 +493,7 @@ mod test {
         }
     }
 
-    // #[test]
+    #[test]
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
@@ -532,7 +524,7 @@ mod test {
     }
 
     #[test]
-    fn disconnect_handle_should_reset_everything_in_clean_session() {
+    fn previous_session_handle_should_reset_everything_in_clean_session() {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
@@ -550,14 +542,14 @@ mod test {
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish);
 
-        mqtt.handle_disconnect();
+        mqtt.handle_previous_session();
         assert_eq!(mqtt.outgoing_pub.len(), 0);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         assert_eq!(mqtt.await_pingresp, false);
     }
 
     #[test]
-    fn disconnect_handle_should_reset_everything_except_queues_in_persistent_session() {
+    fn previous_session_handle_should_reset_everything_except_queues_in_persistent_session() {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
@@ -576,7 +568,7 @@ mod test {
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish);
 
-        mqtt.handle_disconnect();
+        mqtt.handle_previous_session();
         assert_eq!(mqtt.outgoing_pub.len(), 3);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         assert_eq!(mqtt.await_pingresp, false);

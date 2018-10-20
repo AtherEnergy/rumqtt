@@ -2,6 +2,7 @@ extern crate pretty_env_logger;
 extern crate rumqtt;
 use rumqtt::{MqttClient, MqttOptions, QoS};
 use std::thread;
+use std::time::Duration;
 
 fn main() {
     pretty_env_logger::init();
@@ -13,7 +14,7 @@ fn main() {
         thread::sleep_ms(5000);
         for i in 1..11 {
             let payload = format!("publish {}", i);
-            thread::sleep_ms(100);
+            thread::sleep(Duration::from_millis(100));
             mqtt_client
                 .publish("hello/world", QoS::AtLeastOnce, payload)
                 .unwrap();
@@ -23,7 +24,7 @@ fn main() {
 
         for i in 11..21 {
             let payload = format!("publish {}", i);
-            thread::sleep_ms(100);
+            thread::sleep(Duration::from_millis(100));
             mqtt_client
                 .publish("hello/world", QoS::AtLeastOnce, payload)
                 .unwrap();

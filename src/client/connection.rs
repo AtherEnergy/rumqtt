@@ -344,17 +344,3 @@ impl From<Request> for Packet {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_env_logger;
-    use std::thread;
-
-    #[test]
-    fn it_works() {
-        pretty_env_logger::init();
-        let connection = Connection::run(MqttOptions::default());
-        thread::sleep(Duration::from_secs(10));
-    }
-}
