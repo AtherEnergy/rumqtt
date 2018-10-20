@@ -7,11 +7,14 @@ use std::thread;
 fn main() {
     pretty_env_logger::init();
 
-    let client_id = "RAVI-LINUX".to_owned();
-    let ca = include_bytes!("certs/ca-chain.cert.pem").to_vec();
-    let connection_method = ConnectionMethod::Tls(ca, None);
+    let client_id = "tls-test".to_owned();
+    let ca = include_bytes!("tlsfiles/ca-chain.cert.pem").to_vec();
+    let client_cert = include_bytes!("tlsfiles/bike1.cert.pem").to_vec();
+    let client_key = include_bytes!("tlsfiles/bike1.key.pem").to_vec();
 
-    let mqtt_options = MqttOptions::new(client_id, "prod-mqtt-broker.atherengineering.in", 8883)
+    let connection_method = ConnectionMethod::Tls(ca, Some((client_cert, client_key)));
+
+    let mqtt_options = MqttOptions::new(client_id, "localhost", 8883)
         .set_keep_alive(10)
         .set_connection_method(connection_method);
 

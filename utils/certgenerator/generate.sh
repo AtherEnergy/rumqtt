@@ -21,8 +21,8 @@ help() {
     echo
     echo "   --root           | -r                     Delete all the existing certificates and generate new root & intermediate certificates"
     echo "   --inter          | -i                     Generate new intermediate certificates"
-    echo "   --server         | -s                     Generate new server certificates using existing intermediate certs"
-    echo "   --client         | -c                     Generate new client certificates using existing intermediate certs"
+    echo "   --server         | -s                     Generate new server certificates using existing intermediate tlsfiles"
+    echo "   --client         | -c                     Generate new client certificates using existing intermediate tlsfiles"
     echo "   --check-root     | -cr                    Check root ca certificate"
     echo "   --check-inter    | -ci                    Check intermedaite ca certificate"
     echo "   --check-server   | -cs                    Check server certificate"
@@ -47,7 +47,7 @@ info() {
 gen_root_key_cert() {
     mkdir -p $OUT/root
     cd $OUT/root
-    mkdir certs crl newcerts private
+    mkdir tlsfiles crl newcerts private
     chmod 700 private
     touch index.txt
     echo 1000 > serial
@@ -60,16 +60,16 @@ gen_root_key_cert() {
             -config $META/rootca.cnf \
             -key private/ca.key.pem  \
             -new -x509 -days 7300    \
-            -out certs/ca.cert.pem
+            -out tlsfiles/ca.cert.pem
     
-    chmod 444 certs/ca.cert.pem
+    chmod 444 tlsfiles/ca.cert.pem
     cd $HOME
 }
 
 gen_inter_key_cert() {
     mkdir -p $OUT/intermediate
     cd $OUT/intermediate
-    mkdir certs crl csr newcerts private
+    mkdir tlsfiles crl csr newcerts private
     chmod 700 private
     touch index.txt
     echo 1000 > serial
@@ -94,13 +94,13 @@ gen_inter_key_cert() {
             -extensions v3_intermediate_ca -days 3650   \
             -notext -md sha256                          \
             -in csr/intermediate.csr.pem                \
-            -out certs/intermediate.cert.pem
+            -out tlsfiles/intermediate.cert.pem
 
-    chmod 444 certs/intermediate.cert.pem
+    chmod 444 tlsfiles/intermediate.cert.pem
 
     info "creating certificate chain file"
-    cat certs/intermediate.cert.pem ../root/certs/ca.cert.pem > certs/ca-chain.cert.pem
-    chmod 444 certs/ca-chain.cert.pem
+    cat tlsfiles/intermediate.cert.pem ../root/tlsfiles/ca.cert.pem > tlsfiles/ca-chain.cert.pem
+    chmod 444 tlsfiles/ca-chain.cert.pem
     cd $HOME
 }
 
@@ -108,10 +108,10 @@ gen_server_cert_key() {
     rm -rf $OUT/server
     mkdir -p $OUT/server
     cd $OUT/server
-    mkdir certs crl csr private
+    mkdir tlsfiles crl csr private
     chmod 700 private
 
-    openssl ca -config $META/interca.cnf -revoke certs/server.cert.pem || true
+    openssl ca -config $META/interca.cnf -revoke tlsfiles/server.cert.pem || true
 
     info "generating server key"
     openssl genrsa -out private/server.key.pem 2048
@@ -120,7 +120,7 @@ gen_server_cert_key() {
     info "creating signing request for server cert generation", \
          "NOTE: for server, common name should be fully qualified domain name"
 
-    # NOTE: SAN is important for string tls stacks like rustls. SAN in csr
+    # NOTE: SAN is important for strict tls stacks like rustls. SAN in csr
     # doesn't guarantee SAN in the certificate. Intermediate ca conf should
     # be configured to allow SAN extension. This is bypassed with `copyall`
     # for now but that is not safe. Clean this up later
@@ -141,10 +141,10 @@ gen_server_cert_key() {
             -extensions server_cert -days 375   \
             -notext -md sha256                  \
             -in csr/server.csr.pem              \
-            -out certs/server.cert.pem
+            -out tlsfiles/server.cert.pem
 
 
-    chmod 444 certs/server.cert.pem
+    chmod 444 tlsfiles/server.cert.pem
     cd $HOME
     instructions
 }
@@ -152,7 +152,7 @@ gen_server_cert_key() {
 gen_client_cert_key() {
     mkdir -p $OUT/client || true
     cd $OUT/client
-    mkdir certs crl csr private || true
+    mkdir tlsfiles crl csr private || true
     chmod 700 private
 
     info "generating client key"
@@ -173,9 +173,9 @@ gen_client_cert_key() {
             -extensions usr_cert -days 375              \
             -notext -md sha256                          \
             -in csr/$1.csr.pem                          \
-            -out certs/$1.cert.pem
+            -out tlsfiles/$1.cert.pem
 
-    chmod 444 certs/$1.cert.pem
+    chmod 444 tlsfiles/$1.cert.pem
     cd $HOME
     instructions
 }
@@ -195,20 +195,20 @@ validate_client_args () {
 }
 
 instructions () {
-    info "use server/certs/server.cert.pem, server/private/server.key.pem, intermediate/certs/ca-chain.cert.pem on server side", \
-         "use client/certs/client.cert.pem, client/private/client.key.pem, intermediate/certs/ca-chain.cert.pem on client side" 
+    info "use server/tlsfiles/server.cert.pem, server/private/server.key.pem, intermediate/tlsfiles/ca-chain.cert.pem on server side", \
+         "use client/tlsfiles/client.cert.pem, client/private/client.key.pem, intermediate/tlsfiles/ca-chain.cert.pem on client side"
 }
 
 
 check_root () {
     cd $OUT/root
-    openssl x509 -noout -text -in certs/ca.cert.pem
+    openssl x509 -noout -text -in tlsfiles/ca.cert.pem
     cd $HOME
 }
 
 check_inter() {
     cd $OUT/intermediate
-    openssl x509 -noout -text -in certs/intermediate.cert.pem
+    openssl x509 -noout -text -in tlsfiles/intermediate.cert.pem
     cd $HOME
 }
 
@@ -217,32 +217,32 @@ check_server() {
     info "checking server csr"
     openssl req -in csr/server.csr.pem -noout -text
     info "checking server certificate"
-    openssl x509 -noout -text -in certs/server.cert.pem
+    openssl x509 -noout -text -in tlsfiles/server.cert.pem
     cd $HOME
 }
 
 check_client() {
     cd $OUT/client
 
-    openssl x509 -noout -text -in certs/$1.cert.pem
+    openssl x509 -noout -text -in tlsfiles/$1.cert.pem
     cd $HOME
 }
 
 verify_inter() {
     cd $OUT
-    openssl verify -CAfile root/certs/ca.cert.pem intermediate/certs/intermediate.cert.pem
+    openssl verify -CAfile root/tlsfiles/ca.cert.pem intermediate/tlsfiles/intermediate.cert.pem
     cd $HOME
 }
 
 verify_server() {
     cd $OUT
-    openssl verify -CAfile intermediate/certs/ca-chain.cert.pem server/certs/server.cert.pem
+    openssl verify -CAfile intermediate/tlsfiles/ca-chain.cert.pem server/tlsfiles/server.cert.pem
     cd $HOME
 }
 
 verify_client() {
     cd $OUT
-    openssl verify -CAfile intermediate/certs/ca-chain.cert.pem client/certs/$1.cert.pem
+    openssl verify -CAfile intermediate/tlsfiles/ca-chain.cert.pem client/tlsfiles/$1.cert.pem
     cd $HOME
 }
 
@@ -252,14 +252,14 @@ test() {
     copy below command in a seperate terminal
     openssl s_server -accept 12345 -verify \\
                                    -tls1_2 \\
-                                   -cert out/server/certs/server.cert.pem \\
+                                   -cert out/server/tlsfiles/server.cert.pem \\
                                    -key out/server/private/server.key.pem \\
-                                   -CAfile out/intermediate/certs/ca-chain.cert.pem
+                                   -CAfile out/intermediate/tlsfiles/ca-chain.cert.pem
 
     NOTE: return status should be 0 and you'll see send text on the server side
     "
     read -p "Press a key after starting the server" choice
-    openssl s_client -connect 0.0.0.0:12345 -tls1_2 -cert out/client/certs/$1.cert.pem -key out/client/private/$1.key.pem -CAfile out/intermediate/certs/ca-chain.cert.pem
+    openssl s_client -connect 0.0.0.0:12345 -tls1_2 -cert out/client/tlsfiles/$1.cert.pem -key out/client/private/$1.key.pem -CAfile out/intermediate/tlsfiles/ca-chain.cert.pem
 }
 
 clean_root ()
@@ -297,7 +297,7 @@ case $1 in
         ;;
     # Clean and generate new root certificate authority
     -r|--root)
-        read -p "Are you sure you want to remove old root & intermediate certs & start from scratch (y/n)?" choice
+        read -p "Are you sure you want to remove old root & intermediate tlsfiles & start from scratch (y/n)?" choice
         case "$choice" in
         y|Y )
             echo "yes"

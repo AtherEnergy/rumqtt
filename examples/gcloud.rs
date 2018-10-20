@@ -7,6 +7,12 @@ extern crate serde_derive;
 use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
 use std::thread;
 
+
+// NOTES:
+// ---------
+// Proive necessary stuff from environment variables
+// RUST_LOG=rumqtt=debug PROJECT=ABC ID=DEF REGISTRY=GHI cargo run --example gcloud
+
 #[derive(Deserialize, Debug)]
 struct Config {
     project: String,
@@ -30,6 +36,7 @@ fn main() {
         include_bytes!("certs/rsa_private.der").to_vec(),
         60,
     ));
+
     let connection_method = ConnectionMethod::Tls("roots.pem".to_owned(), None);
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
