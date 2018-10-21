@@ -44,34 +44,29 @@ impl MqttClient {
         let (userrequest_tx, notification_rx) = connection::Connection::run(opts);
 
         //TODO: Remove max packet size hardcode
-        let client = MqttClient {
-            userrequest_tx,
-            max_packet_size: 1000,
-        };
+        let client = MqttClient { userrequest_tx,
+                                  max_packet_size: 1000, };
 
         (client, notification_rx)
     }
 
-    pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-        payload: V,
-    ) -> Result<(), ClientError> {
+    pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self,
+                                                      topic: S,
+                                                      qos: QoS,
+                                                      payload: V)
+                                                      -> Result<(), ClientError> {
         let payload = payload.into();
         if payload.len() > self.max_packet_size {
             return Err(ClientError::PacketSizeLimitExceeded);
         }
 
         //TODO: Rename `pid` to `pkid` in mqtt311
-        let publish = Publish {
-            dup: false,
-            qos,
-            retain: false,
-            topic_name: topic.into(),
-            pid: None,
-            payload: Arc::new(payload),
-        };
+        let publish = Publish { dup: false,
+                                qos,
+                                retain: false,
+                                topic_name: topic.into(),
+                                pid: None,
+                                payload: Arc::new(payload), };
 
         let tx = &mut self.userrequest_tx;
         tx.send(Request::Publish(publish)).wait()?;
@@ -79,14 +74,10 @@ impl MqttClient {
     }
 
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let topic = SubscribeTopic {
-            topic_path: topic.into(),
-            qos: qos,
-        };
-        let subscribe = Subscribe {
-            pid: PacketIdentifier::zero(),
-            topics: vec![topic],
-        };
+        let topic = SubscribeTopic { topic_path: topic.into(),
+                                     qos: qos, };
+        let subscribe = Subscribe { pid: PacketIdentifier::zero(),
+                                    topics: vec![topic], };
 
         let tx = &mut self.userrequest_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;

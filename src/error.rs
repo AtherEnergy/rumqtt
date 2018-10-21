@@ -14,10 +14,8 @@ pub enum ClientError {
     PacketSizeLimitExceeded,
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
-    #[fail(
-        display = "Failed sending request to connection thread. Error = {}",
-        _0
-    )]
+    #[fail(display = "Failed sending request to connection thread. Error = {}",
+           _0)]
     MpscSend(SendError<Request>),
 }
 
@@ -43,10 +41,8 @@ pub enum ConnectError {
     DnsListEmpty,
     #[fail(display = "Couldn't create mqtt connection in time")]
     Timeout,
-    #[fail(
-        display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}",
-        _0
-    )]
+    #[fail(display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}",
+           _0)]
     NotConnackPacket(Packet),
     #[fail(display = "Empty response")]
     NoResponse,

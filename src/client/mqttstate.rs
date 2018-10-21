@@ -45,14 +45,12 @@ pub(crate) struct MqttState {
 
 impl MqttState {
     pub fn new(opts: MqttOptions) -> Self {
-        MqttState {
-            opts,
-            connection_status: MqttConnectionStatus::Disconnected,
-            await_pingresp: false,
-            last_network_activity: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            outgoing_pub: VecDeque::new(),
-        }
+        MqttState { opts,
+                    connection_status: MqttConnectionStatus::Disconnected,
+                    await_pingresp: false,
+                    last_network_activity: Instant::now(),
+                    last_pkid: PacketIdentifier(0),
+                    outgoing_pub: VecDeque::new(), }
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkError> {
@@ -82,10 +80,9 @@ impl MqttState {
     //
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(
-        &mut self,
-        packet: Packet,
-    ) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_mqtt_packet(&mut self,
+                                       packet: Packet)
+                                       -> Result<(Notification, Request), NetworkError> {
         self.update_last_in_control_time();
 
         match packet {
@@ -220,11 +217,9 @@ impl MqttState {
     pub fn is_ping_required(&self) -> bool {
         let in_elapsed = self.last_network_activity.elapsed();
 
-        debug!(
-            "Last incoming packet (network activity) before {:?} seconds. Keep alive = {:?}",
-            in_elapsed.as_secs(),
-            self.opts.keep_alive
-        );
+        debug!("Last incoming packet (network activity) before {:?} seconds. Keep alive = {:?}",
+               in_elapsed.as_secs(),
+               self.opts.keep_alive);
         in_elapsed >= self.opts.keep_alive
     }
 
@@ -252,10 +247,8 @@ impl MqttState {
             self.await_pingresp = true;
             Ok(())
         } else {
-            error!(
-                "State = {:?}. Shouldn't ping in this state",
-                self.connection_status
-            );
+            error!("State = {:?}. Shouldn't ping in this state",
+                   self.connection_status);
             Err(NetworkError::InvalidState)
         }
     }
@@ -264,10 +257,9 @@ impl MqttState {
         self.await_pingresp = false;
     }
 
-    pub fn handle_outgoing_subscribe(
-        &mut self,
-        mut subscription: Subscribe,
-    ) -> Result<Subscribe, NetworkError> {
+    pub fn handle_outgoing_subscribe(&mut self,
+                                     mut subscription: Subscribe)
+                                     -> Result<Subscribe, NetworkError> {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -275,10 +267,8 @@ impl MqttState {
 
             Ok(subscription)
         } else {
-            error!(
-                "State = {:?}. Shouldn't subscribe in this state",
-                self.connection_status
-            );
+            error!("State = {:?}. Shouldn't subscribe in this state",
+                   self.connection_status);
             Err(NetworkError::InvalidState)
         }
     }
@@ -293,7 +283,7 @@ impl MqttState {
 
     fn handle_previous_session(&mut self) {
         self.await_pingresp = false;
-        
+
         if self.opts.clean_session {
             self.outgoing_pub.clear();
         }
@@ -341,14 +331,12 @@ mod test {
         mqtt.connection_status = MqttConnectionStatus::Connected;
 
         // QoS0 Publish
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtMostOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtMostOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let publish_out = mqtt.handle_outgoing_publish(publish);
         // pkid shouldn't be added
@@ -357,14 +345,12 @@ mod test {
         assert_eq!(mqtt.outgoing_pub.len(), 0);
 
         // QoS1 Publish
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtLeastOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
         // pkid shouldn't be added
@@ -384,14 +370,12 @@ mod test {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtMostOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtMostOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         match mqtt.handle_outgoing_publish(publish) {
             Err(NetworkError::InvalidState) => (),
@@ -404,14 +388,12 @@ mod test {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtMostOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![0; 257 * 1024]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtMostOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![0; 257 * 1024]), };
 
         match mqtt.handle_outgoing_publish(publish) {
             Err(NetworkError::PacketSizeLimitExceeded) => (),
@@ -424,14 +406,12 @@ mod test {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         // QoS1 Publish
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtLeastOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let _publish_out = mqtt.handle_outgoing_publish(publish.clone());
         let _publish_out = mqtt.handle_outgoing_publish(publish.clone());
@@ -529,14 +509,12 @@ mod test {
         let mut mqtt = MqttState::new(opts);
         mqtt.await_pingresp = true;
         // QoS1 Publish
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtLeastOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish.clone());
@@ -555,14 +533,12 @@ mod test {
         mqtt.await_pingresp = true;
         mqtt.opts.clean_session = false;
         // QoS1 Publish
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtLeastOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish.clone());
@@ -583,18 +559,14 @@ mod test {
         mqtt.handle_outgoing_connect().unwrap();
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Handshake);
 
-        let connack = Connack {
-            session_present: false,
-            code: ConnectReturnCode::Accepted,
-        };
+        let connack = Connack { session_present: false,
+                                code: ConnectReturnCode::Accepted, };
 
         let _ = mqtt.handle_incoming_connack(connack);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Connected);
 
-        let connack = Connack {
-            session_present: false,
-            code: ConnectReturnCode::BadUsernamePassword,
-        };
+        let connack = Connack { session_present: false,
+                                code: ConnectReturnCode::BadUsernamePassword, };
 
         let _ = mqtt.handle_incoming_connack(connack);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
@@ -605,23 +577,19 @@ mod test {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
 
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtLeastOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish);
 
-        let connack = Connack {
-            session_present: false,
-            code: ConnectReturnCode::Accepted,
-        };
+        let connack = Connack { session_present: false,
+                                code: ConnectReturnCode::Accepted, };
 
         mqtt.handle_incoming_connack(connack).unwrap();
         let pubs = mqtt.handle_reconnection();
@@ -629,28 +597,25 @@ mod test {
     }
 
     #[test]
-    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
+    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session(
+        ) {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
         let mut mqtt = MqttState::new(opts);
         mqtt.opts.clean_session = false;
 
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
+        let publish = Publish { dup: false,
+                                qos: QoS::AtLeastOnce,
+                                retain: false,
+                                pid: None,
+                                topic_name: "hello/world".to_owned(),
+                                payload: Arc::new(vec![1, 2, 3]), };
 
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish);
 
-        let connack = Connack {
-            session_present: false,
-            code: ConnectReturnCode::Accepted,
-        };
+        let connack = Connack { session_present: false,
+                                code: ConnectReturnCode::Accepted, };
 
         let pubs = mqtt.handle_reconnection();
         assert_eq!(3, pubs.len());
@@ -660,12 +625,10 @@ mod test {
     fn connect_should_respect_options() {
         use mqttoptions::SecurityOptions::UsernamePassword;
 
-        let lwt = LastWill {
-            topic: String::from("LWT_TOPIC"),
-            message: String::from("LWT_MESSAGE"),
-            qos: QoS::ExactlyOnce,
-            retain: true,
-        };
+        let lwt = LastWill { topic: String::from("LWT_TOPIC"),
+                             message: String::from("LWT_MESSAGE"),
+                             qos: QoS::ExactlyOnce,
+                             retain: true, };
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883)
             .set_clean_session(true)
             .set_keep_alive(50)
@@ -678,17 +641,13 @@ mod test {
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         let pkt = mqtt.handle_outgoing_connect().unwrap();
-        assert_eq!(
-            pkt,
-            Connect {
-                protocol: Protocol::MQTT(4),
-                keep_alive: 50,
-                clean_session: true,
-                client_id: String::from("test-id"),
-                username: Some(String::from("USER")),
-                password: Some(String::from("PASS")),
-                last_will: Some(lwt.clone())
-            }
-        );
+        assert_eq!(pkt,
+                   Connect { protocol: Protocol::MQTT(4),
+                             keep_alive: 50,
+                             clean_session: true,
+                             client_id: String::from("test-id"),
+                             username: Some(String::from("USER")),
+                             password: Some(String::from("PASS")),
+                             last_will: Some(lwt.clone()) });
     }
 }

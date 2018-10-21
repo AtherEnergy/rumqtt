@@ -64,18 +64,16 @@ pub struct MqttOptions {
 
 impl Default for MqttOptions {
     fn default() -> Self {
-        MqttOptions {
-            broker_addr: "127.0.0.1".into(),
-            port: 1883,
-            keep_alive: Duration::from_secs(30),
-            clean_session: true,
-            client_id: "test-client".into(),
-            connection_method: ConnectionMethod::Tcp,
-            reconnect: ReconnectOptions::AfterFirstSuccess(10),
-            security: SecurityOptions::None,
-            max_packet_size: 256 * 1024,
-            last_will: None,
-        }
+        MqttOptions { broker_addr: "127.0.0.1".into(),
+                      port: 1883,
+                      keep_alive: Duration::from_secs(30),
+                      clean_session: true,
+                      client_id: "test-client".into(),
+                      connection_method: ConnectionMethod::Tcp,
+                      reconnect: ReconnectOptions::AfterFirstSuccess(10),
+                      security: SecurityOptions::None,
+                      max_packet_size: 256 * 1024,
+                      last_will: None, }
     }
 }
 
@@ -87,18 +85,16 @@ impl MqttOptions {
             panic!("Invalid client id")
         }
 
-        MqttOptions {
-            broker_addr: host.into(),
-            port,
-            keep_alive: Duration::from_secs(60),
-            clean_session: true,
-            client_id: id.into(),
-            connection_method: ConnectionMethod::Tcp,
-            reconnect: ReconnectOptions::AfterFirstSuccess(10),
-            security: SecurityOptions::None,
-            max_packet_size: 256 * 1024,
-            last_will: None,
-        }
+        MqttOptions { broker_addr: host.into(),
+                      port,
+                      keep_alive: Duration::from_secs(60),
+                      clean_session: true,
+                      client_id: id.into(),
+                      connection_method: ConnectionMethod::Tcp,
+                      reconnect: ReconnectOptions::AfterFirstSuccess(10),
+                      security: SecurityOptions::None,
+                      max_packet_size: 256 * 1024,
+                      last_will: None, }
     }
 
     /// Set number of seconds after which client should ping the broker
@@ -177,15 +173,13 @@ impl MqttOptions {
             SecurityOptions::None => (None, None),
         };
 
-        let connect = Connect {
-            protocol: Protocol::MQTT(4),
-            keep_alive: self.keep_alive.as_secs() as u16,
-            client_id: self.client_id.clone(),
-            clean_session: self.clean_session,
-            last_will: self.last_will.clone(),
-            username,
-            password,
-        };
+        let connect = Connect { protocol: Protocol::MQTT(4),
+                                keep_alive: self.keep_alive.as_secs() as u16,
+                                client_id: self.client_id.clone(),
+                                clean_session: self.clean_session,
+                                last_will: self.last_will.clone(),
+                                username,
+                                password, };
 
         Ok(connect)
     }
@@ -200,27 +194,23 @@ struct Claims {
 
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
-pub fn gen_iotcore_password(
-    project: String,
-    key: Vec<u8>,
-    expiry: i64,
-) -> Result<String, ConnectError> {
+pub fn gen_iotcore_password(project: String,
+                            key: Vec<u8>,
+                            expiry: i64)
+                            -> Result<String, ConnectError> {
     use chrono::{self, Utc};
     use jsonwebtoken::{encode, Algorithm, Header};
 
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();
-    let exp = time
-        .checked_add_signed(chrono::Duration::minutes(expiry))
-        .expect("Unable to create expiry")
-        .timestamp();
+    let exp = time.checked_add_signed(chrono::Duration::minutes(expiry))
+                  .expect("Unable to create expiry")
+                  .timestamp();
 
-    let claims = Claims {
-        iat,
-        exp,
-        aud: project,
-    };
+    let claims = Claims { iat,
+                          exp,
+                          aud: project, };
 
     Ok(encode(&jwt_header, &claims, &key)?)
 }

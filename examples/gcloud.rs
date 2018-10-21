@@ -7,7 +7,6 @@ extern crate serde_derive;
 use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
 use std::thread;
 
-
 // NOTES:
 // ---------
 // Proive necessary stuff from environment variables
@@ -25,17 +24,16 @@ fn main() {
     let config: Config = envy::from_env().unwrap();
 
     let client_id = "projects/".to_owned()
-        + &config.project
-        + "/locations/us-central1/registries/"
-        + &config.registry
-        + "/devices/"
-        + &config.id;
+                    + &config.project
+                    + "/locations/us-central1/registries/"
+                    + &config.registry
+                    + "/devices/"
+                    + &config.id;
 
-    let security_options = SecurityOptions::GcloudIot((
-        config.project,
-        include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
-        60,
-    ));
+    let security_options =
+        SecurityOptions::GcloudIot((config.project,
+                                   include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
+                                   60));
 
     let ca = include_bytes!("gcloudfiles/roots.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);
@@ -49,14 +47,13 @@ fn main() {
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
     thread::spawn(move || {
-        for i in 0..100 {
-            let payload = format!("publish {}", i);
-            thread::sleep_ms(1000);
-            mqtt_client
-                .publish(topic.clone(), QoS::AtLeastOnce, payload)
-                .unwrap();
-        }
-    });
+                      for i in 0..100 {
+                          let payload = format!("publish {}", i);
+                          thread::sleep_ms(1000);
+                          mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
+                                     .unwrap();
+                      }
+                  });
 
     for notification in notifications {
         println!("{:?}", notification)

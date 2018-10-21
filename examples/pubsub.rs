@@ -11,19 +11,17 @@ fn main() {
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
 
-    mqtt_client
-        .subscribe("hello/world", QoS::AtMostOnce)
-        .unwrap();
+    mqtt_client.subscribe("hello/world", QoS::AtMostOnce)
+               .unwrap();
 
     thread::spawn(move || {
-        for i in 0..100 {
-            let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_millis(100));
-            mqtt_client
-                .publish("hello/world", QoS::AtMostOnce, payload)
-                .unwrap();
-        }
-    });
+                      for i in 0..100 {
+                          let payload = format!("publish {}", i);
+                          thread::sleep(Duration::from_millis(100));
+                          mqtt_client.publish("hello/world", QoS::AtMostOnce, payload)
+                                     .unwrap();
+                      }
+                  });
 
     for notification in notifications {
         println!("{:?}", notification)
