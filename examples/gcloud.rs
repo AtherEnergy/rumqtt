@@ -32,8 +32,8 @@ fn main() {
 
     let security_options =
         SecurityOptions::GcloudIot((config.project,
-                                   include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
-                                   60));
+                                    include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
+                                    60));
 
     let ca = include_bytes!("gcloudfiles/roots.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);

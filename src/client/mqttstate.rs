@@ -50,8 +50,7 @@ impl MqttState {
                     last_pkid: PacketIdentifier(0),
                     outgoing_pub: VecDeque::new(),
                     outgoing_rel: VecDeque::new(),
-                    incoming_pub: VecDeque::new(),
-        }
+                    incoming_pub: VecDeque::new(), }
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkError> {
@@ -68,7 +67,7 @@ impl MqttState {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Ok(Packet::Subscribe(subscription))
             }
-            _ => Ok(packet)
+            _ => Ok(packet),
         }
     }
 
@@ -163,12 +162,14 @@ impl MqttState {
         Ok(publish)
     }
 
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_puback(&mut self,
+                                  pkid: PacketIdentifier)
+                                  -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
                 Ok((Notification::None, Request::None))
-            },
+            }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
                 Err(NetworkError::Unsolicited)
@@ -176,7 +177,9 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_pubrec(&mut self,
+                                  pkid: PacketIdentifier)
+                                  -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -185,7 +188,7 @@ impl MqttState {
                 let notification = Notification::None;
                 let reply = Request::PubRel(pkid);
                 Ok((notification, reply))
-            },
+            }
             None => {
                 error!("Unsolicited pubrec packet: {:?}", pkid);
                 Err(NetworkError::Unsolicited)
@@ -195,7 +198,9 @@ impl MqttState {
 
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_publish(&mut self,
+                                   publish: Publish)
+                                   -> Result<(Notification, Request), NetworkError> {
         let qos = publish.qos;
 
         match qos {
@@ -217,14 +222,16 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_pubrel(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_pubrel(&mut self,
+                                  pkid: PacketIdentifier)
+                                  -> Result<(Notification, Request), NetworkError> {
         match self.incoming_pub.iter().position(|x| *x == pkid) {
             Some(index) => {
                 let _pkid = self.incoming_pub.remove(index);
                 let notification = Notification::None;
                 let reply = Request::PubComp(pkid);
                 Ok((notification, reply))
-            },
+            }
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pkid);
                 Err(NetworkError::Unsolicited)
@@ -232,12 +239,14 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_pubcomp(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_pubcomp(&mut self,
+                                   pkid: PacketIdentifier)
+                                   -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_rel.iter().position(|x| *x == pkid) {
             Some(index) => {
                 self.outgoing_rel.remove(index).expect("Wrong index");
                 Ok((Notification::None, Request::None))
-            },
+            }
             _ => {
                 error!("Unsolicited pubcomp packet: {:?}", pkid);
                 Err(NetworkError::Unsolicited)
@@ -347,34 +356,29 @@ mod test {
     use std::time::Duration;
 
     use super::{MqttConnectionStatus, MqttState};
+    use client::Notification;
+    use client::Request;
     use error::NetworkError;
     use mqtt3::*;
     use mqttoptions::MqttOptions;
-    use client::Notification;
-    use client::Request;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
-        Publish {
-            dup: false,
-            qos,
-            retain: false,
-            pid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        }
+        Publish { dup: false,
+                  qos,
+                  retain: false,
+                  pid: None,
+                  topic_name: "hello/world".to_owned(),
+                  payload: Arc::new(vec![1, 2, 3]), }
     }
 
     fn build_incoming_publish(qos: QoS, pkid: u16) -> Publish {
-        Publish {
-            dup: false,
-            qos,
-            retain: false,
-            pid: Some(PacketIdentifier(pkid)),
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        }
+        Publish { dup: false,
+                  qos,
+                  retain: false,
+                  pid: Some(PacketIdentifier(pkid)),
+                  topic_name: "hello/world".to_owned(),
+                  payload: Arc::new(vec![1, 2, 3]), }
     }
-
 
     fn build_mqttstate() -> MqttState {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
@@ -478,12 +482,12 @@ mod test {
 
         match notification {
             Notification::Publish(publish) => assert_eq!(publish.pid.unwrap(), PacketIdentifier(1)),
-            _ => panic!("Invalid notification: {:?}", notification)
+            _ => panic!("Invalid notification: {:?}", notification),
         }
 
         match request {
             Request::PubRec(PacketIdentifier(pkid)) => assert_eq!(pkid, 1),
-            _ => panic!("Invalid network request: {:?}", request)
+            _ => panic!("Invalid network request: {:?}", request),
         }
     }
 
@@ -496,7 +500,6 @@ mod test {
 
         mqtt.handle_outgoing_publish(publish1).unwrap();
         mqtt.handle_outgoing_publish(publish2).unwrap();
-
 
         mqtt.handle_incoming_puback(PacketIdentifier(1)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 1);
@@ -517,7 +520,6 @@ mod test {
 
         let _publish_out = mqtt.handle_outgoing_publish(publish1);
         let _publish_out = mqtt.handle_outgoing_publish(publish2);
-
 
         mqtt.handle_incoming_pubrec(PacketIdentifier(2)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 1);
@@ -544,12 +546,12 @@ mod test {
 
         match notification {
             Notification::None => assert!(true),
-            _ => panic!("Invalid notification: {:?}", notification)
+            _ => panic!("Invalid notification: {:?}", notification),
         }
 
         match request {
             Request::PubRel(PacketIdentifier(pkid)) => assert_eq!(pkid, 1),
-            _ => panic!("Invalid network request: {:?}", request)
+            _ => panic!("Invalid network request: {:?}", request),
         }
     }
 
@@ -564,12 +566,12 @@ mod test {
 
         match notification {
             Notification::None => assert!(true),
-            _ => panic!("Invalid notification: {:?}", notification)
+            _ => panic!("Invalid notification: {:?}", notification),
         }
 
         match request {
             Request::PubComp(PacketIdentifier(pkid)) => assert_eq!(pkid, 1),
-            _ => panic!("Invalid network request: {:?}", request)
+            _ => panic!("Invalid network request: {:?}", request),
         }
     }
 
@@ -722,7 +724,8 @@ mod test {
     }
 
     #[test]
-    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
+    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session(
+        ) {
         let mut mqtt = build_mqttstate();
         mqtt.opts.clean_session = false;
 
@@ -733,7 +736,7 @@ mod test {
         let _ = mqtt.handle_outgoing_publish(publish);
 
         let _connack = Connack { session_present: false,
-                                code: ConnectReturnCode::Accepted, };
+                                 code: ConnectReturnCode::Accepted, };
 
         let pubs = mqtt.handle_reconnection();
         assert_eq!(3, pubs.len());

@@ -5,6 +5,7 @@ use jsonwebtoken;
 use mqtt3::Packet;
 use std::io::Error as IoError;
 use tokio::timer;
+use tokio::timer::timeout;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -66,6 +67,8 @@ pub enum NetworkError {
     Unsolicited,
     #[fail(display = "Tokio timer error = {}", _0)]
     Timer(timer::Error),
+    #[fail(display = "Tokio timer error = {}", _0)]
+    TimeOut(timeout::Error<IoError>),
     #[fail(display = "User requested for reconnect")]
     UserReconnect,
     #[fail(display = "User requested for disconnect")]
@@ -101,5 +104,11 @@ impl From<SendError<Request>> for ClientError {
 impl From<timer::Error> for NetworkError {
     fn from(err: timer::Error) -> NetworkError {
         NetworkError::Timer(err)
+    }
+}
+
+impl From<timeout::Error<IoError>> for NetworkError {
+    fn from(err: timeout::Error<IoError>) -> NetworkError {
+        NetworkError::TimeOut(err)
     }
 }

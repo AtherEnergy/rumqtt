@@ -18,6 +18,7 @@ use std::time::Duration;
 use tokio::runtime::current_thread;
 use tokio::timer::{Interval, Timeout};
 use tokio_codec::Framed;
+use tokio::timer::timeout;
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -163,12 +164,10 @@ impl Connection {
                        -> impl Future<Item = (), Error = NetworkError> + 'a {
         let (network_sink, network_stream) = framed.split();
 
-        let keep_alive_stream = self.network_ping_stream();
         let network_reply_stream = self.network_reply_stream(network_stream);
         let network_request_stream = self.network_request_stream();
 
         network_request_stream.select(network_reply_stream)
-                              .select(keep_alive_stream)
                               .forward(network_sink)
                               .map(|(_selct, _splitsink)| ())
     }
@@ -179,13 +178,18 @@ impl Connection {
                             network_stream: SplitStream<Framed<NetworkStream, MqttCodec>>)
                             -> impl Stream<Item = Packet, Error = NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
+        let keep_alive = self.mqttoptions.keep_alive;
+        let network_stream = Timeout::new(network_stream, keep_alive);
 
         // TODO: Can we prevent this clone?
         // cloning crossbeam channel sender everytime is a problem accordig to docs
         let notification_tx = self.notification_tx.clone();
-        network_stream.map_err(|e| {
+        network_stream.or_else(|e| {
                                    error!("Network receiver error = {:?}", e);
-                                   NetworkError::from(e)
+                                    match e {
+                                        timeout::Error(_) => Ok(Packet::Pingreq),
+                                        _ => Err(NetworkError::from(e))
+                                    }
                                })
                       .and_then(move |packet| {
                           debug!("Incoming packet = {:?}", packet);
@@ -239,19 +243,6 @@ impl Connection {
                                                              .handle_outgoing_mqtt_packet(packet))
                                 })
     }
-
-    fn network_ping_stream(&self) -> impl Stream<Item = Packet, Error = NetworkError> {
-        let keep_alive = self.mqttoptions.keep_alive;
-        let mqtt_state = self.mqtt_state.clone();
-        let ping_interval = Interval::new_interval(keep_alive);
-
-        ping_interval.map_err(|e| e.into())
-                     .filter(move |_v| {
-                                 let mqtt_state = mqtt_state.borrow();
-                                 mqtt_state.is_ping_required()
-                             })
-                     .and_then(|_v| future::ok(Packet::Pingreq))
-    }
 }
 
 fn validate_userrequest(userrequest: Request,
@@ -283,13 +274,10 @@ fn check_and_validate_connack(
     mqtt_state: &mut MqttState)
     -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
     match packet {
-        Some(Packet::Connack(connack)) => {
-            if let Err(err) = mqtt_state.handle_incoming_connack(connack) {
-                future::err(err)
-            } else {
-                future::ok(framed)
-            }
-        }
+        Some(Packet::Connack(connack)) => match mqtt_state.handle_incoming_connack(connack) {
+            Err(err) => future::err(err),
+            _ => future::ok(framed),
+        },
         Some(packet) => future::err(ConnectError::NotConnackPacket(packet)),
         None => future::err(ConnectError::NoResponse),
     }
