@@ -14,20 +14,24 @@ pub mod network;
 
 #[derive(Debug)]
 pub enum Notification {
-    Publish(Arc<Vec<u8>>),
-    PubAck(u16),
-    PubRec(u16),
-    PubRel(u16),
-    PubComp(u16),
-    SubAck(u16),
+    Publish(Publish),
+    PubAck(PacketIdentifier),
+    PubRec(PacketIdentifier),
+    PubRel(PacketIdentifier),
+    PubComp(PacketIdentifier),
+    SubAck(PacketIdentifier),
     None,
 }
 
 /// Requests to network event loop
+#[derive(Debug)]
 pub enum Request {
     Publish(Publish),
     Subscribe(Subscribe),
     PubAck(PacketIdentifier),
+    PubRec(PacketIdentifier),
+    PubRel(PacketIdentifier),
+    PubComp(PacketIdentifier),
     Ping,
     Reconnect(MqttOptions),
     Disconnect,

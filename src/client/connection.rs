@@ -322,6 +322,9 @@ impl From<Request> for Packet {
         match item {
             Request::Publish(publish) => Packet::Publish(publish),
             Request::PubAck(pkid) => Packet::Puback(pkid),
+            Request::PubRec(pkid) => Packet::Pubrec(pkid),
+            Request::PubRel(pkid) => Packet::Pubrel(pkid),
+            Request::PubComp(pkid) => Packet::Pubcomp(pkid),
             Request::Ping => Packet::Pingreq,
             Request::Disconnect => Packet::Disconnect,
             Request::Subscribe(subscribe) => Packet::Subscribe(subscribe),
