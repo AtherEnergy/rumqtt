@@ -86,13 +86,13 @@ pub mod stream {
             port: u16)
             -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
             // let host = host.to_owned();
-            let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
             let addr = lookup_ipv4(host, port);
 
             let tls_connector = self.create_stream();
 
             let network_future = match tls_connector {
                 Ok(tls_connector) => {
+                    let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
                     Either::A(TcpStream::connect(&addr).and_then(move |stream| {
                                             tls_connector.connect(domain.as_ref(), stream)
                                         })
