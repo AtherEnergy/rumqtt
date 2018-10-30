@@ -11,23 +11,23 @@ fn main() {
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
 
     thread::spawn(move || {
-                      thread::sleep_ms(5000);
-                      for i in 1..11 {
-                          let payload = format!("publish {}", i);
-                          thread::sleep(Duration::from_millis(100));
-                          mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload)
-                                     .unwrap();
-                      }
+        thread::sleep_ms(5000);
+        for i in 1..11 {
+            let payload = format!("publish {}", i);
+            thread::sleep(Duration::from_millis(100));
+            mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload)
+                       .unwrap();
+        }
 
-                      mqtt_client.disconnect().unwrap();
+        mqtt_client.disconnect().unwrap();
 
-                      for i in 11..21 {
-                          let payload = format!("publish {}", i);
-                          thread::sleep(Duration::from_millis(100));
-                          mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload)
-                                     .unwrap();
-                      }
-                  });
+        for i in 11..21 {
+            let payload = format!("publish {}", i);
+            thread::sleep(Duration::from_millis(100));
+            mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload)
+                       .unwrap();
+        }
+    });
 
     for notification in notifications {
         println!("{:?}", notification)

@@ -4,8 +4,7 @@ use futures::sync::mpsc::SendError;
 use jsonwebtoken;
 use mqtt3::Packet;
 use std::io::Error as IoError;
-use tokio::timer;
-use tokio::timer::timeout;
+use tokio_timer::{self, timeout};
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -66,7 +65,7 @@ pub enum NetworkError {
     #[fail(display = "Received unsolicited acknowledgment")]
     Unsolicited,
     #[fail(display = "Tokio timer error = {}", _0)]
-    Timer(timer::Error),
+    Timer(tokio_timer::Error),
     #[fail(display = "Tokio timer error = {}", _0)]
     TimeOut(timeout::Error<IoError>),
     #[fail(display = "User requested for reconnect")]
@@ -101,8 +100,8 @@ impl From<SendError<Request>> for ClientError {
     }
 }
 
-impl From<timer::Error> for NetworkError {
-    fn from(err: timer::Error) -> NetworkError {
+impl From<tokio_timer::Error> for NetworkError {
+    fn from(err: tokio_timer::Error) -> NetworkError {
         NetworkError::Timer(err)
     }
 }

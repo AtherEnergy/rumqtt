@@ -47,13 +47,13 @@ fn main() {
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
     thread::spawn(move || {
-                      for i in 0..100 {
-                          let payload = format!("publish {}", i);
-                          thread::sleep_ms(1000);
-                          mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
-                                     .unwrap();
-                      }
-                  });
+        for i in 0..100 {
+            let payload = format!("publish {}", i);
+            thread::sleep_ms(1000);
+            mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
+                       .unwrap();
+        }
+    });
 
     for notification in notifications {
         println!("{:?}", notification)

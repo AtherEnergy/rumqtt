@@ -23,13 +23,13 @@ fn main() {
     let topic = "hello/world";
 
     thread::spawn(move || {
-                      for i in 0..100 {
-                          let payload = format!("publish {}", i);
-                          thread::sleep(Duration::from_secs(1));
-                          mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
-                                     .unwrap();
-                      }
-                  });
+        for i in 0..100 {
+            let payload = format!("publish {}", i);
+            thread::sleep(Duration::from_secs(1));
+            mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
+                       .unwrap();
+        }
+    });
 
     for notification in notifications {
         println!("{:?}", notification)

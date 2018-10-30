@@ -49,7 +49,7 @@ impl MqttClient {
 
         //TODO: Remove max packet size hardcode
         let client = MqttClient { userrequest_tx,
-                                  max_packet_size: 1000, };
+                                  max_packet_size: 1000 };
 
         (client, notification_rx)
     }
@@ -70,7 +70,7 @@ impl MqttClient {
                                 retain: false,
                                 topic_name: topic.into(),
                                 pid: None,
-                                payload: Arc::new(payload), };
+                                payload: Arc::new(payload) };
 
         let tx = &mut self.userrequest_tx;
         tx.send(Request::Publish(publish)).wait()?;
@@ -79,9 +79,9 @@ impl MqttClient {
 
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let topic = SubscribeTopic { topic_path: topic.into(),
-                                     qos: qos, };
+                                     qos: qos };
         let subscribe = Subscribe { pid: PacketIdentifier::zero(),
-                                    topics: vec![topic], };
+                                    topics: vec![topic] };
 
         let tx = &mut self.userrequest_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;

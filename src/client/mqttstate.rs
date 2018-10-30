@@ -50,7 +50,7 @@ impl MqttState {
                     last_pkid: PacketIdentifier(0),
                     outgoing_pub: VecDeque::new(),
                     outgoing_rel: VecDeque::new(),
-                    incoming_pub: VecDeque::new(), }
+                    incoming_pub: VecDeque::new() }
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkError> {
@@ -91,7 +91,7 @@ impl MqttState {
             Packet::Pubrec(pkid) => self.handle_incoming_pubrec(pkid),
             Packet::Pubrel(pkid) => self.handle_incoming_pubrel(pkid),
             Packet::Pubcomp(pkid) => self.handle_incoming_pubcomp(pkid),
-            _ => unimplemented!(),
+            _ => panic!("{:?}", packet),
         }
     }
 
@@ -368,7 +368,7 @@ mod test {
                   retain: false,
                   pid: None,
                   topic_name: "hello/world".to_owned(),
-                  payload: Arc::new(vec![1, 2, 3]), }
+                  payload: Arc::new(vec![1, 2, 3]) }
     }
 
     fn build_incoming_publish(qos: QoS, pkid: u16) -> Publish {
@@ -377,7 +377,7 @@ mod test {
                   retain: false,
                   pid: Some(PacketIdentifier(pkid)),
                   topic_name: "hello/world".to_owned(),
-                  payload: Arc::new(vec![1, 2, 3]), }
+                  payload: Arc::new(vec![1, 2, 3]) }
     }
 
     fn build_mqttstate() -> MqttState {
@@ -445,7 +445,7 @@ mod test {
                                 retain: false,
                                 pid: None,
                                 topic_name: "hello/world".to_owned(),
-                                payload: Arc::new(vec![0; 257 * 1024]), };
+                                payload: Arc::new(vec![0; 257 * 1024]) };
 
         match mqtt.handle_outgoing_publish(publish) {
             Err(NetworkError::PacketSizeLimitExceeded) => (),
@@ -648,7 +648,7 @@ mod test {
                                 retain: false,
                                 pid: None,
                                 topic_name: "hello/world".to_owned(),
-                                payload: Arc::new(vec![1, 2, 3]), };
+                                payload: Arc::new(vec![1, 2, 3]) };
 
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish.clone());
@@ -688,13 +688,13 @@ mod test {
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Handshake);
 
         let connack = Connack { session_present: false,
-                                code: ConnectReturnCode::Accepted, };
+                                code: ConnectReturnCode::Accepted };
 
         let _ = mqtt.handle_incoming_connack(connack);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Connected);
 
         let connack = Connack { session_present: false,
-                                code: ConnectReturnCode::BadUsernamePassword, };
+                                code: ConnectReturnCode::BadUsernamePassword };
 
         let _ = mqtt.handle_incoming_connack(connack);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
@@ -709,14 +709,14 @@ mod test {
                                 retain: false,
                                 pid: None,
                                 topic_name: "hello/world".to_owned(),
-                                payload: Arc::new(vec![1, 2, 3]), };
+                                payload: Arc::new(vec![1, 2, 3]) };
 
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish.clone());
         let _ = mqtt.handle_outgoing_publish(publish);
 
         let connack = Connack { session_present: false,
-                                code: ConnectReturnCode::Accepted, };
+                                code: ConnectReturnCode::Accepted };
 
         mqtt.handle_incoming_connack(connack).unwrap();
         let pubs = mqtt.handle_reconnection();
@@ -736,7 +736,7 @@ mod test {
         let _ = mqtt.handle_outgoing_publish(publish);
 
         let _connack = Connack { session_present: false,
-                                 code: ConnectReturnCode::Accepted, };
+                                 code: ConnectReturnCode::Accepted };
 
         let pubs = mqtt.handle_reconnection();
         assert_eq!(3, pubs.len());
@@ -749,7 +749,7 @@ mod test {
         let lwt = LastWill { topic: String::from("LWT_TOPIC"),
                              message: String::from("LWT_MESSAGE"),
                              qos: QoS::ExactlyOnce,
-                             retain: true, };
+                             retain: true };
 
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883)
             .set_clean_session(true)

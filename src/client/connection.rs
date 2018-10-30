@@ -16,10 +16,8 @@ use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::current_thread;
-use tokio::timer::{Interval, Timeout};
 use tokio_codec::Framed;
-use tokio::timer::timeout;
-
+use tokio_timer::{timeout, Interval, Timeout};
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
 //  https://github.com/tokio-rs/tokio-core/issues/182
@@ -40,15 +38,14 @@ impl Connection {
         let (userrequest_tx, userrequest_rx) = mpsc::channel::<Request>(10);
 
         thread::spawn(move || {
-                          let mqtt_state =
-                              Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
-                          let mut connection = Connection { mqtt_state,
-                                                            userrequest_rx,
-                                                            notification_tx,
-                                                            mqttoptions, };
+            let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
+            let mut connection = Connection { mqtt_state,
+                                              userrequest_rx,
+                                              notification_tx,
+                                              mqttoptions };
 
-                          connection.mqtt_eventloop()
-                      });
+            connection.mqtt_eventloop()
+        });
 
         (userrequest_tx, notificaiton_rx)
     }
@@ -141,10 +138,10 @@ impl Connection {
 
         tcp_connect_future.and_then(move |framed| {
                               connect_packet.and_then(move |packet| {
-                                                          // send mqtt connect packet
-                                                          framed.send(Packet::Connect(packet))
-                                                                .map_err(|e| ConnectError::from(e))
-                                                      })
+                                                // send mqtt connect packet
+                                                framed.send(Packet::Connect(packet))
+                                                      .map_err(|e| ConnectError::from(e))
+                                            })
                                             .and_then(move |framed| {
                                                 framed
                         .into_future()
@@ -184,26 +181,24 @@ impl Connection {
         // TODO: Can we prevent this clone?
         // cloning crossbeam channel sender everytime is a problem accordig to docs
         let notification_tx = self.notification_tx.clone();
-        network_stream.or_else(|e| {
-                                   error!("Network receiver error = {:?}", e);
-                                    match e {
-                                        timeout::Error(_) => Ok(Packet::Pingreq),
-                                        _ => Err(NetworkError::from(e))
-                                    }
-                               })
+        network_stream.map_err(|e| NetworkError::TimeOut(e))
                       .and_then(move |packet| {
                           debug!("Incoming packet = {:?}", packet);
-                          let network_reply_future =
-                              future::result(mqtt_state.borrow_mut()
-                                                       .handle_incoming_mqtt_packet(packet));
+                          let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
+                          let network_reply_future = future::result(reply);
                           let notification_tx = notification_tx.clone();
 
                           network_reply_future.and_then(move |(notification, reply)| {
-                                                            handle_notification(notification,
-                                                                                &notification_tx);
-                                                            future::ok(reply)
-                                                        })
-                                              .or_else(|e| future::err(e))
+                                                  handle_notification(notification,
+                                                                      &notification_tx);
+                                                  future::ok(reply)
+                                              })
+                      })
+                      .or_else(|e| match e {
+                          NetworkError::TimeOut(ref e) if e.is_elapsed() => {
+                              future::ok(Request::Ping)
+                          }
+                          _ => future::err(e),
                       })
                       .filter(|reply| should_forward_packet(reply))
                       .and_then(move |packet| future::ok(packet.into()))
@@ -218,30 +213,30 @@ impl Connection {
         let userrequest_rx = self.userrequest_rx
                                  .by_ref()
                                  .map_err(|e| {
-                                              error!("User request error = {:?}", e);
-                                              NetworkError::Blah
-                                          })
+                                     error!("User request error = {:?}", e);
+                                     NetworkError::Blah
+                                 })
                                  .and_then(move |userrequest| {
-                                               let mut mqtt_state = mqtt_state.borrow_mut();
-                                               validate_userrequest(userrequest, &mut mqtt_state)
-                                           });
+                                     let mut mqtt_state = mqtt_state.borrow_mut();
+                                     validate_userrequest(userrequest, &mut mqtt_state)
+                                 });
 
         let mqtt_state = self.mqtt_state.clone();
 
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
         let last_session_publishes =
             stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
-                         error!("Last session publish stream error = {:?}", e);
-                         NetworkError::Blah
-                     });
+                error!("Last session publish stream error = {:?}", e);
+                NetworkError::Blah
+            });
 
         // NOTE: AndThen is a stream and ForEach is a future
         // TODO: Check if 'chain' puts all its elements before userrequests
         userrequest_rx.chain(last_session_publishes)
                       .and_then(move |packet: Packet| {
-                                    future::result(mqtt_state.borrow_mut()
-                                                             .handle_outgoing_mqtt_packet(packet))
-                                })
+                          future::result(mqtt_state.borrow_mut()
+                                                   .handle_outgoing_mqtt_packet(packet))
+                      })
     }
 }
 
