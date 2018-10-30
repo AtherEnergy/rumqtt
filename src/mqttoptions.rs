@@ -73,7 +73,7 @@ impl Default for MqttOptions {
                       reconnect: ReconnectOptions::AfterFirstSuccess(10),
                       security: SecurityOptions::None,
                       max_packet_size: 256 * 1024,
-                      last_will: None, }
+                      last_will: None }
     }
 }
 
@@ -94,7 +94,7 @@ impl MqttOptions {
                       reconnect: ReconnectOptions::AfterFirstSuccess(10),
                       security: SecurityOptions::None,
                       max_packet_size: 256 * 1024,
-                      last_will: None, }
+                      last_will: None }
     }
 
     /// Set number of seconds after which client should ping the broker
@@ -179,7 +179,7 @@ impl MqttOptions {
                                 clean_session: self.clean_session,
                                 last_will: self.last_will.clone(),
                                 username,
-                                password, };
+                                password };
 
         Ok(connect)
     }
@@ -210,7 +210,7 @@ pub fn gen_iotcore_password(project: String,
 
     let claims = Claims { iat,
                           exp,
-                          aud: project, };
+                          aud: project };
 
     Ok(encode(&jwt_header, &claims, &key)?)
 }

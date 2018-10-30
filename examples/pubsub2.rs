@@ -10,13 +10,15 @@ fn main() {
     let mqtt_options = MqttOptions::new("test-id", "127.0.0.1", 1883).set_keep_alive(10);
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
 
-    mqtt_client.subscribe("hello/world", QoS::ExactlyOnce).unwrap();
+    mqtt_client.subscribe("hello/world", QoS::ExactlyOnce)
+               .unwrap();
 
     thread::spawn(move || {
         for i in 0..100 {
             let payload = format!("publish {}", i);
             thread::sleep(Duration::from_millis(100));
-            mqtt_client.publish("hello/world", QoS::ExactlyOnce, payload).unwrap();
+            mqtt_client.publish("hello/world", QoS::ExactlyOnce, payload)
+                       .unwrap();
         }
     });
 

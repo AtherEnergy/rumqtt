@@ -13,6 +13,7 @@ extern crate tokio_codec;
 extern crate tokio_io;
 #[cfg(feature = "rustls")]
 extern crate tokio_rustls;
+extern crate tokio_timer;
 extern crate tokio_tls;
 #[cfg(feature = "rustls")]
 extern crate webpki;

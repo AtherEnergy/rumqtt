@@ -32,8 +32,8 @@ fn main() {
 
     let security_options =
         SecurityOptions::GcloudIot((config.project,
-                                   include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
-                                   60));
+                                    include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
+                                    60));
 
     let ca = include_bytes!("gcloudfiles/roots.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);
@@ -47,13 +47,13 @@ fn main() {
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
     thread::spawn(move || {
-                      for i in 0..100 {
-                          let payload = format!("publish {}", i);
-                          thread::sleep_ms(1000);
-                          mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
-                                     .unwrap();
-                      }
-                  });
+        for i in 0..100 {
+            let payload = format!("publish {}", i);
+            thread::sleep_ms(1000);
+            mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
+                       .unwrap();
+        }
+    });
 
     for notification in notifications {
         println!("{:?}", notification)
