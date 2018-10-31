@@ -43,7 +43,7 @@ fn main() {
         .set_connection_method(connection_method)
         .set_security_opts(security_options);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
     thread::spawn(move || {

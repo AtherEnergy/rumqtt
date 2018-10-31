@@ -19,7 +19,7 @@ fn main() {
         MqttOptions::new(client_id, "localhost", 8883).set_keep_alive(10)
                                                       .set_connection_method(connection_method);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options);
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     let topic = "hello/world";
 
     thread::spawn(move || {
