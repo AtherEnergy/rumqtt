@@ -1,12 +1,13 @@
 use client::Request;
 use futures::sync::mpsc::SendError;
+use crossbeam_channel::RecvError;
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt3::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, From)]
 pub enum ClientError {
     #[fail(display = "No subscriptions")]
     ZeroSubscriptions,
@@ -19,7 +20,7 @@ pub enum ClientError {
     MpscSend(SendError<Request>),
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, From)]
 pub enum MqttError {
     #[fail(display = "Connection failed")]
     ConnectError,
@@ -28,7 +29,7 @@ pub enum MqttError {
 }
 
 // TODO: Modify mqtt311 to return enums for mqtt connect error
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, From)]
 pub enum ConnectError {
     #[fail(display = "Mqtt connection failed. Error = {}", _0)]
     MqttConnectionRefused(u8),
@@ -37,6 +38,8 @@ pub enum ConnectError {
     Jwt(jsonwebtoken::errors::Error),
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
+    #[fail(display = "Receiving connection status failed. Error = {}", _0)]
+    Recv(RecvError),
     #[fail(display = "Empty dns list")]
     DnsListEmpty,
     #[fail(display = "Couldn't create mqtt connection in time")]
@@ -50,7 +53,7 @@ pub enum ConnectError {
     NoCertificateAuthority,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, From)]
 pub enum NetworkError {
     #[fail(display = "Io failed. Error = {}", _0)]
     Io(IoError),
@@ -74,40 +77,4 @@ pub enum NetworkError {
     UserDisconnect,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
-}
-
-impl From<IoError> for ConnectError {
-    fn from(err: IoError) -> ConnectError {
-        ConnectError::Io(err)
-    }
-}
-
-impl From<jsonwebtoken::errors::Error> for ConnectError {
-    fn from(err: jsonwebtoken::errors::Error) -> ConnectError {
-        ConnectError::Jwt(err)
-    }
-}
-
-impl From<IoError> for NetworkError {
-    fn from(err: IoError) -> NetworkError {
-        NetworkError::Io(err)
-    }
-}
-
-impl From<SendError<Request>> for ClientError {
-    fn from(err: SendError<Request>) -> ClientError {
-        ClientError::MpscSend(err)
-    }
-}
-
-impl From<tokio_timer::Error> for NetworkError {
-    fn from(err: tokio_timer::Error) -> NetworkError {
-        NetworkError::Timer(err)
-    }
-}
-
-impl From<timeout::Error<IoError>> for NetworkError {
-    fn from(err: timeout::Error<IoError>) -> NetworkError {
-        NetworkError::TimeOut(err)
-    }
 }
