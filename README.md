@@ -2,9 +2,8 @@ Asynchronous mqtt client
 
 #### What is supported
 
-- [ ] QoS 0
-- [ ] QoS 1
-- [ ] Tls (User RustTLS. Cross compilation and multi platform support is painless)
+- [ ] QoS 0, 1, 2
+- [ ] Tls (Uses RustTLS by default for TLS. Cross compilation and multi platform support is painless)
 - [ ] Automatic Reconnection
 - [ ] Dynamic Reconnection 
 - [ ] Back pressure when the connection is slow
@@ -12,5 +11,4 @@ Asynchronous mqtt client
 
 #### What's not supported
 
-- [ ] QoS 2
 - [ ] Cancelling `mqtt will` with disconnect packet
