@@ -4,7 +4,7 @@ use error::ConnectError;
 use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ReconnectOptions {
     /// Don't automatically reconnect
     Never,

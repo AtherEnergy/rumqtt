@@ -33,9 +33,12 @@ impl Connection {
     /// Takes mqtt options and tries to create initial connection on current thread and handles
     /// connection events in a new thread if the initial connection is successful
     pub fn run(mqttoptions: MqttOptions)
-               -> (mpsc::Sender<Request>, crossbeam_channel::Receiver<Notification>) {
+               -> Result<(mpsc::Sender<Request>, crossbeam_channel::Receiver<Notification>), ConnectError> {
+        
         let (notification_tx, notificaiton_rx) = crossbeam_channel::bounded(10);
         let (userrequest_tx, userrequest_rx) = mpsc::channel::<Request>(10);
+        let (connection_tx, connection_rx) = crossbeam_channel::bounded(1);
+        let reconnect_option = mqttoptions.reconnect;
 
         thread::spawn(move || {
             let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
@@ -44,13 +47,21 @@ impl Connection {
                                               notification_tx,
                                               mqttoptions };
 
-            connection.mqtt_eventloop()
+            connection.mqtt_eventloop(connection_tx)
         });
 
-        (userrequest_tx, notificaiton_rx)
+        match reconnect_option {
+            ReconnectOptions::AfterFirstSuccess(_) => {
+                connection_rx.recv()??;
+                Ok((userrequest_tx, notificaiton_rx))
+            }
+            _ => Ok((userrequest_tx, notificaiton_rx))
+        }
+
+        
     }
 
-    fn mqtt_eventloop(&mut self) {
+    fn mqtt_eventloop(&mut self, connection_tx: crossbeam_channel::Sender<Result<(), ConnectError>>) {
         let mut connection_count = 1;
         let reconnect_option = self.mqttoptions.reconnect;
 
@@ -69,13 +80,24 @@ impl Connection {
                 }
                 Err(e) => {
                     error!("Connection error = {:?}", e);
+                    let error = match e.into_inner() {
+                        Some(e) => Err(e),
+                        None => Err(ConnectError::Timeout),
+                    };
+
                     match reconnect_option {
-                        ReconnectOptions::AfterFirstSuccess(_) if connection_count == 1 => break,
+                        ReconnectOptions::AfterFirstSuccess(_) if connection_count == 1 => {
+                            connection_tx.send(error).unwrap();
+                            break
+                        }
                         ReconnectOptions::AfterFirstSuccess(time) => {
                             thread::sleep(Duration::from_secs(time))
                         }
                         ReconnectOptions::Always(time) => thread::sleep(Duration::from_secs(time)),
-                        ReconnectOptions::Never => break,
+                        ReconnectOptions::Never => {
+                            connection_tx.send(error).unwrap();
+                            break
+                        },
                     }
                     continue 'reconnection;
                 }
@@ -88,7 +110,6 @@ impl Connection {
             if let Err(e) = rt.block_on(mqtt_future) {
                 error!("Mqtt eventloop error = {:?}", e);
                 match reconnect_option {
-                    ReconnectOptions::AfterFirstSuccess(_) if connection_count == 1 => break,
                     ReconnectOptions::AfterFirstSuccess(time) => {
                         thread::sleep(Duration::from_secs(time))
                     }
@@ -256,8 +277,12 @@ fn handle_notification(notification: Notification,
                        notification_tx: &crossbeam_channel::Sender<Notification>) {
     match notification {
         Notification::None => (),
-        _ if !notification_tx.is_full() => notification_tx.send(notification),
-        _ => (),
+        _ => {
+            match notification_tx.try_send(notification) {
+                Ok(()) => (),
+                Err(e) => error!("Notification send failed. Error = {:?}", e),
+            }
+        }
     }
 }
 

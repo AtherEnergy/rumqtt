@@ -7,6 +7,7 @@ use mqtt3::SubscribeTopic;
 use mqtt3::{PacketIdentifier, Publish, QoS};
 use std::sync::Arc;
 use MqttOptions;
+use error::ConnectError;
 
 pub mod connection;
 pub mod mqttstate;
@@ -44,14 +45,14 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions) -> (Self, crossbeam_channel::Receiver<Notification>) {
-        let (userrequest_tx, notification_rx) = connection::Connection::run(opts);
+    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+        let (userrequest_tx, notification_rx) = connection::Connection::run(opts)?;
 
         //TODO: Remove max packet size hardcode
         let client = MqttClient { userrequest_tx,
                                   max_packet_size: 1000 };
 
-        (client, notification_rx)
+        Ok((client, notification_rx))
     }
 
     pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self,
