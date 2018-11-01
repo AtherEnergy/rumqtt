@@ -1,5 +1,6 @@
 use crossbeam_channel;
 use error::ClientError;
+use error::ConnectError;
 use futures::sync::mpsc;
 use futures::{Future, Sink};
 use mqtt3::Subscribe;
@@ -7,7 +8,6 @@ use mqtt3::SubscribeTopic;
 use mqtt3::{PacketIdentifier, Publish, QoS};
 use std::sync::Arc;
 use MqttOptions;
-use error::ConnectError;
 
 pub mod connection;
 pub mod mqttstate;
@@ -45,7 +45,8 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub fn start(opts: MqttOptions)
+                 -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
         let (userrequest_tx, notification_rx) = connection::Connection::run(opts)?;
 
         //TODO: Remove max packet size hardcode

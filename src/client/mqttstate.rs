@@ -97,14 +97,6 @@ impl MqttState {
 
     pub fn handle_outgoing_connect(&mut self) -> Result<Connect, ConnectError> {
         self.connection_status = MqttConnectionStatus::Handshake;
-
-        let (_username, _password) = match self.opts.security {
-            SecurityOptions::UsernamePassword((ref username, ref password)) => {
-                (Some(username.to_owned()), Some(password.to_owned()))
-            }
-            _ => (None, None),
-        };
-
         self.opts.connect_packet()
     }
 

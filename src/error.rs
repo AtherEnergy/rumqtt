@@ -1,6 +1,6 @@
 use client::Request;
-use futures::sync::mpsc::SendError;
 use crossbeam_channel::RecvError;
+use futures::sync::mpsc::SendError;
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt3::Packet;
