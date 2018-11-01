@@ -193,21 +193,19 @@ impl Connection {
         let keep_alive = self.mqttoptions.keep_alive;
         let network_stream = Timeout::new(network_stream, keep_alive);
 
-        // TODO: Can we prevent this clone?
-        // cloning crossbeam channel sender everytime is a problem accordig to docs
+        // TODO: prevent this clone?
+        // cloning crossbeam channel sender everytime is a problem according to docs
         let notification_tx = self.notification_tx.clone();
         network_stream.map_err(|e| NetworkError::TimeOut(e))
                       .and_then(move |packet| {
                           debug!("Incoming packet = {:?}", packet);
                           let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
-                          let network_reply_future = future::result(reply);
+                          future::result(reply)
+                      })
+                      .and_then(move |(notification, reply)| {
                           let notification_tx = notification_tx.clone();
-
-                          network_reply_future.and_then(move |(notification, reply)| {
-                                                   handle_notification(notification,
-                                                                       &notification_tx);
-                                                  future::ok(reply)
-                                              })
+                          handle_notification(notification, &notification_tx);
+                          future::ok(reply)
                       })
                       .or_else(|e| match e {
                           NetworkError::TimeOut(ref e) if e.is_elapsed() => {
