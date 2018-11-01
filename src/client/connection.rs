@@ -54,7 +54,7 @@ impl Connection {
         });
 
         match reconnect_option {
-            ReconnectOptions::AfterFirstSuccess(_) => {
+            ReconnectOptions::AfterFirstSuccess(_) | ReconnectOptions::Never => {
                 connection_rx.recv()??;
                 Ok((userrequest_tx, notificaiton_rx))
             }
@@ -77,6 +77,9 @@ impl Connection {
             let mut rt = current_thread::Runtime::new().unwrap();
             let framed = match rt.block_on(mqtt_connect_deadline) {
                 Ok(framed) => {
+                    if connection_count == 1 {
+                        connection_tx.send(Ok(())).unwrap();
+                    }
                     connection_count += 1;
                     framed
                 }
@@ -198,11 +201,11 @@ impl Connection {
                           debug!("Incoming packet = {:?}", packet);
                           let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
                           let network_reply_future = future::result(reply);
-                          // let notification_tx = notification_tx.clone();
+                          let notification_tx = notification_tx.clone();
 
                           network_reply_future.and_then(move |(notification, reply)| {
-                                                //   handle_notification(notification,
-                                                //                       &notification_tx);
+                                                   handle_notification(notification,
+                                                                       &notification_tx);
                                                   future::ok(reply)
                                               })
                       })
