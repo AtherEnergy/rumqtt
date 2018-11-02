@@ -1,13 +1,13 @@
 use std::collections::VecDeque;
 use std::result::Result;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 
 use client::{Notification, Request};
 use error::{ConnectError, NetworkError};
 use mqtt3::{
     Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe,
 };
-use mqttoptions::{MqttOptions, SecurityOptions};
+use mqttoptions::MqttOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -251,16 +251,6 @@ impl MqttState {
         self.last_network_activity = Instant::now();
     }
 
-    // check if pinging is required based on last flush time
-    pub fn is_ping_required(&self) -> bool {
-        let in_elapsed = self.last_network_activity.elapsed();
-
-        debug!("Last incoming packet (network activity) before {:?} seconds. Keep alive = {:?}",
-               in_elapsed.as_secs(),
-               self.opts.keep_alive);
-        in_elapsed >= self.opts.keep_alive
-    }
-
     // check when the last control packet/pingreq packet
     // is received and return the status which tells if
     // keep alive time has exceeded
@@ -274,6 +264,16 @@ impl MqttState {
         // (What about case when pings aren't sent because of constant publishes
         // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
         // secs and then error out because of timeout.)
+
+        let keep_alive = self.opts.keep_alive.as_secs() * 1000;
+        let deviation = 100;
+        let keep_alive = Duration::from_millis(keep_alive + deviation);
+
+        let elapsed = self.last_network_activity.elapsed();
+        if elapsed >= keep_alive {
+            error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error", elapsed.as_secs(), keep_alive);
+            return Err(NetworkError::Timeout);
+        }
 
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
@@ -590,12 +590,17 @@ mod test {
 
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
+        // network activity other than pingresp
+        let publish = build_outgoing_publish(QoS::AtLeastOnce);
+        mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish));
+        mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
         thread::sleep(Duration::from_secs(5));
 
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {
+            Ok(_) => panic!("Should throw pingresp await error"),
             Err(NetworkError::AwaitPingResp) => (),
-            _ => panic!("Should throw timeout error"),
+            Err(e) => panic!("Should throw pingresp await error. Error = {:?}", e),
         }
     }
 
@@ -623,7 +628,8 @@ mod test {
 
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
-        mqtt.handle_incoming_pingresp().unwrap();
+        mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
+        
         thread::sleep(Duration::from_secs(5));
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());

@@ -189,7 +189,8 @@ impl Connection {
     fn network_reply_stream(&self,
                             network_stream: SplitStream<MqttFramed>)
                             -> impl Stream<Item = Packet, Error = NetworkError> {
-        let mqtt_state = self.mqtt_state.clone();
+        let mqtt_state_in = self.mqtt_state.clone();
+        let mqtt_state_out = self.mqtt_state.clone();
         let keep_alive = self.mqttoptions.keep_alive;
         let network_stream = Timeout::new(network_stream, keep_alive);
 
@@ -199,7 +200,7 @@ impl Connection {
         network_stream.map_err(|e| NetworkError::TimeOut(e))
                       .and_then(move |packet| {
                           debug!("Incoming packet = {:?}", packet);
-                          let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
+                          let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
                           future::result(reply)
                       })
                       .and_then(move |(notification, reply)| {
@@ -207,11 +208,18 @@ impl Connection {
                           handle_notification(notification, &notification_tx);
                           future::ok(reply)
                       })
-                      .or_else(|e| match e {
+                      .or_else(move |e| match e {
                           NetworkError::TimeOut(ref e) if e.is_elapsed() => {
-                              future::ok(Request::Ping)
+                              let ping = Packet::Pingreq;
+                              match mqtt_state_out.borrow_mut().handle_outgoing_mqtt_packet(ping) {
+                                  Ok(_) => future::ok(Request::Ping),
+                                  Err(e) => future::err(e)
+                              }
                           }
-                          _ => future::err(e),
+                          _ => {
+                              error!("Stream failed. Error = {:?}", e);
+                              future::err(e)
+                          },
                       })
                       .filter(|reply| should_forward_packet(reply))
                       .and_then(move |packet| future::ok(packet.into()))
