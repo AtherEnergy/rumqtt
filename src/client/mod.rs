@@ -12,6 +12,7 @@ use MqttOptions;
 pub mod connection;
 pub mod mqttstate;
 pub mod network;
+pub mod mqttstream;
 
 #[derive(Debug)]
 pub enum Notification {
