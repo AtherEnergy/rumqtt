@@ -2,6 +2,7 @@ use client::mqttstate::MqttState;
 use client::network::stream::NetworkStream;
 use client::Notification;
 use client::Request;
+use client::mqttstream;
 use codec::MqttCodec;
 use crossbeam_channel;
 use error::{ConnectError, NetworkError};
@@ -112,6 +113,10 @@ impl Connection {
 
             let mqtt_future = self.mqtt_future(framed, userrequest_rx);
 
+            match rt.block_on(mqtt_future) {
+
+            }
+
             if let Err(e) = rt.block_on(mqtt_future) {
                 error!("Mqtt eventloop error = {:?}", e);
                 match reconnect_option {
@@ -180,11 +185,18 @@ impl Connection {
         let network_reply_stream = self.network_reply_stream(network_stream);
         let network_request_stream = self.network_request_stream(userrequest_rx);
 
-        network_request_stream.select(network_reply_stream)
-                              .forward(network_sink)
-                              .map(|(_selct, _splitsink)| {
-                                  ()
-                              })
+        let mqtt_stream = mqttstream::new(network_reply_stream, network_request_stream);
+//        network_request_stream.select(network_reply_stream)
+//                              .forward(network_sink)
+//                              .map(|(_selct, _splitsink)| {
+//                                  ()
+//                              })
+
+        mqtt_stream
+            .forward(network_sink)
+            .map(|(_selct, _splitsink)| {
+                ()
+            })
     }
 
     /// Handles all incoming network packets (including sending notifications to user over crossbeam

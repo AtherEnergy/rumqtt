@@ -11,6 +11,7 @@ use mqtt3::Packet;
 use error::NetworkError;
 use futures::Async;
 use futures::future::Future;
+use std::io;
 
 #[must_use = "streams do nothing unless polled"]
 pub struct MqttStream<S1, S2> {
@@ -94,5 +95,11 @@ where S1: Stream<Item = Packet, Error = NetworkError>,
                 None => panic!("!!!")
             }
         }
+    }
+}
+
+impl From<io::Error> for (NetworkError, Stream<Item = Packet, Error = NetworkError>) {
+    fn from(e: io::Error) -> Self {
+        (NetworkError::Io(e), Self)
     }
 }
