@@ -11,8 +11,8 @@ fn main() {
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 
-     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce)
-                .unwrap();
+    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce)
+               .unwrap();
 
     thread::spawn(move || {
         for i in 0..100 {

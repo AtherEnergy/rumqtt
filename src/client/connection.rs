@@ -1,8 +1,8 @@
 use client::mqttstate::MqttState;
+use client::mqttstream;
 use client::network::stream::NetworkStream;
 use client::Notification;
 use client::Request;
-use client::mqttstream;
 use codec::MqttCodec;
 use crossbeam_channel;
 use error::{ConnectError, NetworkError};
@@ -64,9 +64,9 @@ impl Connection {
     fn mqtt_eventloop(&mut self,
                       connection_tx: crossbeam_channel::Sender<Result<(), ConnectError>>,
                       userrequest_rx: mpsc::Receiver<Request>) {
-
         let mut connection_count = 1;
         let reconnect_option = self.mqttoptions.reconnect;
+        let mut network_request_stream = self.network_request_stream(userrequest_rx);
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
@@ -111,25 +111,38 @@ impl Connection {
 
             debug!("Mqtt connection successful!!");
 
-            let mqtt_future = self.mqtt_future(framed, userrequest_rx);
+            //let mqtt_future = self.mqtt_future(framed, userrequest_rx);
+            //let userrequest_stream = self.user_request_stream(userrequest_rx);
+            let (network_sink, network_stream) = framed.split();
+            let network_reply_stream = self.network_reply_stream(network_stream);
+            let mqtt_stream = mqttstream::new(network_reply_stream, network_request_stream);
+
+            let mqtt_future = mqtt_stream.for_each(|packet| {
+                // network_sink.send_all(packet);
+                future::ok(())
+            });
 
             match rt.block_on(mqtt_future) {
+                Ok(_) => panic!("Shouldn't happen"),
+                Err((e, s)) => {
+                    error!("Event loop disconnect. Error = {:?}", e);
 
-            }
-
-            if let Err(e) = rt.block_on(mqtt_future) {
-                error!("Mqtt eventloop error = {:?}", e);
-                match reconnect_option {
-                    ReconnectOptions::AfterFirstSuccess(time) => {
-                        thread::sleep(Duration::from_secs(time))
-                    }
-                    ReconnectOptions::Always(time) => thread::sleep(Duration::from_secs(time)),
-                    ReconnectOptions::Never => break,
+                    network_request_stream = s;
+                    continue 'reconnection
                 }
-                continue 'reconnection;
             }
 
-            error!("Reactor Exited !!!!!!!!!!!");
+//            if let Err(e) = rt.block_on(mqtt_future) {
+//                error!("Mqtt eventloop error = {:?}", e);
+//                match reconnect_option {
+//                    ReconnectOptions::AfterFirstSuccess(time) => {
+//                        thread::sleep(Duration::from_secs(time))
+//                    }
+//                    ReconnectOptions::Always(time) => thread::sleep(Duration::from_secs(time)),
+//                    ReconnectOptions::Never => break,
+//                }
+//                continue 'reconnection;
+//            }
         }
     }
 
@@ -176,28 +189,40 @@ impl Connection {
                           })
     }
 
-    fn mqtt_future(&mut self,
-                       framed: MqttFramed,
-                        userrequest_rx: mpsc::Receiver<Request>)
-                       -> impl Future<Item = (), Error = NetworkError> {
-        let (network_sink, network_stream) = framed.split();
+//    fn mqtt_future(&mut self,
+//                   framed: MqttFramed,
+//                   userrequest_rx: mpsc::Receiver<Request>)
+//                   -> impl Future<Item = (), Error = NetworkError> {
+//        let (network_sink, network_stream) = framed.split();
+//
+//        let network_reply_stream = self.network_reply_stream(network_stream);
+//        let network_request_stream = self.network_request_stream(userrequest_rx);
+//
+//        let mqtt_stream = mqttstream::new(network_reply_stream, network_request_stream);
+//        //        network_request_stream.select(network_reply_stream)
+//        //                              .forward(network_sink)
+//        //                              .map(|(_selct, _splitsink)| {
+//        //                                  ()
+//        //                              })
+//
+//        mqtt_stream.forward(network_sink)
+//                   .map(|(_selct, _splitsink)| ())
+//    }
 
-        let network_reply_stream = self.network_reply_stream(network_stream);
-        let network_request_stream = self.network_request_stream(userrequest_rx);
-
-        let mqtt_stream = mqttstream::new(network_reply_stream, network_request_stream);
-//        network_request_stream.select(network_reply_stream)
-//                              .forward(network_sink)
-//                              .map(|(_selct, _splitsink)| {
-//                                  ()
-//                              })
-
-        mqtt_stream
-            .forward(network_sink)
-            .map(|(_selct, _splitsink)| {
-                ()
-            })
-    }
+//    fn user_request_stream(&self,
+//                           userrequest_rx: mpsc::Receiver<Request>)
+//                           -> impl Stream<Item = Packet, Error = NetworkError> {
+//        let mqtt_state = self.mqtt_state.clone();
+//
+//        let userrequest_rx = userrequest_rx.map_err(|e| {
+//                                               error!("User request error = {:?}", e);
+//                                               NetworkError::Blah
+//                                           })
+//                                           .and_then(move |userrequest| {
+//                                               let mut mqtt_state = mqtt_state.borrow_mut();
+//                                               validate_userrequest(userrequest, &mut mqtt_state)
+//                                           });
+//    }
 
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
     /// channel) and creates a stream of packets to send on network
@@ -239,15 +264,14 @@ impl Connection {
                               -> impl Stream<Item = Packet, Error = NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
 
-        let userrequest_rx = userrequest_rx
-                                 .map_err(|e| {
-                                     error!("User request error = {:?}", e);
-                                     NetworkError::Blah
-                                 })
-                                 .and_then(move |userrequest| {
-                                     let mut mqtt_state = mqtt_state.borrow_mut();
-                                     validate_userrequest(userrequest, &mut mqtt_state)
-                                 });
+        let userrequest_rx = userrequest_rx.map_err(|e| {
+                                               error!("User request error = {:?}", e);
+                                               NetworkError::Blah
+                                           })
+                                           .and_then(move |userrequest| {
+                                               let mut mqtt_state = mqtt_state.borrow_mut();
+                                               validate_userrequest(userrequest, &mut mqtt_state)
+                                           });
 
         let mqtt_state = self.mqtt_state.clone();
 
