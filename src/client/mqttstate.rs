@@ -172,6 +172,7 @@ impl MqttState {
     pub fn handle_incoming_pubrec(&mut self,
                                   pkid: PacketIdentifier)
                                   -> Result<(Notification, Request), NetworkError> {
+
         match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");

@@ -11,7 +11,7 @@ use MqttOptions;
 
 pub mod connection;
 pub mod mqttstate;
-pub mod mqttstream;
+pub mod mqttasync;
 pub mod network;
 
 #[derive(Debug)]
