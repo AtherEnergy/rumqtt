@@ -33,8 +33,6 @@ pub struct MqttStream<S1, S2, S3> {
     network_stream: S1,
     network_sink: S2,
     user_request_stream: Option<S3>,
-    network_stream_done: bool,
-    user_request_stream_done: bool,
     flag: bool,
 }
 
@@ -46,31 +44,7 @@ pub fn new<S1, S2, S3>(network_stream: S1, network_sink: S2, user_request_stream
     MqttStream { network_stream,
                  network_sink,
                  user_request_stream: Some(user_request_stream),
-                 network_stream_done: false,
-                 user_request_stream_done: false,
                  flag: true }
-}
-
-//macro_rules! request_stream_ready {
-//    ($e:expr) => (match $e {
-//        Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
-//        Ok(Async::Ready(None)) => true,
-//        Ok(Async::NotReady) => return Ok(Async::NotReady),
-//        Err(e) => return Err(From::from(e)),
-//    })
-//}
-
-macro_rules! request_stream_poll {
-    //let user_request = $e.unwrap();
-    ($e:expr) => {{
-        let mut user_request = $e.as_mut().unwrap();
-        match user_request.poll() {
-            Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
-            Ok(Async::Ready(None)) => true,
-            Ok(Async::NotReady) => return Ok(Async::NotReady),
-            Err(e) => return Err(From::from(e)),
-        }
-    }}
 }
 
 impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
@@ -107,10 +81,7 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
                 Ok(Async::Ready(None)) if done => Ok(None.into()),
                 // done or not ready but above stream not done. poll again
                 Ok(Async::Ready(None)) | Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => {
-                    let stream = self.user_request_stream.take().unwrap();
-                    Err(PollError::UserRequest(e))
-                }
+                Err(e) => Err(PollError::UserRequest(e))
             }
         } else {
             self.flag = !self.flag;
@@ -119,7 +90,7 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
                 Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
                 Ok(Async::Ready(None)) => true,
                 Ok(Async::NotReady) => false,
-                Err(e) => return Err(From::from(e))
+                Err(e) => return Err(PollError::UserRequest(e))
             };
 
             match self.network_stream.poll() {
