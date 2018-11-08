@@ -1,3 +1,4 @@
+use futures::Stream;
 use client::Request;
 use crossbeam_channel::RecvError;
 use futures::sync::mpsc::SendError;
@@ -77,4 +78,11 @@ pub enum NetworkError {
     UserDisconnect,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
+}
+
+#[derive(From)]
+pub enum PollError<S> where S: Stream<Item = Packet, Error = NetworkError>  {
+    Network((NetworkError, S)),
+    StreamClosed(S),
+    UserRequest(NetworkError)
 }
