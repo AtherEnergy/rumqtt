@@ -7,7 +7,7 @@ use error::{ConnectError, NetworkError};
 use mqtt3::{
     Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe,
 };
-use mqttoptions::{MqttOptions, SecurityOptions};
+use mqttoptions::MqttOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {

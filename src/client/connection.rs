@@ -18,7 +18,7 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::current_thread;
 use tokio_codec::Framed;
-use tokio_timer::{timeout, Interval, Timeout};
+use tokio_timer::Timeout;
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
 //  https://github.com/tokio-rs/tokio-core/issues/182
@@ -121,25 +121,30 @@ impl Connection {
 
             match rt.block_on(mqtt_future) {
                 Ok(_) => panic!("Shouldn't happen"),
-                Err(PollError::Stream((e, s))) => {
+                Err(PollError::Network((e, s))) => {
                     error!("Event loop disconnect. Error = {:?}", e);
-
                     network_request_stream = s;
-                    continue 'reconnection
+                }
+                Err(PollError::UserRequest(_)) => panic!("User req error"),
+                Err(PollError::StreamClosed(s)) => {
+                    error!("Stream closed error");
+                    network_request_stream = s;
                 }
             }
 
-//            if let Err(e) = rt.block_on(mqtt_future) {
-//                error!("Mqtt eventloop error = {:?}", e);
-//                match reconnect_option {
-//                    ReconnectOptions::AfterFirstSuccess(time) => {
-//                        thread::sleep(Duration::from_secs(time))
-//                    }
-//                    ReconnectOptions::Always(time) => thread::sleep(Duration::from_secs(time)),
-//                    ReconnectOptions::Never => break,
-//                }
-//                continue 'reconnection;
-//            }
+            match reconnect_option {
+                ReconnectOptions::AfterFirstSuccess(time) => {
+                    let time = Duration::from_secs(time);
+                    thread::sleep(time);
+                    continue 'reconnection
+                }
+                ReconnectOptions::Always(time) => {
+                    let time = Duration::from_secs(time);
+                    thread::sleep(time);
+                    continue 'reconnection
+                },
+                ReconnectOptions::Never => break 'reconnection,
+            }
         }
     }
 
@@ -200,7 +205,7 @@ impl Connection {
         let notification_tx = self.notification_tx.clone();
         network_stream.map_err(|e| NetworkError::TimeOut(e))
                       .and_then(move |packet| {
-                          debug!("Incoming packet = {:?}", packet);
+                          debug!("Incoming packet = {:?}", packet_info(&packet));
                           let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
                           future::result(reply)
                       })

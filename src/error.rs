@@ -80,6 +80,9 @@ pub enum NetworkError {
     Blah,
 }
 
+#[derive(From)]
 pub enum PollError<S> where S: Stream<Item = Packet, Error = NetworkError>  {
-    Stream((NetworkError, S))
+    Network((NetworkError, S)),
+    StreamClosed(S),
+    UserRequest(NetworkError)
 }
