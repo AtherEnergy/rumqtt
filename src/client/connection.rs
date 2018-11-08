@@ -66,7 +66,7 @@ impl Connection {
                       userrequest_rx: mpsc::Receiver<Request>) {
         let mut connection_count = 1;
         let reconnect_option = self.mqttoptions.reconnect;
-        let mut network_request_stream = self.network_request_stream(userrequest_rx);
+        let mut previous_request_stream = self.user_request_stream(userrequest_rx);
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
@@ -113,6 +113,8 @@ impl Connection {
 
             let (network_sink, network_stream) = framed.split();
             let network_reply_stream = self.network_reply_stream(network_stream);
+            let network_request_stream = self.network_request_stream(previous_request_stream);
+
             let mqtt_stream = mqttasync::new(network_reply_stream, network_sink, network_request_stream);
 
             let (mqtt_sink, mqtt_stream) = mqtt_stream.split();
@@ -123,12 +125,12 @@ impl Connection {
                 Ok(_) => panic!("Shouldn't happen"),
                 Err(PollError::Network((e, s))) => {
                     error!("Event loop disconnect. Error = {:?}", e);
-                    network_request_stream = s;
+                    previous_request_stream = s;
                 }
                 Err(PollError::UserRequest(_)) => panic!("User req error"),
                 Err(PollError::StreamClosed(s)) => {
                     error!("Stream closed error");
-                    network_request_stream = s;
+                    previous_request_stream = s;
                 }
             }
 
@@ -232,11 +234,27 @@ impl Connection {
                       .and_then(move |packet| future::ok(packet.into()))
     }
 
+    fn network_request_stream(&mut self, previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>) -> impl Stream<Item = Packet, Error = NetworkError> {
+        let mqtt_state = self.mqtt_state.clone();
+        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
+
+        let last_session_stream = stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
+            error!("Last session publish stream error = {:?}", e);
+            NetworkError::Blah
+        });
+
+        last_session_stream.chain(previous_request_stream)
+    }
+
     /// Handles all incoming user and session requests and creates a stream of packets to send
     /// on network
-    fn network_request_stream(&mut self,
-                              userrequest_rx: mpsc::Receiver<Request>)
-                              -> impl Stream<Item = Packet, Error = NetworkError> {
+    /// All the remaining packets in the last session (when cleansession = false) will be prepended
+    /// to user request stream to ensure that they are handled first. This cleanly handles last
+    /// session stray (even if disconnect happens while sending last session data)because we always
+    /// get back this stream from reactor after disconnection.
+    fn user_request_stream(&mut self,
+                           userrequest_rx: mpsc::Receiver<Request>)
+                           -> impl Stream<Item = Packet, Error = NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
 
         let userrequest_rx = userrequest_rx.map_err(|e| {
@@ -247,23 +265,11 @@ impl Connection {
                                                let mut mqtt_state = mqtt_state.borrow_mut();
                                                validate_userrequest(userrequest, &mut mqtt_state)
                                            });
-
         let mqtt_state = self.mqtt_state.clone();
-
-        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
-        let last_session_publishes =
-            stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
-                error!("Last session publish stream error = {:?}", e);
-                NetworkError::Blah
-            });
-
-        // NOTE: AndThen is a stream and ForEach is a future
-        // TODO: Check if 'chain' puts all its elements before userrequests
-        userrequest_rx.chain(last_session_publishes)
-                      .and_then(move |packet: Packet| {
-                          future::result(mqtt_state.borrow_mut()
-                                                   .handle_outgoing_mqtt_packet(packet))
-                      })
+        userrequest_rx
+            .and_then(move |packet: Packet| {
+                future::result(mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet))
+            })
     }
 }
 
