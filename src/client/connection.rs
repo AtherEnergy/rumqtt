@@ -121,12 +121,14 @@ impl Connection {
 
             match rt.block_on(mqtt_future) {
                 Ok(_) => panic!("Shouldn't happen"),
-                Err(PollError::Stream((e, s))) => {
+                Err(PollError::Network((e, s))) => {
                     error!("Event loop disconnect. Error = {:?}", e);
 
                     network_request_stream = s;
                     continue 'reconnection
                 }
+                Err(PollError::UserRequest(_)) => panic!("User req error"),
+                Err(PollError::StreamClosed(_)) => panic!("Stream closed error")
             }
 
 //            if let Err(e) = rt.block_on(mqtt_future) {
