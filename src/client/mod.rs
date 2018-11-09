@@ -10,8 +10,8 @@ use std::sync::Arc;
 use MqttOptions;
 
 pub mod connection;
-pub mod mqttstate;
 pub mod mqttasync;
+pub mod mqttstate;
 pub mod network;
 
 #[derive(Debug)]

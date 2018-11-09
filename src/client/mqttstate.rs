@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::result::Result;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use client::{Notification, Request};
 use error::{ConnectError, NetworkError};
@@ -172,7 +172,6 @@ impl MqttState {
     pub fn handle_incoming_pubrec(&mut self,
                                   pkid: PacketIdentifier)
                                   -> Result<(Notification, Request), NetworkError> {
-
         match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -272,7 +271,9 @@ impl MqttState {
 
         let elapsed = self.last_network_activity.elapsed();
         if elapsed >= keep_alive {
-            error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error", elapsed.as_secs(), keep_alive);
+            error!("Elapsed time {:?} is greater than keep alive {:?}. Timeout error",
+                   elapsed.as_secs(),
+                   keep_alive);
             return Err(NetworkError::Timeout);
         }
 
@@ -594,7 +595,8 @@ mod test {
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish));
-        mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
+        mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1)))
+            .unwrap();
         thread::sleep(Duration::from_secs(5));
 
         // should throw error because we didn't get pingresp for previous ping
@@ -630,7 +632,7 @@ mod test {
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
-        
+
         thread::sleep(Duration::from_secs(5));
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());

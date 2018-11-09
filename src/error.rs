@@ -1,7 +1,7 @@
-use futures::Stream;
 use client::Request;
 use crossbeam_channel::RecvError;
 use futures::sync::mpsc::SendError;
+use futures::Stream;
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt3::Packet;
@@ -81,8 +81,10 @@ pub enum NetworkError {
 }
 
 #[derive(From)]
-pub enum PollError<S> where S: Stream<Item = Packet, Error = NetworkError>  {
+pub enum PollError<S>
+    where S: Stream<Item = Packet, Error = NetworkError>
+{
     Network((NetworkError, S)),
     StreamClosed(S),
-    UserRequest(NetworkError)
+    UserRequest(NetworkError),
 }

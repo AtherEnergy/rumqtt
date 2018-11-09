@@ -1,15 +1,15 @@
-use futures::StartSend;
-use futures::Poll;
-use futures::stream::Stream;
 use futures::sink::Sink;
+use futures::stream::Stream;
+use futures::Poll;
+use futures::StartSend;
 
 use error::NetworkError;
 use error::PollError;
-use std::io;
 use futures::Async;
 use mqtt3::Packet;
+use std::io;
 
-/// Customized stream/sink to cater rumqtt needs. 
+/// Customized stream/sink to cater rumqtt needs.
 /// 1
 /// ------
 /// This implementation returns channel back to the user when there are errors.
@@ -19,7 +19,7 @@ use mqtt3::Packet;
 /// ------
 /// `Select` on 2 streams will continue the 2nd stream even after the first stream ends. In our
 /// case we need to detect disconnections as soon as server closes the connection. This alters
-/// the select implementation to throw error when `network_stream` closes. 
+/// the select implementation to throw error when `network_stream` closes.
 /// (by default close = stream end)
 /// 3
 /// ------
@@ -36,7 +36,10 @@ pub struct MqttStream<S1, S2, S3> {
     flag: bool,
 }
 
-pub fn new<S1, S2, S3>(network_stream: S1, network_sink: S2, user_request_stream: S3) -> MqttStream<S1, S2, S3>
+pub fn new<S1, S2, S3>(network_stream: S1,
+                       network_sink: S2,
+                       user_request_stream: S3)
+                       -> MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>
@@ -49,14 +52,13 @@ pub fn new<S1, S2, S3>(network_stream: S1, network_sink: S2, user_request_stream
 
 impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
-          S2: Sink<SinkItem = Packet, SinkError = io::Error>, 
+          S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>
 {
     type Item = Packet;
     type Error = PollError<S3>;
 
     fn poll(&mut self) -> Result<Async<Option<Packet>>, PollError<S3>> {
-
         if self.flag {
             self.flag = !self.flag;
 
@@ -64,10 +66,10 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
                 Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
                 Ok(Async::Ready(None)) => {
                     let stream = self.user_request_stream.take().unwrap();
-                    return Err(PollError::StreamClosed(stream))
-                },
+                    return Err(PollError::StreamClosed(stream));
+                }
                 Ok(Async::NotReady) => false,
-                Err(e) => return Err(From::from(e))
+                Err(e) => return Err(From::from(e)),
             };
 
             // end the user request stream if it's done and don't poll it again
@@ -76,12 +78,12 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
                 Ok(Async::Ready(Some(item))) => {
                     self.flag = !self.flag;
                     Ok(Some(item).into())
-                },
+                }
                 // both done. no need to poll again
                 Ok(Async::Ready(None)) if done => Ok(None.into()),
                 // done or not ready but above stream not done. poll again
                 Ok(Async::Ready(None)) | Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => Err(PollError::UserRequest(e))
+                Err(e) => Err(PollError::UserRequest(e)),
             }
         } else {
             self.flag = !self.flag;
@@ -90,7 +92,7 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
                 Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
                 Ok(Async::Ready(None)) => true,
                 Ok(Async::NotReady) => false,
-                Err(e) => return Err(PollError::UserRequest(e))
+                Err(e) => return Err(PollError::UserRequest(e)),
             };
 
             match self.network_stream.poll() {
@@ -100,13 +102,13 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
                         self.flag = !self.flag;
                     }
                     Ok(Some(item).into())
-                },
+                }
                 Ok(Async::Ready(None)) => {
                     let stream = self.user_request_stream.take().unwrap();
-                    return Err(PollError::StreamClosed(stream))
-                },
+                    return Err(PollError::StreamClosed(stream));
+                }
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => return Err(From::from(e))
+                Err(e) => return Err(From::from(e)),
             }
         }
     }
@@ -114,23 +116,23 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
 
 impl<S1, S2, S3> Sink for MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
-          S2: Sink<SinkItem = Packet, SinkError = io::Error>, 
-          S3: Stream<Item = Packet, Error = NetworkError> {
-
+          S2: Sink<SinkItem = Packet, SinkError = io::Error>,
+          S3: Stream<Item = Packet, Error = NetworkError>
+{
     type SinkItem = Packet;
     type SinkError = PollError<S3>;
 
     fn start_send(&mut self, item: S2::SinkItem) -> StartSend<S2::SinkItem, PollError<S3>> {
         self.network_sink.start_send(item).map_err(|e| {
-            let stream = self.user_request_stream.take().unwrap();
-            PollError::Network((NetworkError::Io(e), stream))
-        })
+                                              let stream = self.user_request_stream.take().unwrap();
+                                              PollError::Network((NetworkError::Io(e), stream))
+                                          })
     }
 
     fn poll_complete(&mut self) -> Poll<(), PollError<S3>> {
         self.network_sink.poll_complete().map_err(|e| {
-            let stream = self.user_request_stream.take().unwrap();
-            PollError::Network((NetworkError::Io(e), stream))
-        })
+                                             let stream = self.user_request_stream.take().unwrap();
+                                             PollError::Network((NetworkError::Io(e), stream))
+                                         })
     }
 }

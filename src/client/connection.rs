@@ -1,5 +1,5 @@
-use client::mqttstate::MqttState;
 use client::mqttasync;
+use client::mqttstate::MqttState;
 use client::network::stream::NetworkStream;
 use client::Notification;
 use client::Request;
@@ -115,11 +115,11 @@ impl Connection {
             let network_reply_stream = self.network_reply_stream(network_stream);
             let network_request_stream = self.network_request_stream(previous_request_stream);
 
-            let mqtt_stream = mqttasync::new(network_reply_stream, network_sink, network_request_stream);
+            let mqtt_stream =
+                mqttasync::new(network_reply_stream, network_sink, network_request_stream);
 
             let (mqtt_sink, mqtt_stream) = mqtt_stream.split();
             let mqtt_future = mqtt_stream.forward(mqtt_sink);
-
 
             match rt.block_on(mqtt_future) {
                 Ok(_) => panic!("Shouldn't happen"),
@@ -138,13 +138,13 @@ impl Connection {
                 ReconnectOptions::AfterFirstSuccess(time) => {
                     let time = Duration::from_secs(time);
                     thread::sleep(time);
-                    continue 'reconnection
+                    continue 'reconnection;
                 }
                 ReconnectOptions::Always(time) => {
                     let time = Duration::from_secs(time);
                     thread::sleep(time);
-                    continue 'reconnection
-                },
+                    continue 'reconnection;
+                }
                 ReconnectOptions::Never => break 'reconnection,
             }
         }
@@ -209,7 +209,8 @@ impl Connection {
         network_stream.map_err(|e| NetworkError::TimeOut(e))
                       .and_then(move |packet| {
                           debug!("Incoming packet = {:?}", packet_info(&packet));
-                          let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
+                          let reply = mqtt_state_in.borrow_mut()
+                                                   .handle_incoming_mqtt_packet(packet);
                           future::result(reply)
                       })
                       .and_then(move |(notification, reply)| {
@@ -220,28 +221,33 @@ impl Connection {
                       .or_else(move |e| match e {
                           NetworkError::TimeOut(ref e) if e.is_elapsed() => {
                               let ping = Packet::Pingreq;
-                              match mqtt_state_out.borrow_mut().handle_outgoing_mqtt_packet(ping) {
+                              match mqtt_state_out.borrow_mut()
+                                                  .handle_outgoing_mqtt_packet(ping)
+                              {
                                   Ok(_) => future::ok(Request::Ping),
-                                  Err(e) => future::err(e)
+                                  Err(e) => future::err(e),
                               }
                           }
                           _ => {
                               error!("Stream failed. Error = {:?}", e);
                               future::err(e)
-                          },
+                          }
                       })
                       .filter(|reply| should_forward_packet(reply))
                       .and_then(move |packet| future::ok(packet.into()))
     }
 
-    fn network_request_stream(&mut self, previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>) -> impl Stream<Item = Packet, Error = NetworkError> {
+    fn network_request_stream(&mut self,
+                              previous_request_stream: impl Stream<Item = Packet,
+                                     Error = NetworkError>)
+                              -> impl Stream<Item = Packet, Error = NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
 
         let last_session_stream = stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
-            error!("Last session publish stream error = {:?}", e);
-            NetworkError::Blah
-        });
+                                      error!("Last session publish stream error = {:?}", e);
+                                      NetworkError::Blah
+                                  });
 
         last_session_stream.chain(previous_request_stream)
     }
@@ -266,10 +272,10 @@ impl Connection {
                                                validate_userrequest(userrequest, &mut mqtt_state)
                                            });
         let mqtt_state = self.mqtt_state.clone();
-        userrequest_rx
-            .and_then(move |packet: Packet| {
-                future::result(mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet))
-            })
+        userrequest_rx.and_then(move |packet: Packet| {
+                          future::result(mqtt_state.borrow_mut()
+                                                   .handle_outgoing_mqtt_packet(packet))
+                      })
     }
 }
 
