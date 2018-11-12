@@ -76,6 +76,8 @@ pub enum NetworkError {
     UserReconnect,
     #[fail(display = "User requested for disconnect")]
     UserDisconnect,
+    #[fail(display = "Network stream closed")]
+    NetworkStreamClosed,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }

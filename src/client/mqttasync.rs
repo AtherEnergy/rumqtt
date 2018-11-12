@@ -50,6 +50,46 @@ pub fn new<S1, S2, S3>(network_stream: S1,
                  flag: true }
 }
 
+impl<S1, S2, S3> MqttStream<S1, S2, S3>
+    where S1: Stream<Item = Packet, Error = NetworkError>,
+          S2: Sink<SinkItem = Packet, SinkError = io::Error>,
+          S3: Stream<Item = Packet, Error = NetworkError> {
+
+    fn interleave(&mut self) -> Poll<Option<S1::Item>, NetworkError> {
+        let user_request_stream = self.user_request_stream.as_mut().unwrap();
+        let network_stream = &mut self.network_stream;
+
+        let (a, b) = if self.flag {
+            (user_request_stream as &mut Stream<Item=_, Error=_>,
+             network_stream as &mut Stream<Item=_, Error=_>)
+        } else {
+            (network_stream as &mut Stream<Item=_, Error=_>,
+             user_request_stream as &mut Stream<Item=_, Error=_>)
+        };
+
+        self.flag = !self.flag;
+
+        let a_done = match a.poll()? {
+            Async::Ready(Some(item)) => return Ok(Some(item).into()),
+            Async::Ready(None) => true,
+            Async::NotReady => false,
+        };
+
+        match b.poll()? {
+            Async::Ready(Some(item)) => {
+                // If the other stream isn't finished yet, give them a chance to
+                // go first next time as we pulled something off `b`.
+                if !a_done {
+                    self.flag = !self.flag;
+                }
+                Ok(Some(item).into())
+            }
+            Async::Ready(None) if a_done => Ok(None.into()),
+            Async::Ready(None) | Async::NotReady => Ok(Async::NotReady),
+        }
+    }
+}
+
 impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
@@ -58,57 +98,12 @@ impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
     type Item = Packet;
     type Error = PollError<S3>;
 
-    fn poll(&mut self) -> Result<Async<Option<Packet>>, PollError<S3>> {
-        if self.flag {
-            self.flag = !self.flag;
-
-            let done = match self.network_stream.poll() {
-                Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
-                Ok(Async::Ready(None)) => {
-                    let stream = self.user_request_stream.take().unwrap();
-                    return Err(PollError::StreamClosed(stream));
-                }
-                Ok(Async::NotReady) => false,
-                Err(e) => return Err(From::from(e)),
-            };
-
-            // end the user request stream if it's done and don't poll it again
-            match self.user_request_stream.as_mut().unwrap().poll() {
-                // poll network first next time again if user stream returns a value
-                Ok(Async::Ready(Some(item))) => {
-                    self.flag = !self.flag;
-                    Ok(Some(item).into())
-                }
-                // both done. no need to poll again
-                Ok(Async::Ready(None)) if done => Ok(None.into()),
-                // done or not ready but above stream not done. poll again
-                Ok(Async::Ready(None)) | Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => Err(PollError::UserRequest(e)),
-            }
-        } else {
-            self.flag = !self.flag;
-
-            let done = match self.user_request_stream.as_mut().unwrap().poll() {
-                Ok(Async::Ready(Some(item))) => return Ok(Some(item).into()),
-                Ok(Async::Ready(None)) => true,
-                Ok(Async::NotReady) => false,
-                Err(e) => return Err(PollError::UserRequest(e)),
-            };
-
-            match self.network_stream.poll() {
-                // poll user request first next time again if n/w returns a value
-                Ok(Async::Ready(Some(item))) => {
-                    if !done {
-                        self.flag = !self.flag;
-                    }
-                    Ok(Some(item).into())
-                }
-                Ok(Async::Ready(None)) => {
-                    let stream = self.user_request_stream.take().unwrap();
-                    return Err(PollError::StreamClosed(stream));
-                }
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => return Err(From::from(e)),
+    fn poll(&mut self) -> Poll<Option<S1::Item>, PollError<S3>> {
+        match self.interleave() {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let stream = self.user_request_stream.take().unwrap();
+                Err(PollError::Network((e, stream)))
             }
         }
     }

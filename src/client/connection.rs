@@ -113,7 +113,8 @@ impl Connection {
 
             let (network_sink, network_stream) = framed.split();
             let network_reply_stream = self.network_reply_stream(network_stream);
-            let network_request_stream = self.network_request_stream(previous_request_stream);
+            // let network_request_stream = self.network_request_stream(previous_request_stream);
+            let network_request_stream = previous_request_stream;
 
             let mqtt_stream =
                 mqttasync::new(network_reply_stream, network_sink, network_request_stream);
@@ -206,7 +207,7 @@ impl Connection {
         // TODO: prevent this clone?
         // cloning crossbeam channel sender everytime is a problem according to docs
         let notification_tx = self.notification_tx.clone();
-        network_stream.map_err(|e| NetworkError::TimeOut(e))
+        let network_stream = network_stream.map_err(|e| NetworkError::TimeOut(e))
                       .and_then(move |packet| {
                           debug!("Incoming packet = {:?}", packet_info(&packet));
                           let reply = mqtt_state_in.borrow_mut()
@@ -234,7 +235,9 @@ impl Connection {
                           }
                       })
                       .filter(|reply| should_forward_packet(reply))
-                      .and_then(move |packet| future::ok(packet.into()))
+                      .and_then(move |packet| future::ok(packet.into()));
+
+        network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
 
     fn network_request_stream(&mut self,
