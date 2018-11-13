@@ -19,6 +19,9 @@ use std::time::Duration;
 use tokio::runtime::current_thread;
 use tokio_codec::Framed;
 use tokio_timer::Timeout;
+use client::stream2::chain2::Chain2;
+use client::stream2::StreamExt;
+
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
 //  https://github.com/tokio-rs/tokio-core/issues/182
@@ -66,7 +69,8 @@ impl Connection {
                       userrequest_rx: mpsc::Receiver<Request>) {
         let mut connection_count = 1;
         let reconnect_option = self.mqttoptions.reconnect;
-        let mut previous_request_stream = self.user_request_stream(userrequest_rx);
+        let previous_request_stream = self.user_request_stream(userrequest_rx);
+        let mut network_request_stream= self.network_request_stream(previous_request_stream);
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
@@ -114,7 +118,7 @@ impl Connection {
             let (network_sink, network_stream) = framed.split();
             let network_reply_stream = self.network_reply_stream(network_stream);
             // let network_request_stream = self.network_request_stream(previous_request_stream);
-            let network_request_stream = previous_request_stream;
+            // let network_request_stream = previous_request_stream;
 
             let mqtt_stream =
                 mqttasync::new(network_reply_stream, network_sink, network_request_stream);
@@ -126,12 +130,12 @@ impl Connection {
                 Ok(_) => panic!("Shouldn't happen"),
                 Err(PollError::Network((e, s))) => {
                     error!("Event loop disconnect. Error = {:?}", e);
-                    previous_request_stream = s;
+                    network_request_stream = self.network_request_stream();
                 }
                 Err(PollError::UserRequest(_)) => panic!("User req error"),
                 Err(PollError::StreamClosed(s)) => {
                     error!("Stream closed error");
-                    previous_request_stream = s;
+                    network_request_stream = s;
                 }
             }
 
@@ -241,9 +245,10 @@ impl Connection {
     }
 
     fn network_request_stream(&mut self,
-                              previous_request_stream: impl Stream<Item = Packet,
-                                     Error = NetworkError>)
-                              -> impl Stream<Item = Packet, Error = NetworkError> {
+                              previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>)
+        -> Chain2<impl Stream<Item = Packet, Error = NetworkError>, impl Stream<Item = Packet, Error = NetworkError>>
+
+    {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
 
@@ -252,8 +257,22 @@ impl Connection {
                                       NetworkError::Blah
                                   });
 
-        last_session_stream.chain(previous_request_stream)
+        last_session_stream.chain2(previous_request_stream)
     }
+
+//    fn network_request_stream2<S>(&mut self, previous_request_stream: S) -> Chain2<S, S>
+//        where S: Stream<Item = Packet, Error = NetworkError>
+//    {
+//        let mqtt_state = self.mqtt_state.clone();
+//        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
+//
+//        let last_session_stream = stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
+//            error!("Last session publish stream error = {:?}", e);
+//            NetworkError::Blah
+//        });
+//
+//        last_session_stream.chain2(previous_request_stream)
+//    }
 
     /// Handles all incoming user and session requests and creates a stream of packets to send
     /// on network

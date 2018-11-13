@@ -26,6 +26,7 @@ extern crate log;
 #[macro_use]
 extern crate failure;
 extern crate pretty_env_logger;
+extern crate core;
 
 pub mod client;
 pub mod codec;
