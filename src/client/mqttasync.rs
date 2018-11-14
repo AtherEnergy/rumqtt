@@ -3,12 +3,12 @@ use futures::stream::Stream;
 use futures::Poll;
 use futures::StartSend;
 
+use client::prepend::prepend::Prepend;
 use error::NetworkError;
 use error::PollError;
 use futures::Async;
 use mqtt3::Packet;
 use std::io;
-use client::stream2::chain2::Chain2;
 
 /// Customized stream/sink to cater rumqtt needs.
 /// 1
@@ -34,13 +34,14 @@ use client::stream2::chain2::Chain2;
 pub struct MqttStream<S1, S2, S3, S4> {
     network_stream: S1,
     network_sink: S2,
-    request_stream: Option<Chain2<S3, S4>>,
+    request_stream: Option<Prepend<S3, S4>>,
     flag: bool,
 }
 
 pub fn new<S1, S2, S3, S4>(network_stream: S1,
-                       network_sink: S2,
-                       request_stream: Chain2<S3, S4>) -> MqttStream<S1, S2, S3, S4>
+                           network_sink: S2,
+                           request_stream: Prepend<S3, S4>)
+                           -> MqttStream<S1, S2, S3, S4>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>,
@@ -56,18 +57,18 @@ impl<S1, S2, S3, S4> MqttStream<S1, S2, S3, S4>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>,
-          S4: Stream<Item = Packet, Error = NetworkError> {
-
+          S4: Stream<Item = Packet, Error = NetworkError>
+{
     fn interleave(&mut self) -> Poll<Option<S1::Item>, NetworkError> {
         let user_request_stream = self.request_stream.as_mut().unwrap();
         let network_stream = &mut self.network_stream;
 
         let (a, b) = if self.flag {
-            (user_request_stream as &mut Stream<Item=_, Error=_>,
-             network_stream as &mut Stream<Item=_, Error=_>)
+            (user_request_stream as &mut Stream<Item = _, Error = _>,
+             network_stream as &mut Stream<Item = _, Error = _>)
         } else {
-            (network_stream as &mut Stream<Item=_, Error=_>,
-             user_request_stream as &mut Stream<Item=_, Error=_>)
+            (network_stream as &mut Stream<Item = _, Error = _>,
+             user_request_stream as &mut Stream<Item = _, Error = _>)
         };
 
         self.flag = !self.flag;

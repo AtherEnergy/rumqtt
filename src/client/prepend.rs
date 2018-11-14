@@ -1,21 +1,21 @@
 use futures::Stream;
 
 pub trait StreamExt: Stream {
-    fn chain2<S>(self, stream: S) -> chain2::Chain2<Self, S>
+    fn chain2<S>(self, stream: S) -> prepend::Prepend<Self, S>
         where S: Stream<Item = Self::Item, Error = Self::Error>,
-              Self: Sized,
+              Self: Sized
     {
-        chain2::new(self, stream)
+        prepend::new(self, stream)
     }
 }
 
 impl<T: ?Sized> StreamExt for T where T: Stream {}
 
-pub mod chain2 {
-    use futures::Stream;
-    use futures::Poll;
-    use futures::Async;
+pub mod prepend {
     use core::mem;
+    use futures::Async;
+    use futures::Poll;
+    use futures::Stream;
 
     /// State of chain stream.
     #[derive(Debug)]
@@ -34,28 +34,30 @@ pub mod chain2 {
     /// from second stream.
     #[derive(Debug)]
     #[must_use = "streams do nothing unless polled"]
-    pub struct Chain2<S1, S2> {
-        state: State<S1, S2>
+    pub struct Prepend<S1, S2> {
+        state: State<S1, S2>,
     }
 
-    pub fn new<S1, S2>(s1: S1, s2: S2) -> Chain2<S1, S2>
-        where S1: Stream, S2: Stream<Item=S1::Item, Error=S1::Error>,
+    pub fn new<S1, S2>(s1: S1, s2: S2) -> Prepend<S1, S2>
+        where S1: Stream,
+              S2: Stream<Item = S1::Item, Error = S1::Error>
     {
-        Chain2 { state: State::First(s1, s2) }
+        Prepend { state: State::First(s1, s2) }
     }
 
-    impl<S1, S2> Chain2<S1, S2> {
-        pub fn update_first(&mut self, s: S) -> Self {
-            match self.state() {
-                State::First(s1, s2) => self::new(s, s2),
-                State::Second(s2) => self::new(s, s2),
-                State::Temp => unreachable!()
-            }
-        }
+    impl<S1, S2> Prepend<S1, S2> {
+//        pub fn update_first(&mut self, s: S) -> Self {
+//            match self.state() {
+//                State::First(s1, s2) => self::new(s, s2),
+//                State::Second(s2) => self::new(s, s2),
+//                State::Temp => unreachable!(),
+//            }
+//        }
     }
 
-    impl<S1, S2> Stream for Chain2<S1, S2>
-        where S1: Stream, S2: Stream<Item=S1::Item, Error=S1::Error>,
+    impl<S1, S2> Stream for Prepend<S1, S2>
+        where S1: Stream,
+              S2: Stream<Item = S1::Item, Error = S1::Error>
     {
         type Item = S1::Item;
         type Error = S1::Error;

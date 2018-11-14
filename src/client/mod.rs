@@ -13,7 +13,7 @@ pub mod connection;
 pub mod mqttasync;
 pub mod mqttstate;
 pub mod network;
-pub mod stream2;
+pub mod prepend;
 
 #[derive(Debug)]
 pub enum Notification {

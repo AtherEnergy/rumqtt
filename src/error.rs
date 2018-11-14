@@ -1,3 +1,4 @@
+use client::prepend::prepend::Prepend;
 use client::Request;
 use crossbeam_channel::RecvError;
 use futures::sync::mpsc::SendError;
@@ -7,7 +8,6 @@ use jsonwebtoken;
 use mqtt3::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
-use client::stream2::chain2::Chain2;
 
 #[derive(Debug, Fail, From)]
 pub enum ClientError {
@@ -86,9 +86,9 @@ pub enum NetworkError {
 #[derive(From)]
 pub enum PollError<S1, S2>
     where S1: Stream<Item = Packet, Error = NetworkError>,
-          S2:Stream<Item = Packet, Error = NetworkError>
+          S2: Stream<Item = Packet, Error = NetworkError>
 {
-    Network((NetworkError, Chain2<S1, S2>)),
-    StreamClosed(Chain2<S1, S2>),
+    Network((NetworkError, Prepend<S1, S2>)),
+    StreamClosed(Prepend<S1, S2>),
     UserRequest(NetworkError),
 }

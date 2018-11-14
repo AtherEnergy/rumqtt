@@ -25,8 +25,8 @@ extern crate derive_more;
 extern crate log;
 #[macro_use]
 extern crate failure;
-extern crate pretty_env_logger;
 extern crate core;
+extern crate pretty_env_logger;
 
 pub mod client;
 pub mod codec;

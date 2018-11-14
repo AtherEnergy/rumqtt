@@ -1,6 +1,8 @@
 use client::mqttasync;
 use client::mqttstate::MqttState;
 use client::network::stream::NetworkStream;
+use client::prepend::prepend::Prepend;
+use client::prepend::StreamExt;
 use client::Notification;
 use client::Request;
 use codec::MqttCodec;
@@ -19,8 +21,6 @@ use std::time::Duration;
 use tokio::runtime::current_thread;
 use tokio_codec::Framed;
 use tokio_timer::Timeout;
-use client::stream2::chain2::Chain2;
-use client::stream2::StreamExt;
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -70,7 +70,7 @@ impl Connection {
         let mut connection_count = 1;
         let reconnect_option = self.mqttoptions.reconnect;
         let previous_request_stream = self.user_request_stream(userrequest_rx);
-        let mut network_request_stream= self.network_request_stream(previous_request_stream);
+        let mut network_request_stream = self.network_request_stream(previous_request_stream);
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
@@ -212,43 +212,44 @@ impl Connection {
         // cloning crossbeam channel sender everytime is a problem according to docs
         let notification_tx = self.notification_tx.clone();
         let network_stream = network_stream.map_err(|e| NetworkError::TimeOut(e))
-                      .and_then(move |packet| {
-                          debug!("Incoming packet = {:?}", packet_info(&packet));
-                          let reply = mqtt_state_in.borrow_mut()
+                                           .and_then(move |packet| {
+                                               debug!("Incoming packet = {:?}",
+                                                      packet_info(&packet));
+                                               let reply = mqtt_state_in.borrow_mut()
                                                    .handle_incoming_mqtt_packet(packet);
-                          future::result(reply)
-                      })
-                      .and_then(move |(notification, reply)| {
-                          let notification_tx = notification_tx.clone();
-                          handle_notification(notification, &notification_tx);
-                          future::ok(reply)
-                      })
-                      .or_else(move |e| match e {
-                          NetworkError::TimeOut(ref e) if e.is_elapsed() => {
-                              let ping = Packet::Pingreq;
-                              match mqtt_state_out.borrow_mut()
+                                               future::result(reply)
+                                           })
+                                           .and_then(move |(notification, reply)| {
+                                               let notification_tx = notification_tx.clone();
+                                               handle_notification(notification, &notification_tx);
+                                               future::ok(reply)
+                                           })
+                                           .or_else(move |e| match e {
+                                               NetworkError::TimeOut(ref e) if e.is_elapsed() => {
+                                                   let ping = Packet::Pingreq;
+                                                   match mqtt_state_out.borrow_mut()
                                                   .handle_outgoing_mqtt_packet(ping)
                               {
                                   Ok(_) => future::ok(Request::Ping),
                                   Err(e) => future::err(e),
                               }
-                          }
-                          _ => {
-                              error!("Stream failed. Error = {:?}", e);
-                              future::err(e)
-                          }
-                      })
-                      .filter(|reply| should_forward_packet(reply))
-                      .and_then(move |packet| future::ok(packet.into()));
+                                               }
+                                               _ => {
+                                                   error!("Stream failed. Error = {:?}", e);
+                                                   future::err(e)
+                                               }
+                                           })
+                                           .filter(|reply| should_forward_packet(reply))
+                                           .and_then(move |packet| future::ok(packet.into()));
 
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
 
-    fn network_request_stream(&mut self,
-                              previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>)
-        -> Chain2<impl Stream<Item = Packet, Error = NetworkError>, impl Stream<Item = Packet, Error = NetworkError>>
-
-    {
+    fn network_request_stream(
+        &mut self,
+        previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>)
+        -> Prepend<impl Stream<Item = Packet, Error = NetworkError>,
+                  impl Stream<Item = Packet, Error = NetworkError>> {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
 
@@ -260,19 +261,19 @@ impl Connection {
         last_session_stream.chain2(previous_request_stream)
     }
 
-//    fn network_request_stream2<S>(&mut self, previous_request_stream: S) -> Chain2<S, S>
-//        where S: Stream<Item = Packet, Error = NetworkError>
-//    {
-//        let mqtt_state = self.mqtt_state.clone();
-//        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
-//
-//        let last_session_stream = stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
-//            error!("Last session publish stream error = {:?}", e);
-//            NetworkError::Blah
-//        });
-//
-//        last_session_stream.chain2(previous_request_stream)
-//    }
+    //    fn network_request_stream2<S>(&mut self, previous_request_stream: S) -> Chain2<S, S>
+    //        where S: Stream<Item = Packet, Error = NetworkError>
+    //    {
+    //        let mqtt_state = self.mqtt_state.clone();
+    //        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
+    //
+    //        let last_session_stream = stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
+    //            error!("Last session publish stream error = {:?}", e);
+    //            NetworkError::Blah
+    //        });
+    //
+    //        last_session_stream.chain2(previous_request_stream)
+    //    }
 
     /// Handles all incoming user and session requests and creates a stream of packets to send
     /// on network
