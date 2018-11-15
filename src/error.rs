@@ -1,7 +1,8 @@
-use futures::Stream;
+use client::prepend::prepend::Prepend;
 use client::Request;
 use crossbeam_channel::RecvError;
 use futures::sync::mpsc::SendError;
+use futures::Stream;
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt3::Packet;
@@ -76,13 +77,17 @@ pub enum NetworkError {
     UserReconnect,
     #[fail(display = "User requested for disconnect")]
     UserDisconnect,
+    #[fail(display = "Network stream closed")]
+    NetworkStreamClosed,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }
 
 #[derive(From)]
-pub enum PollError<S> where S: Stream<Item = Packet, Error = NetworkError>  {
-    Network((NetworkError, S)),
-    StreamClosed(S),
-    UserRequest(NetworkError)
+pub enum PollError<S>
+    where S: Stream<Item = Packet, Error = NetworkError>
+{
+    Network((NetworkError, Prepend<S>)),
+    StreamClosed(Prepend<S>),
+    UserRequest(NetworkError),
 }

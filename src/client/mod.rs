@@ -10,9 +10,10 @@ use std::sync::Arc;
 use MqttOptions;
 
 pub mod connection;
-pub mod mqttstate;
 pub mod mqttasync;
+pub mod mqttstate;
 pub mod network;
+pub mod prepend;
 
 #[derive(Debug)]
 pub enum Notification {
