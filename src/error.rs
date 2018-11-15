@@ -1,3 +1,4 @@
+use client::prepend::prepend::Prepend;
 use client::Request;
 use crossbeam_channel::RecvError;
 use futures::sync::mpsc::SendError;
@@ -86,7 +87,7 @@ pub enum NetworkError {
 pub enum PollError<S>
     where S: Stream<Item = Packet, Error = NetworkError>
 {
-    Network((NetworkError, S)),
-    StreamClosed(S),
+    Network((NetworkError, Prepend<S>)),
+    StreamClosed(Prepend<S>),
     UserRequest(NetworkError),
 }
