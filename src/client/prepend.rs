@@ -12,9 +12,7 @@ pub trait StreamExt: Stream {
 impl<T: ?Sized> StreamExt for T where T: Stream {}
 
 pub mod prepend {
-    use futures::Async;
-    use futures::Poll;
-    use futures::Stream;
+    use futures::{Async, Poll, Stream};
     use std::collections::VecDeque;
 
     /// An adapter for chaining the output of two streams.

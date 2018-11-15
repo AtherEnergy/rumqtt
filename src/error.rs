@@ -1,8 +1,6 @@
-use client::prepend::prepend::Prepend;
-use client::Request;
+use client::{prepend::prepend::Prepend, Request};
 use crossbeam_channel::RecvError;
-use futures::sync::mpsc::SendError;
-use futures::Stream;
+use futures::{sync::mpsc::SendError, Stream};
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt3::Packet;

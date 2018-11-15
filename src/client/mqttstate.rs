@@ -1,6 +1,8 @@
-use std::collections::VecDeque;
-use std::result::Result;
-use std::time::{Duration, Instant};
+use std::{
+    collections::VecDeque,
+    result::Result,
+    time::{Duration, Instant},
+};
 
 use client::{Notification, Request};
 use error::{ConnectError, NetworkError};
@@ -327,13 +329,10 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
+    use std::{sync::Arc, thread, time::Duration};
 
     use super::{MqttConnectionStatus, MqttState};
-    use client::Notification;
-    use client::Request;
+    use client::{Notification, Request};
     use error::NetworkError;
     use mqtt3::*;
     use mqttoptions::MqttOptions;

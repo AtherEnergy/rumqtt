@@ -1,2 +1,5 @@
 indent_style = "Visual"
 max_width = 130
+merge_imports = true
+imports_layout = "HorizontalVertical"
+

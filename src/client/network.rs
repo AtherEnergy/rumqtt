@@ -10,15 +10,21 @@ pub mod stream {
     use client::network::lookup_ipv4;
     use codec::MqttCodec;
     use error::ConnectError;
-    use futures::future;
-    use futures::{future::Either, Future};
-    use std::io::BufReader;
-    use std::io::Cursor;
-    use std::sync::Arc;
+    use futures::{
+        future::{self, Either},
+        Future,
+    };
+    use std::{
+        io::{BufReader, Cursor},
+        sync::Arc,
+    };
     use tokio::net::TcpStream;
     use tokio_codec::{Decoder, Framed};
-    use tokio_rustls::{rustls::internal::pemfile, rustls::ClientConfig, TlsConnector};
-    use tokio_rustls::{rustls::ClientSession, TlsStream};
+    use tokio_rustls::{
+        rustls::{internal::pemfile, ClientConfig, ClientSession},
+        TlsConnector,
+        TlsStream,
+    };
     use webpki::DNSNameRef;
 
     pub enum NetworkStream {

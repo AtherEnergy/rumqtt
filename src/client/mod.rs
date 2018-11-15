@@ -1,11 +1,7 @@
 use crossbeam_channel;
-use error::ClientError;
-use error::ConnectError;
-use futures::sync::mpsc;
-use futures::{Future, Sink};
-use mqtt3::Subscribe;
-use mqtt3::SubscribeTopic;
-use mqtt3::{PacketIdentifier, Publish, QoS};
+use error::{ClientError, ConnectError};
+use futures::{sync::mpsc, Future, Sink};
+use mqtt3::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic};
 use std::sync::Arc;
 use MqttOptions;
 
@@ -41,17 +37,22 @@ pub enum Request {
     None,
 }
 
+pub struct UserHandle {
+    request_tx: mpsc::Sender<Request>,
+    notification_rx: crossbeam_channel::Receiver<Notification>,
+}
+
 pub struct MqttClient {
-    userrequest_tx: mpsc::Sender<Request>,
+    request_tx: mpsc::Sender<Request>,
     max_packet_size: usize,
 }
 
 impl MqttClient {
     pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
-        let (userrequest_tx, notification_rx) = connection::Connection::run(opts)?;
+        let UserHandle { request_tx, notification_rx } = connection::Connection::run(opts)?;
 
         //TODO: Remove max packet size hardcode
-        let client = MqttClient { userrequest_tx,
+        let client = MqttClient { request_tx,
                                   max_packet_size: 1000 };
 
         Ok((client, notification_rx))
@@ -71,7 +72,7 @@ impl MqttClient {
                                 pid: None,
                                 payload: Arc::new(payload) };
 
-        let tx = &mut self.userrequest_tx;
+        let tx = &mut self.request_tx;
         tx.send(Request::Publish(publish)).wait()?;
         Ok(())
     }
@@ -82,13 +83,13 @@ impl MqttClient {
         let subscribe = Subscribe { pid: PacketIdentifier::zero(),
                                     topics: vec![topic] };
 
-        let tx = &mut self.userrequest_tx;
+        let tx = &mut self.request_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;
         Ok(())
     }
 
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        let tx = &mut self.userrequest_tx;
+        let tx = &mut self.request_tx;
         tx.send(Request::Disconnect).wait()?;
         Ok(())
     }
