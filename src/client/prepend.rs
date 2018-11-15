@@ -1,83 +1,59 @@
 use futures::Stream;
+use std::collections::VecDeque;
 
 pub trait StreamExt: Stream {
-    fn chain2<S>(self, stream: S) -> prepend::Prepend<Self, S>
-        where S: Stream<Item = Self::Item, Error = Self::Error>,
-              Self: Sized
+    fn prepend(self, first: VecDeque<Self::Item>) -> prepend::Prepend<Self>
+        where Self: Sized
     {
-        prepend::new(self, stream)
+        prepend::new(self, first)
     }
 }
 
 impl<T: ?Sized> StreamExt for T where T: Stream {}
 
 pub mod prepend {
-    use core::mem;
     use futures::Async;
     use futures::Poll;
     use futures::Stream;
-
-    /// State of chain stream.
-    #[derive(Debug)]
-    enum State<S1, S2> {
-        /// Emitting elements of first stream
-        First(S1, S2),
-        /// Emitting elements of second stream
-        Second(S2),
-        /// Temporary value to replace first with second
-        Temp,
-    }
+    use std::collections::VecDeque;
 
     /// An adapter for chaining the output of two streams.
     ///
     /// The resulting stream produces items from first stream and then
     /// from second stream.
-    #[derive(Debug)]
     #[must_use = "streams do nothing unless polled"]
-    pub struct Prepend<S1, S2> {
-        state: State<S1, S2>,
+    pub struct Prepend<S> where S: Stream {
+        stream: S,
+        session: VecDeque<<S as Stream>::Item>,
     }
 
-    pub fn new<S1, S2>(s1: S1, s2: S2) -> Prepend<S1, S2>
-        where S1: Stream,
-              S2: Stream<Item = S1::Item, Error = S1::Error>
+    pub fn new<S>(stream: S, session: VecDeque<<S as Stream>::Item>) -> Prepend<S>
+        where
+            S: Stream,
     {
-        Prepend { state: State::First(s1, s2) }
+        Prepend { stream, session }
     }
 
-    impl<S1, S2> Prepend<S1, S2> {
-//        pub fn update_first(&mut self, s: S) -> Self {
-//            match self.state() {
-//                State::First(s1, s2) => self::new(s, s2),
-//                State::Second(s2) => self::new(s, s2),
-//                State::Temp => unreachable!(),
-//            }
-//        }
+    impl<S> Prepend<S> where S: futures::Stream {
+        pub fn merge_session(&mut self, session: VecDeque<<S as Stream>::Item>) {
+            self.session.extend(session)
+        }
     }
 
-    impl<S1, S2> Stream for Prepend<S1, S2>
-        where S1: Stream,
-              S2: Stream<Item = S1::Item, Error = S1::Error>
+    impl<S> Stream for Prepend<S>
+        where
+            S: Stream,
     {
-        type Item = S1::Item;
-        type Error = S1::Error;
+        type Item = <S as Stream>::Item;
+        type Error = <S as Stream>::Error;
 
         fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-            loop {
-                match self.state {
-                    State::First(ref mut s1, ref _s2) => match s1.poll() {
-                        Ok(Async::Ready(None)) => (), // roll
-                        x => return x,
-                    },
-                    State::Second(ref mut s2) => return s2.poll(),
-                    State::Temp => unreachable!(),
-                }
+            match self.session.pop_front() {
+                Some(v) => return Ok(Async::Ready(Some(v))),
+                None => (),
+            };
 
-                self.state = match mem::replace(&mut self.state, State::Temp) {
-                    State::First(_s1, s2) => State::Second(s2),
-                    _ => unreachable!(),
-                };
-            }
+            return self.stream.poll();
         }
     }
 }

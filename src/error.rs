@@ -84,11 +84,10 @@ pub enum NetworkError {
 }
 
 #[derive(From)]
-pub enum PollError<S1, S2>
-    where S1: Stream<Item = Packet, Error = NetworkError>,
-          S2: Stream<Item = Packet, Error = NetworkError>
+pub enum PollError<S>
+    where S: Stream<Item = Packet, Error = NetworkError>
 {
-    Network((NetworkError, Prepend<S1, S2>)),
-    StreamClosed(Prepend<S1, S2>),
+    Network((NetworkError, Prepend<S>)),
+    StreamClosed(Prepend<S>),
     UserRequest(NetworkError),
 }

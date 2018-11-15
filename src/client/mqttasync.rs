@@ -31,21 +31,20 @@ use std::io;
 
 //TODO: Remove Option and use Chain stream directly
 #[must_use = "streams do nothing unless polled"]
-pub struct MqttStream<S1, S2, S3, S4> {
+pub struct MqttStream<S1, S2, S3> where S3: Stream{
     network_stream: S1,
     network_sink: S2,
-    request_stream: Option<Prepend<S3, S4>>,
+    request_stream: Option<Prepend<S3>>,
     flag: bool,
 }
 
-pub fn new<S1, S2, S3, S4>(network_stream: S1,
+pub fn new<S1, S2, S3>(network_stream: S1,
                            network_sink: S2,
-                           request_stream: Prepend<S3, S4>)
-                           -> MqttStream<S1, S2, S3, S4>
+                           request_stream: Prepend<S3>)
+                           -> MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
-          S3: Stream<Item = Packet, Error = NetworkError>,
-          S4: Stream<Item = Packet, Error = NetworkError>
+          S3: Stream<Item = Packet, Error = NetworkError>
 {
     MqttStream { network_stream,
                  network_sink,
@@ -53,11 +52,10 @@ pub fn new<S1, S2, S3, S4>(network_stream: S1,
                  flag: true }
 }
 
-impl<S1, S2, S3, S4> MqttStream<S1, S2, S3, S4>
+impl<S1, S2, S3> MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
-          S3: Stream<Item = Packet, Error = NetworkError>,
-          S4: Stream<Item = Packet, Error = NetworkError>
+          S3: Stream<Item = Packet, Error = NetworkError>
 {
     fn interleave(&mut self) -> Poll<Option<S1::Item>, NetworkError> {
         let user_request_stream = self.request_stream.as_mut().unwrap();
@@ -94,16 +92,15 @@ impl<S1, S2, S3, S4> MqttStream<S1, S2, S3, S4>
     }
 }
 
-impl<S1, S2, S3, S4> Stream for MqttStream<S1, S2, S3, S4>
+impl<S1, S2, S3> Stream for MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
-          S3: Stream<Item = Packet, Error = NetworkError>,
-          S4: Stream<Item = Packet, Error = NetworkError>
+          S3: Stream<Item = Packet, Error = NetworkError>
 {
     type Item = Packet;
-    type Error = PollError<S3, S4>;
+    type Error = PollError<S3>;
 
-    fn poll(&mut self) -> Poll<Option<S1::Item>, PollError<S3, S4>> {
+    fn poll(&mut self) -> Poll<Option<S1::Item>, PollError<S3>> {
         match self.interleave() {
             Ok(v) => Ok(v),
             Err(e) => {
@@ -114,23 +111,22 @@ impl<S1, S2, S3, S4> Stream for MqttStream<S1, S2, S3, S4>
     }
 }
 
-impl<S1, S2, S3, S4> Sink for MqttStream<S1, S2, S3, S4>
+impl<S1, S2, S3> Sink for MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
-          S3: Stream<Item = Packet, Error = NetworkError>,
-          S4: Stream<Item = Packet, Error = NetworkError>
+          S3: Stream<Item = Packet, Error = NetworkError>
 {
     type SinkItem = Packet;
-    type SinkError = PollError<S3, S4>;
+    type SinkError = PollError<S3>;
 
-    fn start_send(&mut self, item: S2::SinkItem) -> StartSend<S2::SinkItem, PollError<S3, S4>> {
+    fn start_send(&mut self, item: S2::SinkItem) -> StartSend<S2::SinkItem, PollError<S3>> {
         self.network_sink.start_send(item).map_err(|e| {
                                               let stream = self.request_stream.take().unwrap();
                                               PollError::Network((NetworkError::Io(e), stream))
                                           })
     }
 
-    fn poll_complete(&mut self) -> Poll<(), PollError<S3, S4>> {
+    fn poll_complete(&mut self) -> Poll<(), PollError<S3>> {
         self.network_sink.poll_complete().map_err(|e| {
                                              let stream = self.request_stream.take().unwrap();
                                              PollError::Network((NetworkError::Io(e), stream))

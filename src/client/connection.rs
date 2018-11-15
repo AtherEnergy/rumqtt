@@ -71,6 +71,7 @@ impl Connection {
         let reconnect_option = self.mqttoptions.reconnect;
         let previous_request_stream = self.user_request_stream(userrequest_rx);
         let mut network_request_stream = self.network_request_stream(previous_request_stream);
+        let mut network_request_stream = self.merge_network_request_stream(network_request_stream);
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
@@ -130,11 +131,13 @@ impl Connection {
                 Ok(_) => panic!("Shouldn't happen"),
                 Err(PollError::Network((e, s))) => {
                     error!("Event loop disconnect. Error = {:?}", e);
-                    network_request_stream = self.network_request_stream();
+                    let s = self.merge_network_request_stream(s);
+                    network_request_stream = s;
                 }
                 Err(PollError::UserRequest(_)) => panic!("User req error"),
                 Err(PollError::StreamClosed(s)) => {
                     error!("Stream closed error");
+                    let s = self.merge_network_request_stream(s);
                     network_request_stream = s;
                 }
             }
@@ -245,20 +248,21 @@ impl Connection {
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
 
-    fn network_request_stream(
-        &mut self,
-        previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>)
-        -> Prepend<impl Stream<Item = Packet, Error = NetworkError>,
-                  impl Stream<Item = Packet, Error = NetworkError>> {
+    fn network_request_stream(&mut self, previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>)
+        -> Prepend<impl Stream<Item = Packet, Error = NetworkError>> {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
+        previous_request_stream.prepend(last_session_publishes)
+    }
 
-        let last_session_stream = stream::iter_ok::<_, ()>(last_session_publishes).map_err(|e| {
-                                      error!("Last session publish stream error = {:?}", e);
-                                      NetworkError::Blah
-                                  });
+    fn merge_network_request_stream(&mut self,
+                                    mut previous_request_stream: Prepend<impl Stream<Item = Packet, Error = NetworkError>>)
+        -> Prepend<impl Stream<Item = Packet, Error = NetworkError>> {
+        let mqtt_state = self.mqtt_state.clone();
+        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
+        previous_request_stream.merge_session(last_session_publishes);
+        previous_request_stream
 
-        last_session_stream.chain2(previous_request_stream)
     }
 
     //    fn network_request_stream2<S>(&mut self, previous_request_stream: S) -> Chain2<S, S>
