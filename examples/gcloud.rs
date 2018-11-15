@@ -31,17 +31,14 @@ fn main() {
                     + &config.id;
 
     let security_options =
-        SecurityOptions::GcloudIot((config.project,
-                                    include_bytes!("gcloudfiles/rsa_private.der").to_vec(),
-                                    60));
+        SecurityOptions::GcloudIot((config.project, include_bytes!("gcloudfiles/rsa_private.der").to_vec(), 60));
 
     let ca = include_bytes!("gcloudfiles/roots.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);
 
-    let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
-        .set_keep_alive(10)
-        .set_connection_method(connection_method)
-        .set_security_opts(security_options);
+    let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883).set_keep_alive(10)
+                                                                               .set_connection_method(connection_method)
+                                                                               .set_security_opts(security_options);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
@@ -50,8 +47,7 @@ fn main() {
         for i in 0..100 {
             let payload = format!("publish {}", i);
             thread::sleep_ms(1000);
-            mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload)
-                       .unwrap();
+            mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload).unwrap();
         }
     });
 

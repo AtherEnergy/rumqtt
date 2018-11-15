@@ -161,9 +161,7 @@ impl MqttOptions {
 
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
         let (username, password) = match self.security.clone() {
-            SecurityOptions::UsernamePassword((username, password)) => {
-                (Some(username), Some(password))
-            }
+            SecurityOptions::UsernamePassword((username, password)) => (Some(username), Some(password)),
             #[cfg(feature = "jwt")]
             SecurityOptions::GcloudIot((projectname, key, expiry)) => {
                 let username = Some("unused".to_owned());
@@ -194,10 +192,7 @@ struct Claims {
 
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
-pub fn gen_iotcore_password(project: String,
-                            key: Vec<u8>,
-                            expiry: i64)
-                            -> Result<String, ConnectError> {
+pub fn gen_iotcore_password(project: String, key: Vec<u8>, expiry: i64) -> Result<String, ConnectError> {
     use chrono::{self, Utc};
     use jsonwebtoken::{encode, Algorithm, Header};
 
@@ -208,9 +203,7 @@ pub fn gen_iotcore_password(project: String,
                   .expect("Unable to create expiry")
                   .timestamp();
 
-    let claims = Claims { iat,
-                          exp,
-                          aud: project };
+    let claims = Claims { iat, exp, aud: project };
 
     Ok(encode(&jwt_header, &claims, &key)?)
 }
@@ -222,16 +215,14 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883)
-            .set_reconnect_opts(ReconnectOptions::Always(10))
-            .set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_reconnect_opts(ReconnectOptions::Always(10))
+                                                                         .set_clean_session(true);
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883)
-            .set_reconnect_opts(ReconnectOptions::Always(10))
-            .set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_reconnect_opts(ReconnectOptions::Always(10))
+                                                                .set_clean_session(true);
     }
 }

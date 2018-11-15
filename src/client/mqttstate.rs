@@ -4,9 +4,7 @@ use std::time::{Duration, Instant};
 
 use client::{Notification, Request};
 use error::{ConnectError, NetworkError};
-use mqtt3::{
-    Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe,
-};
+use mqtt3::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
 use mqttoptions::MqttOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,9 +76,7 @@ impl MqttState {
     //
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self,
-                                       packet: Packet)
-                                       -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Request), NetworkError> {
         self.update_last_in_control_time();
 
         match packet {
@@ -154,9 +150,7 @@ impl MqttState {
         Ok(publish)
     }
 
-    pub fn handle_incoming_puback(&mut self,
-                                  pkid: PacketIdentifier)
-                                  -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -169,9 +163,7 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_pubrec(&mut self,
-                                  pkid: PacketIdentifier)
-                                  -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -190,9 +182,7 @@ impl MqttState {
 
     // return a tuple. tuple.0 is supposed to be send to user through 'notify_tx' while tuple.1
     // should be sent back on network as ack
-    pub fn handle_incoming_publish(&mut self,
-                                   publish: Publish)
-                                   -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Notification, Request), NetworkError> {
         let qos = publish.qos;
 
         match qos {
@@ -214,9 +204,7 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_pubrel(&mut self,
-                                  pkid: PacketIdentifier)
-                                  -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_pubrel(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.incoming_pub.iter().position(|x| *x == pkid) {
             Some(index) => {
                 let _pkid = self.incoming_pub.remove(index);
@@ -231,9 +219,7 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_pubcomp(&mut self,
-                                   pkid: PacketIdentifier)
-                                   -> Result<(Notification, Request), NetworkError> {
+    pub fn handle_incoming_pubcomp(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_rel.iter().position(|x| *x == pkid) {
             Some(index) => {
                 self.outgoing_rel.remove(index).expect("Wrong index");
@@ -287,8 +273,7 @@ impl MqttState {
             self.await_pingresp = true;
             Ok(())
         } else {
-            error!("State = {:?}. Shouldn't ping in this state",
-                   self.connection_status);
+            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
             Err(NetworkError::InvalidState)
         }
     }
@@ -298,9 +283,7 @@ impl MqttState {
         Ok((Notification::None, Request::None))
     }
 
-    pub fn handle_outgoing_subscribe(&mut self,
-                                     mut subscription: Subscribe)
-                                     -> Result<Subscribe, NetworkError> {
+    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
@@ -308,8 +291,7 @@ impl MqttState {
 
             Ok(subscription)
         } else {
-            error!("State = {:?}. Shouldn't subscribe in this state",
-                   self.connection_status);
+            error!("State = {:?}. Shouldn't subscribe in this state", self.connection_status);
             Err(NetworkError::InvalidState)
         }
     }
@@ -595,8 +577,7 @@ mod test {
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish));
-        mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1)))
-            .unwrap();
+        mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
         thread::sleep(Duration::from_secs(5));
 
         // should throw error because we didn't get pingresp for previous ping
@@ -725,8 +706,7 @@ mod test {
     }
 
     #[test]
-    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session(
-        ) {
+    fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
         let mut mqtt = build_mqttstate();
         mqtt.opts.clean_session = false;
 
@@ -752,14 +732,11 @@ mod test {
                              qos: QoS::ExactlyOnce,
                              retain: true };
 
-        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883)
-            .set_clean_session(true)
-            .set_keep_alive(50)
-            .set_last_will(lwt.clone())
-            .set_security_opts(UsernamePassword((
-                String::from("USER"),
-                String::from("PASS"),
-            )));
+        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883).set_clean_session(true)
+                                                                 .set_keep_alive(50)
+                                                                 .set_last_will(lwt.clone())
+                                                                 .set_security_opts(UsernamePassword((String::from("USER"),
+                                                                                                      String::from("PASS"))));
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);

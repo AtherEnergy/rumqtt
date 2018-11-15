@@ -47,8 +47,7 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions)
-                 -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
         let (userrequest_tx, notification_rx) = connection::Connection::run(opts)?;
 
         //TODO: Remove max packet size hardcode
@@ -58,11 +57,7 @@ impl MqttClient {
         Ok((client, notification_rx))
     }
 
-    pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self,
-                                                      topic: S,
-                                                      qos: QoS,
-                                                      payload: V)
-                                                      -> Result<(), ClientError> {
+    pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError> {
         let payload = payload.into();
         if payload.len() > self.max_packet_size {
             return Err(ClientError::PacketSizeLimitExceeded);

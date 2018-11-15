@@ -17,8 +17,7 @@ pub enum ClientError {
     PacketSizeLimitExceeded,
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
-    #[fail(display = "Failed sending request to connection thread. Error = {}",
-           _0)]
+    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
     MpscSend(SendError<Request>),
 }
 

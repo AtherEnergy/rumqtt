@@ -40,10 +40,7 @@ pub struct MqttStream<S1, S2, S3>
     flag: bool,
 }
 
-pub fn new<S1, S2, S3>(network_stream: S1,
-                       network_sink: S2,
-                       request_stream: Prepend<S3>)
-                       -> MqttStream<S1, S2, S3>
+pub fn new<S1, S2, S3>(network_stream: S1, network_sink: S2, request_stream: Prepend<S3>) -> MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>
@@ -64,11 +61,9 @@ impl<S1, S2, S3> MqttStream<S1, S2, S3>
         let network_stream = &mut self.network_stream;
 
         let (a, b) = if self.flag {
-            (user_request_stream as &mut Stream<Item = _, Error = _>,
-             network_stream as &mut Stream<Item = _, Error = _>)
+            (user_request_stream as &mut Stream<Item = _, Error = _>, network_stream as &mut Stream<Item = _, Error = _>)
         } else {
-            (network_stream as &mut Stream<Item = _, Error = _>,
-             user_request_stream as &mut Stream<Item = _, Error = _>)
+            (network_stream as &mut Stream<Item = _, Error = _>, user_request_stream as &mut Stream<Item = _, Error = _>)
         };
 
         self.flag = !self.flag;
