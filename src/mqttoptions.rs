@@ -39,6 +39,8 @@ pub enum ConnectionMethod {
     Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
+//TODO: Remove pubs from mqtt options
+
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
