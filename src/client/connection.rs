@@ -247,20 +247,22 @@ impl Connection {
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
 
-    fn network_request_stream(&mut self, previous_request_stream: impl Stream<Item = Packet, Error = NetworkError>)
-        -> Prepend<impl Stream<Item = Packet, Error = NetworkError>> {
+    fn network_request_stream(&mut self,
+                              previous_request_stream: impl Stream<Item = Packet,
+                                     Error = NetworkError>)
+                              -> Prepend<impl Stream<Item = Packet, Error = NetworkError>> {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
         previous_request_stream.prepend(last_session_publishes)
     }
 
     fn merge_network_request_stream(&mut self,
-                                    previous_request_stream: &mut Prepend<impl Stream<Item = Packet, Error = NetworkError>>) {
+                                    previous_request_stream: &mut Prepend<impl Stream<Item = Packet, Error = NetworkError>>)
+    {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
         previous_request_stream.merge_session(last_session_publishes);
     }
-
 
     /// Handles all incoming user and session requests and creates a stream of packets to send
     /// on network

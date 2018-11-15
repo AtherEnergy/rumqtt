@@ -22,27 +22,27 @@ pub mod prepend {
     /// The resulting stream produces items from first stream and then
     /// from second stream.
     #[must_use = "streams do nothing unless polled"]
-    pub struct Prepend<S> where S: Stream {
+    pub struct Prepend<S>
+        where S: Stream
+    {
         stream: S,
         session: VecDeque<<S as Stream>::Item>,
     }
 
     pub fn new<S>(stream: S, session: VecDeque<<S as Stream>::Item>) -> Prepend<S>
-        where
-            S: Stream,
+        where S: Stream
     {
         Prepend { stream, session }
     }
 
-    impl<S> Prepend<S> where S: futures::Stream {
+    impl<S> Prepend<S> where S: futures::Stream
+    {
         pub fn merge_session(&mut self, session: VecDeque<<S as Stream>::Item>) {
             self.session.extend(session)
         }
     }
 
-    impl<S> Stream for Prepend<S>
-        where
-            S: Stream,
+    impl<S> Stream for Prepend<S> where S: Stream
     {
         type Item = <S as Stream>::Item;
         type Error = <S as Stream>::Error;

@@ -31,7 +31,9 @@ use std::io;
 
 //TODO: Remove Option and use Chain stream directly
 #[must_use = "streams do nothing unless polled"]
-pub struct MqttStream<S1, S2, S3> where S3: Stream{
+pub struct MqttStream<S1, S2, S3>
+    where S3: Stream
+{
     network_stream: S1,
     network_sink: S2,
     request_stream: Option<Prepend<S3>>,
@@ -39,9 +41,9 @@ pub struct MqttStream<S1, S2, S3> where S3: Stream{
 }
 
 pub fn new<S1, S2, S3>(network_stream: S1,
-                           network_sink: S2,
-                           request_stream: Prepend<S3>)
-                           -> MqttStream<S1, S2, S3>
+                       network_sink: S2,
+                       request_stream: Prepend<S3>)
+                       -> MqttStream<S1, S2, S3>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>
