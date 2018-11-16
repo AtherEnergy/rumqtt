@@ -6,6 +6,7 @@ extern crate serde_derive;
 
 use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
 use std::thread;
+use std::time::Duration;
 
 // NOTES:
 // ---------
@@ -46,7 +47,7 @@ fn main() {
     thread::spawn(move || {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep_ms(1000);
+            thread::sleep(Duration::from_secs(1));
             mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, payload).unwrap();
         }
     });

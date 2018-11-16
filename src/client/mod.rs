@@ -72,7 +72,9 @@ impl MqttClient {
         Ok((client, notification_rx))
     }
 
-    pub fn publish<S: Into<String>, V: Into<Vec<u8>>>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError> {
+    pub fn publish<S, V>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError>
+    where S: Into<String>, V: Into<Vec<u8>>
+    {
         let payload = payload.into();
         if payload.len() > self.max_packet_size {
             return Err(ClientError::PacketSizeLimitExceeded);
@@ -91,11 +93,11 @@ impl MqttClient {
         Ok(())
     }
 
-    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let topic = SubscribeTopic { topic_path: topic.into(),
-                                     qos: qos };
-        let subscribe = Subscribe { pid: PacketIdentifier::zero(),
-                                    topics: vec![topic] };
+    pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
+    where S: Into<String>
+    {
+        let topic = SubscribeTopic { topic_path: topic.into(), qos: qos };
+        let subscribe = Subscribe { pid: PacketIdentifier::zero(), topics: vec![topic] };
 
         let tx = &mut self.request_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;

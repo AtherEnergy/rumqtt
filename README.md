@@ -1,13 +1,14 @@
-Asynchronous mqtt client
+Pure rust mqtt client
 
 #### What is supported
 
-- [ ] QoS 0, 1, 2
-- [ ] Tls (Uses RustTLS by default for TLS. Cross compilation and multi platform support is painless)
-- [ ] Automatic Reconnection
-- [ ] Dynamic Reconnection 
-- [ ] Back pressure when the connection is slow
-- [ ] Incoming notifications on crossbeam channel
+- [x] QoS 0, 1, 2
+- [x] Tls (Uses RustTLS by default for TLS. Cross compilation and multi platform support is painless)
+- [x] Automatic Reconnection
+- [x] Dynamic Reconnection
+- [x] Back pressure when the connection is slow
+- [x] Incoming notifications on crossbeam channel
+- [x] Pause/Resume network io
 
 #### What's not supported
 

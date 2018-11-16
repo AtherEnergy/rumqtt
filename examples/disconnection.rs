@@ -10,7 +10,8 @@ fn main() {
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 
     thread::spawn(move || {
-        thread::sleep_ms(5000);
+        thread::sleep(Duration::from_secs(5));
+
         for i in 1..11 {
             let payload = format!("publish {}", i);
             thread::sleep(Duration::from_millis(100));
