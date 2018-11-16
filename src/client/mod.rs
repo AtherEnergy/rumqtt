@@ -49,6 +49,7 @@ pub struct UserHandle {
     notification_rx: crossbeam_channel::Receiver<Notification>,
 }
 
+#[derive(Clone)]
 pub struct MqttClient {
     request_tx: mpsc::Sender<Request>,
     command_tx: mpsc::Sender<Command>,
@@ -98,6 +99,18 @@ impl MqttClient {
 
         let tx = &mut self.request_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;
+        Ok(())
+    }
+
+    pub fn pause(&mut self) -> Result<(), ClientError> {
+        let tx  = &mut self.command_tx;
+        tx.send(Command::Pause).wait()?;
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> Result<(), ClientError> {
+        let tx  = &mut self.command_tx;
+        tx.send(Command::Resume).wait()?;
         Ok(())
     }
 

@@ -35,6 +35,7 @@ pub struct MqttStream<S1, S2, S3, S4>
     network_sink: S2,
     request_stream: Option<Prepend<S3>>,
     command_stream: Option<S4>,
+    is_paused: bool,
     flag: bool,
 }
 
@@ -51,6 +52,7 @@ pub fn new<S1, S2, S3, S4>(network_stream: S1,
                  network_sink,
                  request_stream: Some(request_stream),
                  command_stream: Some(command_stream),
+                 is_paused: false,
                  flag: true }
 }
 
@@ -60,14 +62,38 @@ impl<S1, S2, S3, S4> MqttStream<S1, S2, S3, S4>
           S3: Stream<Item = Packet, Error = NetworkError>,
           S4: Stream<Item = Command, Error = NetworkError>
 {
+    fn playpause(&mut self) -> Poll<Option<S1::Item>, NetworkError> {
+        let command_stream = self.command_stream.as_mut().unwrap();
+
+        match command_stream.poll()? {
+            Async::Ready(Some(command)) => {
+                match command {
+                    Command::Pause => {
+                        self.is_paused = true;
+                        Ok(Async::NotReady)
+                    },
+                    Command::Resume => {
+                        self.is_paused = false;
+                        Err(NetworkError::Interleave)
+                    }
+                }
+            },
+            // ignore polls due to request/network during pause mode
+            Async::Ready(None) | Async::NotReady if self.is_paused => return Ok(Async::NotReady),
+            // consider polls due to request/network during !pause mode
+            Async::Ready(None) | Async::NotReady => Err(NetworkError::Interleave)
+        }
+    }
+
+
     fn interleave(&mut self) -> Poll<Option<S1::Item>, NetworkError> {
-        let user_request_stream = self.request_stream.as_mut().unwrap();
+        let request_stream = self.request_stream.as_mut().unwrap();
         let network_stream = &mut self.network_stream;
 
         let (a, b) = if self.flag {
-            (user_request_stream as &mut Stream<Item = _, Error = _>, network_stream as &mut Stream<Item = _, Error = _>)
+            (request_stream as &mut Stream<Item = _, Error = _>, network_stream as &mut Stream<Item = _, Error = _>)
         } else {
-            (network_stream as &mut Stream<Item = _, Error = _>, user_request_stream as &mut Stream<Item = _, Error = _>)
+            (network_stream as &mut Stream<Item = _, Error = _>, request_stream as &mut Stream<Item = _, Error = _>)
         };
 
         self.flag = !self.flag;
@@ -103,6 +129,18 @@ impl<S1, S2, S3, S4> Stream for MqttStream<S1, S2, S3, S4>
     type Error = PollError<S3, S4>;
 
     fn poll(&mut self) -> Poll<Option<S1::Item>, PollError<S3, S4>> {
+
+        match self.playpause() {
+            Ok(v) => return Ok(v),
+            Err(NetworkError::Interleave) => (),
+            Err(e) => {
+                let request_stream = self.request_stream.take().unwrap();
+                let command_stream = self.command_stream.take().unwrap();
+
+                return Err(PollError::Network((e, request_stream, command_stream)))
+            }
+        }
+
         match self.interleave() {
             Ok(v) => Ok(v),
             Err(e) => {

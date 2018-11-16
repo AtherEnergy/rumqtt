@@ -17,7 +17,9 @@ pub enum ClientError {
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<Request>),
+    MpscRequestSend(SendError<Request>),
+    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
+    MpscCommandSend(SendError<Command>),
 }
 
 #[derive(Debug, Fail, From)]
@@ -77,6 +79,8 @@ pub enum NetworkError {
     UserDisconnect,
     #[fail(display = "Network stream closed")]
     NetworkStreamClosed,
+    #[fail(display = "Error to poll interleave")]
+    Interleave,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }
