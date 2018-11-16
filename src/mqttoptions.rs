@@ -39,29 +39,28 @@ pub enum ConnectionMethod {
     Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
-//TODO: Remove pubs from mqtt options
 
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
-    pub broker_addr: String,
-    pub port: u16,
+    broker_addr: String,
+    port: u16,
     /// keep alive time to send pingreq to broker when the connection is idle
-    pub keep_alive: Duration,
+    keep_alive: Duration,
     /// clean (or) persistent session
-    pub clean_session: bool,
+    clean_session: bool,
     /// client identifier
-    pub client_id: String,
+    client_id: String,
     /// connection method
-    pub connection_method: ConnectionMethod,
+    connection_method: ConnectionMethod,
     /// reconnection options
-    pub reconnect: ReconnectOptions,
+    reconnect: ReconnectOptions,
     /// security options
-    pub security: SecurityOptions,
+    security: SecurityOptions,
     /// maximum packet size
-    pub max_packet_size: usize,
+    max_packet_size: usize,
     /// last will and testament
-    pub last_will: Option<LastWill>,
+    last_will: Option<LastWill>,
 }
 
 impl Default for MqttOptions {
@@ -99,6 +98,10 @@ impl MqttOptions {
                       last_will: None }
     }
 
+    pub fn broker_address(&self) -> (String, u16) {
+        (self.broker_addr.clone(), self.port)
+    }
+
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(mut self, secs: u16) -> Self {
@@ -110,10 +113,18 @@ impl MqttOptions {
         self
     }
 
+    pub fn keep_alive(&self) -> Duration {
+        self.keep_alive
+    }
+
     /// Set packet size limit (in Kilo Bytes)
     pub fn set_max_packet_size(mut self, sz: usize) -> Self {
         self.max_packet_size = sz * 1024;
         self
+    }
+
+    pub fn max_packet_size(&self) -> usize {
+        self.max_packet_size
     }
 
     /// `clean_session = true` removes all the state from queues & instructs the broker
@@ -129,10 +140,18 @@ impl MqttOptions {
         self
     }
 
+    pub fn clean_session(&self) -> bool {
+        self.clean_session
+    }
+
     /// Set how to connect to a MQTT Broker (either plain TCP or SSL)
     pub fn set_connection_method(mut self, opts: ConnectionMethod) -> Self {
         self.connection_method = opts;
         self
+    }
+
+    pub fn connection_method(&self) -> ConnectionMethod {
+        self.connection_method.clone()
     }
 
     /// Time interval after which client should retry for new
@@ -140,6 +159,10 @@ impl MqttOptions {
     pub fn set_reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
         self.reconnect = opts;
         self
+    }
+
+    pub fn reconnect_opts(&self) -> ReconnectOptions {
+        self.reconnect
     }
 
     /// Set security option

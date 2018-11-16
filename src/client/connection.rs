@@ -51,7 +51,7 @@ impl Connection {
         let (command_tx, command_rx) = mpsc::channel::<Command>(5);
 
         let (connection_tx, connection_rx) = crossbeam_channel::bounded(1);
-        let reconnect_option = mqttoptions.reconnect;
+        let reconnect_option = mqttoptions.reconnect_opts();
 
         // start the network thread to handle all mqtt network io
         thread::spawn(move || {
@@ -86,7 +86,7 @@ impl Connection {
     //       bind to reactor lazily.
     //       You'll face `reactor gone` error if `framed` is used again with a new recator
     fn mqtt_eventloop(&mut self, request_rx: Receiver<Request>, command_rx: Receiver<Command>) {
-        let reconnect_option = self.mqttoptions.reconnect;
+        let reconnect_option = self.mqttoptions.reconnect_opts();
         let previous_request_stream = self.request_stream(request_rx);
         let mut command_stream = self.command_stream(command_rx);
         let mut network_request_stream = self.network_request_stream(previous_request_stream);
@@ -165,7 +165,7 @@ impl Connection {
         };
 
         if self.connection_count == 1 {
-            match self.mqttoptions.reconnect {
+            match self.mqttoptions.reconnect_opts() {
                 ReconnectOptions::AfterFirstSuccess(_) => {
                     let connection_tx = self.connection_tx.take().unwrap();
                     connection_tx.send(error).unwrap();
@@ -183,9 +183,8 @@ impl Connection {
     /// which makes a new tcp or tls connection to the broker.
     /// Note that this doesn't actual connect to the broker
     fn tcp_connect_future(&self) -> impl Future<Item = MqttFramed, Error = ConnectError> {
-        let host = &self.mqttoptions.broker_addr;
-        let port = self.mqttoptions.port;
-        let connection_method = self.mqttoptions.connection_method.clone();
+        let (host, port) = self.mqttoptions.broker_address();
+        let connection_method = self.mqttoptions.connection_method();
         let builder = NetworkStream::builder();
 
         let builder = match connection_method {
@@ -194,7 +193,7 @@ impl Connection {
             ConnectionMethod::Tcp => builder,
         };
 
-        builder.connect(host, port)
+        builder.connect(&host, port)
     }
 
     /// Composes a new future which is a combination of tcp connect + mqtt handshake
@@ -220,7 +219,7 @@ impl Connection {
     fn network_reply_stream(&self, network_stream: SplitStream<MqttFramed>) -> impl PacketStream {
         let mqtt_state_in = self.mqtt_state.clone();
         let mqtt_state_out = self.mqtt_state.clone();
-        let keep_alive = self.mqttoptions.keep_alive;
+        let keep_alive = self.mqttoptions.keep_alive();
         let network_stream = Timeout::new(network_stream, keep_alive);
 
         // TODO: prevent this clone?

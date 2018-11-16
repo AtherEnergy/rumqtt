@@ -112,7 +112,7 @@ impl MqttState {
     }
 
     pub fn handle_reconnection(&mut self) -> VecDeque<Packet> {
-        if self.opts.clean_session {
+        if self.opts.clean_session() {
             VecDeque::new()
         } else {
             //TODO: Write unittest for checking state during reconnection
@@ -140,7 +140,7 @@ impl MqttState {
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
-        if publish.payload.len() > self.opts.max_packet_size {
+        if publish.payload.len() > self.opts.max_packet_size() {
             return Err(NetworkError::PacketSizeLimitExceeded);
         }
 
@@ -253,7 +253,7 @@ impl MqttState {
         // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
         // secs and then error out because of timeout.)
 
-        let keep_alive = self.opts.keep_alive.as_secs() * 1000;
+        let keep_alive = self.opts.keep_alive().as_secs() * 1000;
         let deviation = 100;
         let keep_alive = Duration::from_millis(keep_alive + deviation);
 
@@ -309,7 +309,7 @@ impl MqttState {
     fn handle_previous_session(&mut self) {
         self.await_pingresp = false;
 
-        if self.opts.clean_session {
+        if self.opts.clean_session() {
             self.outgoing_pub.clear();
         }
 
@@ -556,7 +556,7 @@ mod test {
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
 
         mqtt.handle_outgoing_publish(publish).unwrap();
-        mqtt.handle_incoming_pubrec(PacketIdentifier(1));
+        mqtt.handle_incoming_pubrec(PacketIdentifier(1)).unwrap();
         println!("{:?}", mqtt);
 
         mqtt.handle_incoming_pubcomp(PacketIdentifier(1)).unwrap();
@@ -566,18 +566,18 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-
-        mqtt.opts.keep_alive = Duration::from_secs(5);
+        let opts = MqttOptions::default().set_keep_alive(10);
+        mqtt.opts = opts;
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(10));
 
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish));
+        mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish)).unwrap();
         mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(10));
 
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {
@@ -591,9 +591,11 @@ mod test {
     fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
         let mut mqtt = build_mqttstate();
 
-        mqtt.opts.keep_alive = Duration::from_secs(5);
+        let opts = MqttOptions::default().set_keep_alive(10);
+        mqtt.opts = opts;
+
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::from_secs(7));
+        thread::sleep(Duration::from_secs(12));
 
         match mqtt.handle_outgoing_ping() {
             Err(NetworkError::Timeout) => (),
@@ -605,15 +607,17 @@ mod test {
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
 
-        mqtt.opts.keep_alive = Duration::from_secs(5);
+        let opts = MqttOptions::default().set_keep_alive(10);
+        mqtt.opts = opts;
+
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(10));
 
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
 
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(10));
         // should ping
         assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
     }
@@ -646,7 +650,10 @@ mod test {
         let mut mqtt = build_mqttstate();
 
         mqtt.await_pingresp = true;
-        mqtt.opts.clean_session = false;
+
+        let opts = MqttOptions::default().set_clean_session(false);
+        mqtt.opts = opts;
+
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
 
@@ -707,7 +714,9 @@ mod test {
     #[test]
     fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
         let mut mqtt = build_mqttstate();
-        mqtt.opts.clean_session = false;
+
+        let opts = MqttOptions::default().set_clean_session(false);
+        mqtt.opts = opts;
 
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
 
