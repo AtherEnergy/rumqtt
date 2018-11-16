@@ -82,7 +82,7 @@ impl MqttOptions {
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         // TODO: Validate if addr is proper address type
         let id = id.into();
-        if id.starts_with(" ") || id.is_empty() {
+        if id.starts_with(' ') || id.is_empty() {
             panic!("Invalid client id")
         }
 
@@ -90,7 +90,7 @@ impl MqttOptions {
                       port,
                       keep_alive: Duration::from_secs(60),
                       clean_session: true,
-                      client_id: id.into(),
+                      client_id: id,
                       connection_method: ConnectionMethod::Tcp,
                       reconnect: ReconnectOptions::AfterFirstSuccess(10),
                       security: SecurityOptions::None,
@@ -109,7 +109,7 @@ impl MqttOptions {
             panic!("Keep alives should be >= 10 secs");
         }
 
-        self.keep_alive = Duration::from_secs(secs as u64);
+        self.keep_alive = Duration::from_secs(u64::from(secs));
         self
     }
 
@@ -190,7 +190,7 @@ impl MqttOptions {
             #[cfg(feature = "jwt")]
             SecurityOptions::GcloudIot((projectname, key, expiry)) => {
                 let username = Some("unused".to_owned());
-                let password = Some(gen_iotcore_password(projectname, key, expiry)?);
+                let password = Some(gen_iotcore_password(projectname, &key, expiry)?);
                 (username, password)
             }
             SecurityOptions::None => (None, None),
@@ -217,7 +217,7 @@ struct Claims {
 
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
-pub fn gen_iotcore_password(project: String, key: Vec<u8>, expiry: i64) -> Result<String, ConnectError> {
+pub fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
     use chrono::{self, Utc};
     use jsonwebtoken::{encode, Algorithm, Header};
 

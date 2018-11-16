@@ -51,7 +51,7 @@ pub mod prepend {
                 None => (),
             };
 
-            return self.stream.poll();
+            self.stream.poll()
         }
     }
 }

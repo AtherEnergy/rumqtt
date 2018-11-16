@@ -79,7 +79,7 @@ impl<S1, S2, S3, S4> MqttStream<S1, S2, S3, S4>
                 }
             },
             // ignore polls due to request/network during pause mode
-            Async::Ready(None) | Async::NotReady if self.is_paused => return Ok(Async::NotReady),
+            Async::Ready(None) | Async::NotReady if self.is_paused => Ok(Async::NotReady),
             // consider polls due to request/network during !pause mode
             Async::Ready(None) | Async::NotReady => Err(NetworkError::Interleave)
         }
