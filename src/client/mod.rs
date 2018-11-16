@@ -37,22 +37,35 @@ pub enum Request {
     None,
 }
 
+#[derive(Debug)]
+pub enum Command {
+    Pause,
+    Resume
+}
+
 pub struct UserHandle {
     request_tx: mpsc::Sender<Request>,
+    command_tx: mpsc::Sender<Command>,
     notification_rx: crossbeam_channel::Receiver<Notification>,
 }
 
 pub struct MqttClient {
     request_tx: mpsc::Sender<Request>,
+    command_tx: mpsc::Sender<Command>,
     max_packet_size: usize,
 }
 
 impl MqttClient {
     pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
-        let UserHandle { request_tx, notification_rx } = connection::Connection::run(opts)?;
+        let UserHandle {
+            request_tx,
+            command_tx,
+            notification_rx
+        } = connection::Connection::run(opts)?;
 
         //TODO: Remove max packet size hardcode
         let client = MqttClient { request_tx,
+                                  command_tx,
                                   max_packet_size: 1000 };
 
         Ok((client, notification_rx))
