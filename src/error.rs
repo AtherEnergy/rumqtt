@@ -6,6 +6,7 @@ use jsonwebtoken;
 use mqtt3::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
+use client::Command;
 
 #[derive(Debug, Fail, From)]
 pub enum ClientError {
@@ -16,7 +17,9 @@ pub enum ClientError {
     #[fail(display = "Client id should not be empty")]
     EmptyClientId,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
-    MpscSend(SendError<Request>),
+    MpscRequestSend(SendError<Request>),
+    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
+    MpscCommandSend(SendError<Command>),
 }
 
 #[derive(Debug, Fail, From)]
@@ -76,15 +79,18 @@ pub enum NetworkError {
     UserDisconnect,
     #[fail(display = "Network stream closed")]
     NetworkStreamClosed,
+    #[fail(display = "Error to poll interleave")]
+    Interleave,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }
 
 #[derive(From)]
-pub enum PollError<S>
-    where S: Stream<Item = Packet, Error = NetworkError>
+pub enum PollError<S1, S2>
+    where S1: Stream<Item = Packet, Error = NetworkError>,
+          S2: Stream<Item = Command, Error = NetworkError>
 {
-    Network((NetworkError, Prepend<S>)),
-    StreamClosed(Prepend<S>),
+    Network((NetworkError, Prepend<S1>, S2)),
+    StreamClosed(Prepend<S1>, S2),
     UserRequest(NetworkError),
 }

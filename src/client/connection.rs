@@ -27,6 +27,7 @@ use crossbeam_channel::Sender;
 use futures::sync::mpsc::Receiver;
 use client::UserHandle;
 use tokio_timer::timeout;
+use client::Command;
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -47,6 +48,8 @@ impl Connection {
     pub fn run(mqttoptions: MqttOptions) -> Result<UserHandle, ConnectError> {
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
         let (request_tx, request_rx) = mpsc::channel::<Request>(10);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(5);
+
         let (connection_tx, connection_rx) = crossbeam_channel::bounded(1);
         let reconnect_option = mqttoptions.reconnect;
 
@@ -59,12 +62,13 @@ impl Connection {
                                               connection_count: 0,
                                               mqttoptions };
 
-            connection.mqtt_eventloop(request_rx)
+            connection.mqtt_eventloop(request_rx, command_rx)
         });
 
 
         // return user handle to client to send requests and handle notifications
-        let user_handle = UserHandle{request_tx, notification_rx};
+        let user_handle = UserHandle{request_tx, command_tx, notification_rx};
+
         match reconnect_option {
             ReconnectOptions::AfterFirstSuccess(_) => {
                 connection_rx.recv()??;
@@ -81,9 +85,10 @@ impl Connection {
     // NOTE: We need to use same reactor across threads because io resources (framed) will
     //       bind to reactor lazily.
     //       You'll face `reactor gone` error if `framed` is used again with a new recator
-    fn mqtt_eventloop(&mut self, userrequest_rx: Receiver<Request>) {
+    fn mqtt_eventloop(&mut self, request_rx: Receiver<Request>, command_rx: Receiver<Command>) {
         let reconnect_option = self.mqttoptions.reconnect;
-        let previous_request_stream = self.user_request_stream(userrequest_rx);
+        let previous_request_stream = self.request_stream(request_rx);
+        let mut command_stream = self.command_stream(command_rx);
         let mut network_request_stream = self.network_request_stream(previous_request_stream);
 
         'reconnection: loop {
@@ -112,22 +117,24 @@ impl Connection {
             let (network_sink, network_stream) = framed.split();
             let network_reply_stream = self.network_reply_stream(network_stream);
 
-            let mqtt_stream = mqttasync::new(network_reply_stream, network_sink, network_request_stream);
+            let mqtt_stream = mqttasync::new(network_reply_stream, network_sink, network_request_stream, command_stream);
             let (mqtt_sink, mqtt_stream) = mqtt_stream.split();
 
             let mqtt_future = mqtt_stream.forward(mqtt_sink);
 
             // mqtt event loop
             match rt.block_on(mqtt_future) {
-                Err(PollError::Network((e, mut s))) => {
+                Err(PollError::Network((e, mut r, c))) => {
                     error!("Event loop disconnect. Error = {:?}", e);
-                    self.merge_network_request_stream(&mut s);
-                    network_request_stream = s;
+                    self.merge_network_request_stream(&mut r);
+                    network_request_stream = r;
+                    command_stream = c;
                 }
-                Err(PollError::StreamClosed(mut s)) => {
+                Err(PollError::StreamClosed(mut r, c)) => {
                     error!("Stream closed error");
-                    self.merge_network_request_stream(&mut s);
-                    network_request_stream = s;
+                    self.merge_network_request_stream(&mut r);
+                    network_request_stream = r;
+                    command_stream = c;
                 }
                 _ => panic!("Shouldn't happen")
             }
@@ -259,10 +266,10 @@ impl Connection {
     /// to user request stream to ensure that they are handled first. This cleanly handles last
     /// session stray (even if disconnect happens while sending last session data)because we always
     /// get back this stream from reactor after disconnection.
-    fn user_request_stream(&mut self, request: mpsc::Receiver<Request>) -> impl PacketStream {
+    fn request_stream(&mut self, request: mpsc::Receiver<Request>) -> impl PacketStream {
         let mqtt_state = self.mqtt_state.clone();
 
-        let userrequest_rx = request.map_err(|e| {
+        let request_stream = request.map_err(|e| {
                                                error!("User request error = {:?}", e);
                                                NetworkError::Blah
                                            })
@@ -272,9 +279,16 @@ impl Connection {
                                            });
 
         let mqtt_state = self.mqtt_state.clone();
-        userrequest_rx.and_then(move |packet: Packet| {
+        request_stream.and_then(move |packet: Packet| {
             let o = mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet);
             future::result(o)
+        })
+    }
+
+    fn command_stream(&mut self, commands: mpsc::Receiver<Command>) -> impl CommandStream {
+        commands.map_err(|e| {
+            error!("User request error = {:?}", e);
+            NetworkError::Blah
         })
     }
 }
@@ -386,6 +400,9 @@ type MqttFramed = Framed<NetworkStream, MqttCodec>;
 
 trait PacketStream: Stream<Item = Packet, Error = NetworkError> {}
 impl<T> PacketStream for T where T: Stream<Item = Packet, Error = NetworkError> {}
+
+trait CommandStream: Stream<Item = Command, Error = NetworkError> {}
+impl<T> CommandStream for T where T: Stream<Item = Command, Error = NetworkError> {}
 
 trait PacketFuture: Future<Item = Packet, Error = NetworkError> {}
 impl<T> PacketFuture for T where T: Future<Item = Packet, Error = NetworkError> {}
