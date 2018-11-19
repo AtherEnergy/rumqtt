@@ -1,4 +1,4 @@
-use client::{prepend::prepend::Prepend, Request};
+use client::{prepend::Prepend, Request};
 use crossbeam_channel::RecvError;
 use futures::{sync::mpsc::SendError, Stream};
 #[cfg(feature = "jwt")]

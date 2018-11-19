@@ -95,7 +95,7 @@ pub mod stream {
 
             let tls_connector = self.create_stream();
 
-            let network_future = match tls_connector {
+            match tls_connector {
                 Ok(tls_connector) => {
                     let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
                     Either::A(TcpStream::connect(&addr).and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
@@ -111,9 +111,7 @@ pub mod stream {
                                                                        })
                                                                        .map_err(ConnectError::from)),
                 _ => unimplemented!(),
-            };
-
-            network_future
+            }
         }
     }
 }

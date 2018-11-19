@@ -2,7 +2,7 @@ use client::{
     mqttasync,
     mqttstate::MqttState,
     network::stream::NetworkStream,
-    prepend::{prepend::Prepend, StreamExt},
+    prepend::{Prepend, StreamExt},
     Notification,
     Request,
 };
@@ -32,7 +32,6 @@ use client::Command;
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
 //  https://github.com/tokio-rs/tokio-core/issues/182
-
 
 pub struct Connection {
     mqtt_state: Rc<RefCell<MqttState>>,
@@ -106,13 +105,13 @@ impl Connection {
                 Err(e) => {
                     error!("Connection error = {:?}", e);
                     self.handle_connection_error(e);
-                    match should_reconnect_again(reconnect_option) {
-                        true => continue 'reconnection,
-                        false => break 'reconnection
+                    if should_reconnect_again(reconnect_option) {
+                        continue 'reconnection
+                    } else {
+                        break 'reconnection
                     }
                 }
             };
-
 
             let (network_sink, network_stream) = framed.split();
             let network_reply_stream = self.network_reply_stream(network_stream);
@@ -139,9 +138,10 @@ impl Connection {
                 _ => panic!("Shouldn't happen")
             }
 
-            match should_reconnect_again(reconnect_option) {
-                true => continue 'reconnection,
-                false => break 'reconnection
+            if should_reconnect_again(reconnect_option) {
+                continue 'reconnection
+            } else {
+                break 'reconnection
             }
         }
     }
@@ -204,7 +204,7 @@ impl Connection {
 
         tcp_connect_future.and_then(move |framed| {
                               let packet = Packet::Connect(connect_packet);
-                              framed.send(packet).map_err(|e| ConnectError::Io(e))
+                              framed.send(packet).map_err(ConnectError::Io)
                           })
                           .and_then(|framed| framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err)))
                           .and_then(move |(response, framed)| {
@@ -225,7 +225,7 @@ impl Connection {
         // TODO: prevent this clone?
         // cloning crossbeam channel sender every time is a problem according to docs
         let notification_tx = self.notification_tx.clone();
-        let network_stream = network_stream.map_err(|e| NetworkError::TimeOut(e))
+        let network_stream = network_stream.map_err(NetworkError::TimeOut)
                                            .and_then(move |packet| {
                                                debug!("Incoming packet = {:?}", packet_info(&packet));
                                                let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
