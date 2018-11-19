@@ -96,7 +96,7 @@ impl MqttClient {
     pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
     where S: Into<String>
     {
-        let topic = SubscribeTopic { topic_path: topic.into(), qos: qos };
+        let topic = SubscribeTopic { topic_path: topic.into(), qos };
         let subscribe = Subscribe { pid: PacketIdentifier::zero(), topics: vec![topic] };
 
         let tx = &mut self.request_tx;

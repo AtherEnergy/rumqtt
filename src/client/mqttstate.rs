@@ -119,7 +119,7 @@ impl MqttState {
             self.outgoing_pub
                 .clone()
                 .into_iter()
-                .map(|publish| Packet::Publish(publish))
+                .map(Packet::Publish)
                 .collect()
         }
     }
