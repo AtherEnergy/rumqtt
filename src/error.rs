@@ -3,7 +3,7 @@ use crossbeam_channel::RecvError;
 use futures::{sync::mpsc::SendError, Stream};
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
-use mqtt3::Packet;
+use mqtt311::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
 use client::Command;

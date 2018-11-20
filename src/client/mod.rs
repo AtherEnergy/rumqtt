@@ -1,7 +1,7 @@
 use crossbeam_channel;
 use error::{ClientError, ConnectError};
 use futures::{sync::mpsc, Future, Sink};
-use mqtt3::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic};
+use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic};
 use std::sync::Arc;
 use MqttOptions;
 
@@ -80,12 +80,11 @@ impl MqttClient {
             return Err(ClientError::PacketSizeLimitExceeded);
         }
 
-        //TODO: Rename `pid` to `pkid` in mqtt311
         let publish = Publish { dup: false,
                                 qos,
                                 retain: false,
                                 topic_name: topic.into(),
-                                pid: None,
+                                pkid: None,
                                 payload: Arc::new(payload) };
 
         let tx = &mut self.request_tx;
@@ -97,7 +96,7 @@ impl MqttClient {
     where S: Into<String>
     {
         let topic = SubscribeTopic { topic_path: topic.into(), qos };
-        let subscribe = Subscribe { pid: PacketIdentifier::zero(), topics: vec![topic] };
+        let subscribe = Subscribe { pkid: PacketIdentifier::zero(), topics: vec![topic] };
 
         let tx = &mut self.request_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;

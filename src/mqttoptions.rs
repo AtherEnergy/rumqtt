@@ -1,4 +1,4 @@
-use mqtt3::{Connect, LastWill, Protocol};
+use mqtt311::{Connect, LastWill, Protocol};
 
 use error::ConnectError;
 use std::time::Duration;

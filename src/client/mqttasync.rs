@@ -3,7 +3,7 @@ use futures::{sink::Sink, stream::Stream, Poll, StartSend};
 use client::prepend::Prepend;
 use error::{NetworkError, PollError};
 use futures::Async;
-use mqtt3::Packet;
+use mqtt311::Packet;
 use std::io;
 use client::Command;
 

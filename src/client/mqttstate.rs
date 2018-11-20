@@ -6,7 +6,7 @@ use std::{
 
 use client::{Notification, Request};
 use error::{ConnectError, NetworkError};
-use mqtt3::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
+use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
 use mqttoptions::MqttOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,9 +125,9 @@ impl MqttState {
     }
 
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
-        let publish = if publish.pid == None {
+        let publish = if publish.pkid == None {
             let pkid = self.next_pkid();
-            publish.pid = Some(pkid);
+            publish.pkid = Some(pkid);
             publish
         } else {
             publish
@@ -153,7 +153,7 @@ impl MqttState {
     }
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
-        match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
+        match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
                 Ok((Notification::None, Request::None))
@@ -166,7 +166,7 @@ impl MqttState {
     }
 
     pub fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
-        match self.outgoing_pub.iter().position(|x| x.pid == Some(pkid)) {
+        match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
                 self.outgoing_rel.push_back(pkid);
@@ -190,13 +190,13 @@ impl MqttState {
         match qos {
             QoS::AtMostOnce => Ok((Notification::None, Request::None)),
             QoS::AtLeastOnce => {
-                let pkid = publish.pid.unwrap();
+                let pkid = publish.pkid.unwrap();
                 let request = Request::PubAck(pkid);
                 let notification = Notification::Publish(publish);
                 Ok((notification, request))
             }
             QoS::ExactlyOnce => {
-                let pkid = publish.pid.unwrap();
+                let pkid = publish.pkid.unwrap();
                 let request = Request::PubRec(pkid);
                 let notification = Notification::Publish(publish);
 
@@ -289,7 +289,7 @@ impl MqttState {
         let pkid = self.next_pkid();
 
         if self.connection_status == MqttConnectionStatus::Connected {
-            subscription.pid = pkid;
+            subscription.pkid = pkid;
 
             Ok(subscription)
         } else {
@@ -341,7 +341,7 @@ mod test {
         Publish { dup: false,
                   qos,
                   retain: false,
-                  pid: None,
+                  pkid: None,
                   topic_name: "hello/world".to_owned(),
                   payload: Arc::new(vec![1, 2, 3]) }
     }
@@ -350,7 +350,7 @@ mod test {
         Publish { dup: false,
                   qos,
                   retain: false,
-                  pid: Some(PacketIdentifier(pkid)),
+                  pkid: Some(PacketIdentifier(pkid)),
                   topic_name: "hello/world".to_owned(),
                   payload: Arc::new(vec![1, 2, 3]) }
     }
@@ -380,7 +380,7 @@ mod test {
 
         // Packet id shouldn't be set and publish shouldn't be saved in queue
         let publish_out = mqtt.handle_outgoing_publish(publish);
-        assert_eq!(publish_out.unwrap().pid, None);
+        assert_eq!(publish_out.unwrap().pkid, None);
         assert_eq!(mqtt.outgoing_pub.len(), 0);
 
         // QoS1 Publish
@@ -388,12 +388,12 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
-        assert_eq!(publish_out.unwrap().pid, Some(PacketIdentifier(1)));
+        assert_eq!(publish_out.unwrap().pkid, Some(PacketIdentifier(1)));
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
-        assert_eq!(publish_out.unwrap().pid, Some(PacketIdentifier(2)));
+        assert_eq!(publish_out.unwrap().pkid, Some(PacketIdentifier(2)));
         assert_eq!(mqtt.outgoing_pub.len(), 2);
 
         // QoS1 Publish
@@ -401,12 +401,12 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
-        assert_eq!(publish_out.unwrap().pid, Some(PacketIdentifier(3)));
+        assert_eq!(publish_out.unwrap().pkid, Some(PacketIdentifier(3)));
         assert_eq!(mqtt.outgoing_pub.len(), 3);
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
-        assert_eq!(publish_out.unwrap().pid, Some(PacketIdentifier(4)));
+        assert_eq!(publish_out.unwrap().pkid, Some(PacketIdentifier(4)));
         assert_eq!(mqtt.outgoing_pub.len(), 4);
     }
 
@@ -418,7 +418,7 @@ mod test {
         let publish = Publish { dup: false,
                                 qos: QoS::AtMostOnce,
                                 retain: false,
-                                pid: None,
+                                pkid: None,
                                 topic_name: "hello/world".to_owned(),
                                 payload: Arc::new(vec![0; 257 * 1024]) };
 
@@ -456,7 +456,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_publish(publish).unwrap();
 
         match notification {
-            Notification::Publish(publish) => assert_eq!(publish.pid.unwrap(), PacketIdentifier(1)),
+            Notification::Publish(publish) => assert_eq!(publish.pkid.unwrap(), PacketIdentifier(1)),
             _ => panic!("Invalid notification: {:?}", notification),
         }
 
@@ -480,7 +480,7 @@ mod test {
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
         let backup = mqtt.outgoing_pub.get(0).unwrap().clone();
-        assert_eq!(backup.pid, Some(PacketIdentifier(2)));
+        assert_eq!(backup.pkid, Some(PacketIdentifier(2)));
 
         mqtt.handle_incoming_puback(PacketIdentifier(2)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 0);
@@ -501,7 +501,7 @@ mod test {
 
         // check if the remaining element's pkid is 1
         let backup = mqtt.outgoing_pub.get(0).unwrap().clone();
-        assert_eq!(backup.pid, Some(PacketIdentifier(1)));
+        assert_eq!(backup.pkid, Some(PacketIdentifier(1)));
 
         assert_eq!(mqtt.outgoing_rel.len(), 1);
 
@@ -631,7 +631,7 @@ mod test {
         let publish = Publish { dup: false,
                                 qos: QoS::AtLeastOnce,
                                 retain: false,
-                                pid: None,
+                                pkid: None,
                                 topic_name: "hello/world".to_owned(),
                                 payload: Arc::new(vec![1, 2, 3]) };
 
@@ -695,7 +695,7 @@ mod test {
         let publish = Publish { dup: false,
                                 qos: QoS::AtLeastOnce,
                                 retain: false,
-                                pid: None,
+                                pkid: None,
                                 topic_name: "hello/world".to_owned(),
                                 payload: Arc::new(vec![1, 2, 3]) };
 

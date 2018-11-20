@@ -16,7 +16,7 @@ log = "0.4"
 failure = "0.1"
 derive_more = "0.13"
 pretty_env_logger = "0.2"
-mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
+mqtt311 = { git = "https://github.com/tekjar/mqtt311" }
 
 [dependencies.native-tls]
 version = "0.2"

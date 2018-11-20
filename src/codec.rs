@@ -1,7 +1,6 @@
 use bytes::BytesMut;
-use mqtt3::{self, MqttRead, MqttWrite, Packet};
+use mqtt311::{self, MqttRead, MqttWrite, Packet};
 use std::{
-    error::Error,
     io::{self, Cursor, ErrorKind},
 };
 use tokio_codec::{Decoder, Encoder};
@@ -28,17 +27,17 @@ impl Decoder for MqttCodec {
             let mut buf_ref = buf.as_ref();
             match buf_ref.read_packet_with_len() {
                 Err(e) => {
-                    if let mqtt3::Error::Io(e) = e {
+                    if let mqtt311::Error::Io(e) = e {
                         match e.kind() {
                             ErrorKind::TimedOut | ErrorKind::WouldBlock | ErrorKind::UnexpectedEof => return Ok(None),
                             _ => {
                                 error!("mqtt3 io error = {:?}", e);
-                                return Err(io::Error::new(e.kind(), e.description()));
+                                return Err(e);
                             }
                         }
                     } else {
                         error!("mqtt3 read error = {:?}", e);
-                        return Err(io::Error::new(ErrorKind::Other, e.description()));
+                        return Err(io::Error::new(ErrorKind::Other, "Mqtt Error"));
                     }
                 }
                 Ok(v) => v,

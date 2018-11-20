@@ -5,7 +5,7 @@ extern crate crossbeam_channel;
 extern crate futures;
 #[cfg(feature = "jwt")]
 extern crate jsonwebtoken;
-extern crate mqtt3;
+extern crate mqtt311;
 #[cfg(feature = "nativetls")]
 extern crate native_tls;
 extern crate tokio;
@@ -34,5 +34,5 @@ pub mod error;
 pub mod mqttoptions;
 
 pub use client::MqttClient;
-pub use mqtt3::QoS;
+pub use mqtt311::QoS;
 pub use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions, SecurityOptions};

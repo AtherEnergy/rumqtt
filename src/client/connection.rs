@@ -17,7 +17,7 @@ use futures::{
     Sink,
     Stream,
 };
-use mqtt3::Packet;
+use mqtt311::Packet;
 use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions};
 use std::{cell::RefCell, rc::Rc, thread, time::Duration};
 use tokio::runtime::current_thread;
@@ -356,7 +356,7 @@ fn packet_info(packet: &Packet) -> String {
                                        payload size = {:?} bytes",
                                       p.topic_name,
                                       p.qos,
-                                      p.pid,
+                                      p.pkid,
                                       p.payload.len()),
 
         _ => format!("{:?}", packet),
