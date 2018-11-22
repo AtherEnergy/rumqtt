@@ -334,7 +334,7 @@ mod test {
     use super::{MqttConnectionStatus, MqttState};
     use client::{Notification, Request};
     use error::NetworkError;
-    use mqtt3::*;
+    use mqtt311::*;
     use mqttoptions::MqttOptions;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {

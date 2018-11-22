@@ -17,6 +17,7 @@ failure = "0.1"
 derive_more = "0.13"
 pretty_env_logger = "0.2"
 mqtt311 = { git = "https://github.com/tekjar/mqtt311" }
+# mqtt311 = { path = "../mqtt311"}
 
 [dependencies.native-tls]
 version = "0.2"
