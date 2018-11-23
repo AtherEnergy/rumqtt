@@ -8,7 +8,6 @@ tokio = "0.1"
 tokio-timer = "0.2.7"
 tokio-io = "0.1"
 tokio-codec = "0.1"
-tokio-tls = "0.2"
 bytes = "0.4"
 futures = "0.1"
 crossbeam-channel = "0.3"
@@ -20,6 +19,10 @@ mqtt311 = { git = "https://github.com/tekjar/mqtt311" }
 # mqtt311 = { path = "../mqtt311"}
 
 [dependencies.native-tls]
+version = "0.2"
+optional = true
+
+[dependencies.tokio-tls]
 version = "0.2"
 optional = true
 
@@ -56,4 +59,4 @@ serde_derive = "1"
 default = ["rustls", "jwt"]
 rustls = ["tokio-rustls", "webpki"]
 jwt = ["jsonwebtoken", "chrono", "serde", "serde_derive"]
-nativetls = ["native-tls"]
+nativetls = ["native-tls", "tokio-tls"]
