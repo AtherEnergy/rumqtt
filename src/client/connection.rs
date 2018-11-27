@@ -193,7 +193,7 @@ impl Connection {
             ConnectionMethod::Tcp => builder,
         };
 
-        builder.connect(&host, port)
+        let stream = builder.tcp_connect(&host, port);
     }
 
     /// Composes a new future which is a combination of tcp connect + mqtt handshake

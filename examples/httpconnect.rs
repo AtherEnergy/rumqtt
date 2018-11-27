@@ -14,6 +14,7 @@ use futures::future::Future;
 use futures::sink::Sink;
 use futures::stream::Stream;
 use tokio::codec::Decoder;
+use tokio::io::AsyncRead;
 
 #[derive(Deserialize, Debug)]
 struct Config {
@@ -39,7 +40,7 @@ fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
 
 fn connect_future(proxy_host: &str, proxy_port: u16, main_host: &str, main_port: u16, proxy_auth: &str) -> impl Future<Item = TcpStream>{
     let codec = LinesCodec::new();
-    let host = main_host.to_string() + &format!("{}", main_port);
+    let host = main_host.to_string() + &format!(":{}", main_port);
     let socket = lookup_ipv4(proxy_host, proxy_port);
 
     let connect = format!("CONNECT {} HTTP/1.1\r\nHost: {}\r\nProxy-Authorization: {}\r\n\r\n", host, host, proxy_auth);

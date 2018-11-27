@@ -72,6 +72,10 @@ impl MqttClient {
         Ok((client, notification_rx))
     }
 
+//    pub fn proxy_start(opts: MqttOptions, ) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+//
+//    }
+
     pub fn publish<S, V>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError>
     where S: Into<String>, V: Into<Vec<u8>>
     {
