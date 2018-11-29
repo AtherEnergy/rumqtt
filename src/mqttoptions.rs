@@ -41,6 +41,14 @@ pub enum ConnectionMethod {
 
 
 #[derive(Clone, Debug)]
+pub enum Proxy {
+    None,
+    /// Option to tunnel through http connect. (Proxy name, Port, Auth)
+    HttpConnect(String, u16, String),
+}
+
+
+#[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
     broker_addr: String,
@@ -53,6 +61,8 @@ pub struct MqttOptions {
     client_id: String,
     /// connection method
     connection_method: ConnectionMethod,
+    /// proxy
+    proxy: Proxy,
     /// reconnection options
     reconnect: ReconnectOptions,
     /// security options
@@ -71,6 +81,7 @@ impl Default for MqttOptions {
                       clean_session: true,
                       client_id: "test-client".into(),
                       connection_method: ConnectionMethod::Tcp,
+                      proxy: Proxy::None,
                       reconnect: ReconnectOptions::AfterFirstSuccess(10),
                       security: SecurityOptions::None,
                       max_packet_size: 256 * 1024,
@@ -92,6 +103,7 @@ impl MqttOptions {
                       clean_session: true,
                       client_id: id,
                       connection_method: ConnectionMethod::Tcp,
+                      proxy: Proxy::None,
                       reconnect: ReconnectOptions::AfterFirstSuccess(10),
                       security: SecurityOptions::None,
                       max_packet_size: 256 * 1024,
@@ -152,6 +164,16 @@ impl MqttOptions {
 
     pub fn connection_method(&self) -> ConnectionMethod {
         self.connection_method.clone()
+    }
+
+
+    pub fn set_proxy(mut self, proxy: Proxy) -> Self {
+        self.proxy = proxy;
+        self
+    }
+
+    pub fn proxy(&self) -> Proxy {
+        self.proxy.clone()
     }
 
     /// Time interval after which client should retry for new

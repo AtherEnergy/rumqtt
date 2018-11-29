@@ -28,6 +28,7 @@ use futures::sync::mpsc::Receiver;
 use client::UserHandle;
 use tokio_timer::timeout;
 use client::Command;
+use mqttoptions::Proxy;
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -193,7 +194,14 @@ impl Connection {
             ConnectionMethod::Tcp => builder,
         };
 
-        let stream = builder.tcp_connect(&host, port);
+        let builder = match self.mqttoptions.proxy() {
+            Proxy::None => builder,
+            Proxy::HttpConnect(proxy_host, proxy_port, proxy_auth) => {
+                builder.set_http_proxy(&proxy_host, proxy_port, &proxy_auth)
+            },
+        };
+
+        builder.connect(&host, port)
     }
 
     /// Composes a new future which is a combination of tcp connect + mqtt handshake
@@ -207,6 +215,13 @@ impl Connection {
                               framed.send(packet).map_err(ConnectError::Io)
                           })
                           .and_then(|framed| framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err)))
+                          .and_then(move |(response, framed)| {
+                              debug!("Mqtt connect response = {:?}", response);
+                              thread::sleep_ms(10000);
+                              framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err))
+                              // let mut mqtt_state = mqtt_state.borrow_mut();
+                              //check_and_validate_connack(response, framed, &mut mqtt_state)
+                          })
                           .and_then(move |(response, framed)| {
                               debug!("Mqtt connect response = {:?}", response);
                               let mut mqtt_state = mqtt_state.borrow_mut();

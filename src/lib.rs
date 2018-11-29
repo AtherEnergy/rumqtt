@@ -36,4 +36,5 @@ pub mod mqttoptions;
 pub use client::MqttClient;
 pub use mqtt311::{QoS, PacketIdentifier};
 pub use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions, SecurityOptions};
+pub use mqttoptions::Proxy;
 pub use crossbeam_channel::Receiver;

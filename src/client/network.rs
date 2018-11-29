@@ -4,12 +4,6 @@ use client::network::stream::NetworkStream;
 use futures::Poll;
 use std::net::SocketAddr;
 use tokio_io::{AsyncRead, AsyncWrite};
-use futures::Future;
-use tokio::net::TcpStream;
-
-pub trait ConnectFuture {
-    fn connect() -> Box<dyn Future<Item = TcpStream, Error = io::Error>>;
-}
 
 #[cfg(feature = "rustls")]
 pub mod stream {
@@ -34,9 +28,7 @@ pub mod stream {
     };
     use webpki::DNSNameRef;
     use std::io;
-    use client::network::ConnectFuture;
     use futures::sink::Sink;
-    use futures::future::IntoFuture;
     use futures::stream::Stream;
     use tokio::codec::LinesCodec;
 
@@ -47,9 +39,12 @@ pub mod stream {
 
     impl NetworkStream {
         pub fn builder() -> NetworkStreamBuilder {
-            NetworkStreamBuilder { certificate_authority: None,
-                                   client_cert: None,
-                                   client_private_key: None }
+            NetworkStreamBuilder {
+                certificate_authority: None,
+                client_cert: None,
+                client_private_key: None,
+                http_proxy: None
+            }
         }
     }
 
@@ -57,6 +52,7 @@ pub mod stream {
         certificate_authority: Option<Vec<u8>>,
         client_cert: Option<Vec<u8>>,
         client_private_key: Option<Vec<u8>>,
+        http_proxy: Option<(String, u16, String)>
     }
 
     impl NetworkStreamBuilder {
@@ -68,6 +64,11 @@ pub mod stream {
         pub fn add_client_auth(mut self, cert: &[u8], private_key: &[u8]) -> NetworkStreamBuilder {
             self.client_cert = Some(cert.to_vec());
             self.client_private_key = Some(private_key.to_vec());
+            self
+        }
+
+        pub fn set_http_proxy(mut self, proxy_host: &str, proxy_port: u16, auth: &str) -> NetworkStreamBuilder {
+            self.http_proxy = Some((proxy_host.to_string(), proxy_port, auth.to_string()));
             self
         }
 
@@ -126,11 +127,12 @@ pub mod stream {
                 })
                 .and_then(|(s, f)| {
                     println!("{:?}", s);
+                    f.into_future().map_err(|(e, _f)| e)
+                })
+                .and_then(|(s, f)| {
+                    println!("{:?}", s);
                     let stream = f.into_inner();
                     future::ok(stream)
-                })
-                .and_then(|s| {
-                    future::ok(s)
                 })
         }
 
@@ -139,24 +141,39 @@ pub mod stream {
             TcpStream::connect(&addr)
         }
 
-        pub fn connect(mut self, host: &str, connection: impl Future<Item = TcpStream, Error = io::Error>) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
+        pub fn connect(mut self,
+                       host: &str,
+                       port: u16)
+                       -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
             let tls_connector = self.create_stream();
+
+            let stream = match self.http_proxy {
+                Some((ref proxy_host, proxy_port, ref proxy_auth)) => {
+                    let s = self.http_connect(proxy_host, proxy_port, host, port, proxy_auth);
+                    Either::A(s)
+                }
+                None => {
+                    let s = self.tcp_connect(host, port);
+                    Either::B(s)
+                }
+            };
+
 
             match tls_connector {
                 Ok(tls_connector) => {
                     let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
-                    Either::A(connection.and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
-                                                       .map_err(ConnectError::from)
-                                                       .and_then(|stream| {
-                                                           let stream = NetworkStream::Tls(stream);
-                                                           future::ok(MqttCodec.framed(stream))
-                                                       }))
+                    Either::A(stream.and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
+                        .map_err(ConnectError::from)
+                        .and_then(|stream| {
+                            let stream = NetworkStream::Tls(stream);
+                            future::ok(MqttCodec.framed(stream))
+                        }))
                 }
-                Err(ConnectError::NoCertificateAuthority) => Either::B(connection.and_then(|stream| {
-                                                                           let stream = NetworkStream::Tcp(stream);
-                                                                           future::ok(MqttCodec.framed(stream))
-                                                                       })
-                                                                       .map_err(ConnectError::from)),
+                Err(ConnectError::NoCertificateAuthority) => Either::B(stream.and_then(|stream| {
+                    let stream = NetworkStream::Tcp(stream);
+                    future::ok(MqttCodec.framed(stream))
+                })
+                    .map_err(ConnectError::from)),
                 _ => unimplemented!(),
             }
         }
