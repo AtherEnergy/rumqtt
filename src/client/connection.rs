@@ -211,22 +211,15 @@ impl Connection {
         let connect_packet = self.mqtt_state.borrow_mut().handle_outgoing_connect().unwrap();
 
         tcp_connect_future.and_then(move |framed| {
-                              let packet = Packet::Connect(connect_packet);
-                              framed.send(packet).map_err(ConnectError::Io)
-                          })
-                          .and_then(|framed| framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err)))
-                          .and_then(move |(response, framed)| {
-                              debug!("Mqtt connect response = {:?}", response);
-                              thread::sleep_ms(10000);
-                              framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err))
-                              // let mut mqtt_state = mqtt_state.borrow_mut();
-                              //check_and_validate_connack(response, framed, &mut mqtt_state)
-                          })
-                          .and_then(move |(response, framed)| {
-                              debug!("Mqtt connect response = {:?}", response);
-                              let mut mqtt_state = mqtt_state.borrow_mut();
-                              check_and_validate_connack(response, framed, &mut mqtt_state)
-                          })
+            let packet = Packet::Connect(connect_packet);
+            framed.send(packet).map_err(ConnectError::Io)
+        })
+            .and_then(|framed| framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err)))
+            .and_then(move |(response, framed)| {
+                debug!("Mqtt connect response = {:?}", response);
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                check_and_validate_connack(response, framed, &mut mqtt_state)
+            })
     }
 
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
