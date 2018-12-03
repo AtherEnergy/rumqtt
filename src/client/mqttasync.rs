@@ -1,11 +1,10 @@
 use futures::{sink::Sink, stream::Stream, Poll, StartSend};
 
-use client::prepend::Prepend;
+use client::{prepend::Prepend, Command};
 use error::{NetworkError, PollError};
 use futures::Async;
 use mqtt311::Packet;
 use std::io;
-use client::Command;
 
 /// Customized stream/sink to cater rumqtt needs.
 /// 1
@@ -40,9 +39,10 @@ pub struct MqttStream<S1, S2, S3, S4>
 }
 
 pub fn new<S1, S2, S3, S4>(network_stream: S1,
-                       network_sink: S2,
-                       request_stream: Prepend<S3>,
-                       command_stream: S4) -> MqttStream<S1, S2, S3, S4>
+                           network_sink: S2,
+                           request_stream: Prepend<S3>,
+                           command_stream: S4)
+                           -> MqttStream<S1, S2, S3, S4>
     where S1: Stream<Item = Packet, Error = NetworkError>,
           S2: Sink<SinkItem = Packet, SinkError = io::Error>,
           S3: Stream<Item = Packet, Error = NetworkError>,
@@ -66,25 +66,22 @@ impl<S1, S2, S3, S4> MqttStream<S1, S2, S3, S4>
         let command_stream = self.command_stream.as_mut().unwrap();
 
         match command_stream.poll()? {
-            Async::Ready(Some(command)) => {
-                match command {
-                    Command::Pause => {
-                        self.is_paused = true;
-                        Ok(Async::NotReady)
-                    },
-                    Command::Resume => {
-                        self.is_paused = false;
-                        Err(NetworkError::Interleave)
-                    }
+            Async::Ready(Some(command)) => match command {
+                Command::Pause => {
+                    self.is_paused = true;
+                    Ok(Async::NotReady)
+                }
+                Command::Resume => {
+                    self.is_paused = false;
+                    Err(NetworkError::Interleave)
                 }
             },
             // ignore polls due to request/network during pause mode
             Async::Ready(None) | Async::NotReady if self.is_paused => Ok(Async::NotReady),
             // consider polls due to request/network during !pause mode
-            Async::Ready(None) | Async::NotReady => Err(NetworkError::Interleave)
+            Async::Ready(None) | Async::NotReady => Err(NetworkError::Interleave),
         }
     }
-
 
     fn interleave(&mut self) -> Poll<Option<S1::Item>, NetworkError> {
         let request_stream = self.request_stream.as_mut().unwrap();
@@ -129,7 +126,6 @@ impl<S1, S2, S3, S4> Stream for MqttStream<S1, S2, S3, S4>
     type Error = PollError<S3, S4>;
 
     fn poll(&mut self) -> Poll<Option<S1::Item>, PollError<S3, S4>> {
-
         match self.playpause() {
             Ok(v) => return Ok(v),
             Err(NetworkError::Interleave) => (),
@@ -137,7 +133,7 @@ impl<S1, S2, S3, S4> Stream for MqttStream<S1, S2, S3, S4>
                 let request_stream = self.request_stream.take().unwrap();
                 let command_stream = self.command_stream.take().unwrap();
 
-                return Err(PollError::Network((e, request_stream, command_stream)))
+                return Err(PollError::Network((e, request_stream, command_stream)));
             }
         }
 
@@ -164,19 +160,19 @@ impl<S1, S2, S3, S4> Sink for MqttStream<S1, S2, S3, S4>
 
     fn start_send(&mut self, item: S2::SinkItem) -> StartSend<S2::SinkItem, PollError<S3, S4>> {
         self.network_sink.start_send(item).map_err(|e| {
-            let request_stream = self.request_stream.take().unwrap();
-            let command_stream = self.command_stream.take().unwrap();
+                                              let request_stream = self.request_stream.take().unwrap();
+                                              let command_stream = self.command_stream.take().unwrap();
 
-            PollError::Network((NetworkError::Io(e), request_stream, command_stream))
-        })
+                                              PollError::Network((NetworkError::Io(e), request_stream, command_stream))
+                                          })
     }
 
     fn poll_complete(&mut self) -> Poll<(), PollError<S3, S4>> {
         self.network_sink.poll_complete().map_err(|e| {
-            let request_stream = self.request_stream.take().unwrap();
-            let command_stream = self.command_stream.take().unwrap();
+                                             let request_stream = self.request_stream.take().unwrap();
+                                             let command_stream = self.command_stream.take().unwrap();
 
-            PollError::Network((NetworkError::Io(e), request_stream, command_stream))
-        })
+                                             PollError::Network((NetworkError::Io(e), request_stream, command_stream))
+                                         })
     }
 }

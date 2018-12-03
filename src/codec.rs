@@ -1,8 +1,6 @@
 use bytes::BytesMut;
 use mqtt311::{self, MqttRead, MqttWrite, Packet};
-use std::{
-    io::{self, Cursor, ErrorKind},
-};
+use std::io::{self, Cursor, ErrorKind};
 use tokio_codec::{Decoder, Encoder};
 
 #[derive(Debug)]

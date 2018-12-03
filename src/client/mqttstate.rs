@@ -116,11 +116,7 @@ impl MqttState {
             VecDeque::new()
         } else {
             //TODO: Write unittest for checking state during reconnection
-            self.outgoing_pub
-                .clone()
-                .into_iter()
-                .map(Packet::Publish)
-                .collect()
+            self.outgoing_pub.clone().into_iter().map(Packet::Publish).collect()
         }
     }
 

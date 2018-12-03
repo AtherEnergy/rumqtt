@@ -1,6 +1,5 @@
-use futures::Stream;
+use futures::{Async, Poll, Stream};
 use std::collections::VecDeque;
-use futures::{Async, Poll};
 
 pub trait StreamExt: Stream {
     fn prepend(self, first: VecDeque<Self::Item>) -> Prepend<Self>
@@ -44,7 +43,7 @@ impl<S> Stream for Prepend<S> where S: Stream
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Some(v) = self.session.pop_front() {
-            return Ok(Async::Ready(Some(v)))
+            return Ok(Async::Ready(Some(v)));
         }
 
         self.stream.poll()

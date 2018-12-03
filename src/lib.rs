@@ -34,7 +34,6 @@ pub mod error;
 pub mod mqttoptions;
 
 pub use client::MqttClient;
-pub use mqtt311::{QoS, PacketIdentifier};
-pub use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions, SecurityOptions};
-pub use mqttoptions::Proxy;
 pub use crossbeam_channel::Receiver;
+pub use mqtt311::{PacketIdentifier, QoS};
+pub use mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};

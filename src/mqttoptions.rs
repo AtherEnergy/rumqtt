@@ -39,14 +39,12 @@ pub enum ConnectionMethod {
     Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
-
 #[derive(Clone, Debug)]
 pub enum Proxy {
     None,
     /// Option to tunnel through http connect. (Proxy name, Port, Auth)
     HttpConnect(String, u16, String),
 }
-
 
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
@@ -165,7 +163,6 @@ impl MqttOptions {
     pub fn connection_method(&self) -> ConnectionMethod {
         self.connection_method.clone()
     }
-
 
     pub fn set_proxy(mut self, proxy: Proxy) -> Self {
         self.proxy = proxy;

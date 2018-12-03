@@ -1,20 +1,22 @@
+extern crate futures;
 extern crate pretty_env_logger;
 extern crate rumqtt;
 extern crate tokio;
-extern crate futures;
 #[macro_use]
 extern crate serde_derive;
 
-use rumqtt::{MqttClient, MqttOptions, ReconnectOptions, Proxy};
+use futures::{
+    future::{self, Future},
+    sink::Sink,
+    stream::Stream,
+};
+use rumqtt::{MqttClient, MqttOptions, Proxy, ReconnectOptions};
 use std::net::SocketAddr;
-use tokio::net::TcpStream;
-use futures::future;
-use tokio::codec::LinesCodec;
-use futures::future::Future;
-use futures::sink::Sink;
-use futures::stream::Stream;
-use tokio::codec::Decoder;
-use tokio::io::AsyncRead;
+use tokio::{
+    codec::{Decoder, LinesCodec},
+    io::AsyncRead,
+    net::TcpStream,
+};
 
 #[derive(Deserialize, Debug)]
 struct Config {
@@ -22,9 +24,8 @@ struct Config {
     proxy_port: u16,
     main_host: String,
     main_port: u16,
-    proxy_auth: String
+    proxy_auth: String,
 }
-
 
 fn main() {
     pretty_env_logger::init();
@@ -39,10 +40,9 @@ fn main() {
 
     let mqtt_options = MqttOptions::new(id, host, port);
 
-    let mqtt_options = mqtt_options
-        .set_keep_alive(10)
-        .set_reconnect_opts(reconnect_options)
-        .set_proxy(proxy);
+    let mqtt_options = mqtt_options.set_keep_alive(10)
+                                   .set_reconnect_opts(reconnect_options)
+                                   .set_proxy(proxy);
 
     let (_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 

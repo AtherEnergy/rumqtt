@@ -1,4 +1,4 @@
-use client::{prepend::Prepend, Request};
+use client::{prepend::Prepend, Command, Request};
 use crossbeam_channel::RecvError;
 use futures::{sync::mpsc::SendError, Stream};
 #[cfg(feature = "jwt")]
@@ -6,7 +6,6 @@ use jsonwebtoken;
 use mqtt311::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
-use client::Command;
 
 #[derive(Debug, Fail, From)]
 pub enum ClientError {
