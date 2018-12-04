@@ -17,6 +17,9 @@ use tokio::{
     io::AsyncRead,
     net::TcpStream,
 };
+use rumqtt::QoS;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Deserialize, Debug)]
 struct Config {
@@ -44,7 +47,15 @@ fn main() {
                                    .set_reconnect_opts(reconnect_options)
                                    .set_proxy(proxy);
 
-    let (_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+
+    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
+
+    thread::spawn(move || for i in 0..100 {
+        let payload = format!("publish {}", i);
+        thread::sleep(Duration::from_millis(100));
+        mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
+    });
 
     for notification in notifications {
         println!("{:?}", notification)
