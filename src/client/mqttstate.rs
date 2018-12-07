@@ -188,7 +188,10 @@ impl MqttState {
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => Ok((Notification::None, Request::None)),
+            QoS::AtMostOnce => {
+                let notification = Notification::Publish(publish);
+                Ok((notification, Request::None))
+            }
             QoS::AtLeastOnce => {
                 let pkid = publish.pkid.unwrap();
                 let request = Request::PubAck(pkid);
