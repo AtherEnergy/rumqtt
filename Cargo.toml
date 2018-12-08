@@ -51,6 +51,7 @@ optional = true
 envy = "0.3"
 serde = "1"
 serde_derive = "1"
+base64 = "0.10"
 
 [features]
 default = ["rustls", "jwt"]
