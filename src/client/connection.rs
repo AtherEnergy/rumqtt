@@ -182,6 +182,8 @@ impl Connection {
     fn tcp_connect_future(&self) -> impl Future<Item = MqttFramed, Error = ConnectError> {
         let (host, port) = self.mqttoptions.broker_address();
         let connection_method = self.mqttoptions.connection_method();
+        let proxy = self.mqttoptions.proxy();
+
         let builder = NetworkStream::builder();
 
         let builder = match connection_method {
@@ -190,10 +192,11 @@ impl Connection {
             ConnectionMethod::Tcp => builder,
         };
 
-        let builder = match self.mqttoptions.proxy() {
+        let builder = match proxy {
             Proxy::None => builder,
-            Proxy::HttpConnect(proxy_host, proxy_port, proxy_auth) => {
-                builder.set_http_proxy(&proxy_host, proxy_port, &proxy_auth)
+            Proxy::HttpConnect(proxy_host, proxy_port, key, expiry) => {
+                let id = self.mqttoptions.client_id();
+                builder.set_http_proxy(&id, &proxy_host, proxy_port, &key, expiry)
             }
         };
 

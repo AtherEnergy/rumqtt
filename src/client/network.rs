@@ -7,7 +7,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
-    use client::network::lookup_ipv4;
+    use client::network::{lookup_ipv4, generate_httpproxy_auth};
     use codec::MqttCodec;
     use error::ConnectError;
     use futures::{
@@ -31,6 +31,7 @@ pub mod stream {
         TlsStream,
     };
     use webpki::DNSNameRef;
+    use uuid::Uuid;
 
     pub enum NetworkStream {
         Tcp(TcpStream),
@@ -50,7 +51,7 @@ pub mod stream {
         certificate_authority: Option<Vec<u8>>,
         client_cert: Option<Vec<u8>>,
         client_private_key: Option<Vec<u8>>,
-        http_proxy: Option<(String, u16, String)>,
+        http_proxy: Option<(String, String, u16, Vec<u8>, i64)>,
     }
 
     impl NetworkStreamBuilder {
@@ -65,8 +66,15 @@ pub mod stream {
             self
         }
 
-        pub fn set_http_proxy(mut self, proxy_host: &str, proxy_port: u16, auth: &str) -> NetworkStreamBuilder {
-            self.http_proxy = Some((proxy_host.to_string(), proxy_port, auth.to_string()));
+        pub fn set_http_proxy(mut self, id: &str, proxy_host: &str, proxy_port: u16, key: &[u8], expiry: i64) -> NetworkStreamBuilder {
+            self.http_proxy = Some((
+                id.to_owned(), 
+                proxy_host.to_owned(), 
+                proxy_port, 
+                key.to_owned(),
+                expiry
+            ));
+            
             self
         }
 
@@ -99,12 +107,16 @@ pub mod stream {
         }
 
         pub fn http_connect(&self,
+                            id: &str,
                             proxy_host: &str,
                             proxy_port: u16,
                             host: &str,
                             port: u16,
-                            proxy_auth: &str)
+                            key: &[u8],
+                            expiry: i64)
                             -> impl Future<Item = TcpStream, Error = io::Error> {
+            
+            let proxy_auth = generate_httpproxy_auth(id, key, expiry);
             let connect = format!("CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\nProxy-Authorization: {}\r\n\r\n",
                                   host, port, host, port, proxy_auth);
             println!("{}", connect);
@@ -145,8 +157,8 @@ pub mod stream {
             let tls_connector = self.create_stream();
 
             let stream = match self.http_proxy {
-                Some((ref proxy_host, proxy_port, ref proxy_auth)) => {
-                    let s = self.http_connect(proxy_host, proxy_port, host, port, proxy_auth);
+                Some((ref id, ref proxy_host, proxy_port, ref key, expiry)) => {
+                    let s = self.http_connect(id, proxy_host, proxy_port, host, port, key, expiry);
                     Either::A(s)
                 }
                 None => {
@@ -200,6 +212,39 @@ fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
     }
 
     unreachable!("Cannot lookup address");
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    iat: i64,
+    exp: i64,
+    aud: String,
+}
+
+fn generate_httpproxy_auth(id: &str, key: &[u8], expiry:i64) -> String {
+    use chrono::{Duration, Utc};
+    use jsonwebtoken::{encode, Algorithm, Header};
+    let time = Utc::now();
+    let jwt_header = Header::new(Algorithm::RS256);
+    let iat = time.timestamp();
+    //let uuid =
+    
+    let exp = time
+        .checked_add_signed(Duration::minutes(expiry))
+        .expect("Unable to create expiry")
+        .timestamp();
+    
+    let claims = Claims {
+        iat,
+        exp,
+        aud: "hello world".to_string(),
+    };
+    
+    let jwt = encode(&jwt_header, &claims, &key).unwrap();
+    let userid_password = format!("{}:{}", id, jwt);
+    let auth = base64::encode(userid_password.as_bytes());
+
+    format!("Basic {}", auth)
 }
 
 impl Read for NetworkStream {

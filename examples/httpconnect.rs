@@ -5,18 +5,9 @@ extern crate tokio;
 #[macro_use]
 extern crate serde_derive;
 
-use futures::{
-    future::{self, Future},
-    sink::Sink,
-    stream::Stream,
-};
+
 use rumqtt::{MqttClient, MqttOptions, Proxy, ReconnectOptions};
-use std::net::SocketAddr;
-use tokio::{
-    codec::{Decoder, LinesCodec},
-    io::AsyncRead,
-    net::TcpStream,
-};
+
 use rumqtt::QoS;
 use std::thread;
 use std::time::Duration;
@@ -27,17 +18,17 @@ struct Config {
     proxy_port: u16,
     main_host: String,
     main_port: u16,
-    proxy_auth: String,
 }
 
 fn main() {
     pretty_env_logger::init();
     let config: Config = envy::from_env().unwrap();
+    let key = include_bytes!("gcloudfiles/rsa_private.der");
 
     let reconnect_options = ReconnectOptions::Never;
-    let proxy = Proxy::HttpConnect(config.proxy_host, config.proxy_port, config.proxy_auth);
+    let proxy = Proxy::HttpConnect(config.proxy_host, config.proxy_port, key.to_vec(), 40);
 
-    let id = "test-id";
+    let id = "RAVI-LINUX";
     let host = "prod-mqtt-broker.atherengineering.in";
     let port = 1883;
 

@@ -27,6 +27,8 @@ extern crate log;
 extern crate failure;
 extern crate core;
 extern crate pretty_env_logger;
+extern crate base64;
+extern crate uuid;
 
 pub mod client;
 pub mod codec;
