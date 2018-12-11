@@ -25,7 +25,7 @@ fn main() {
     let config: Config = envy::from_env().unwrap();
     let key = include_bytes!("gcloudfiles/rsa_private.der");
 
-    let reconnect_options = ReconnectOptions::Never;
+    let reconnect_options = ReconnectOptions::AfterFirstSuccess(10);
     let proxy = Proxy::HttpConnect(config.proxy_host, config.proxy_port, key.to_vec(), 40);
 
     let id = "RAVI-LINUX";

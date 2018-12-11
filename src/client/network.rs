@@ -214,21 +214,24 @@ fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
     unreachable!("Cannot lookup address");
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    iat: i64,
-    exp: i64,
-    aud: String,
-}
 
 fn generate_httpproxy_auth(id: &str, key: &[u8], expiry:i64) -> String {
     use chrono::{Duration, Utc};
     use jsonwebtoken::{encode, Algorithm, Header};
+    use uuid::Uuid;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        iat: i64,
+        exp: i64,
+        jti: Uuid,
+    }
+
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();
-    //let uuid =
-    
+    let jti = Uuid::new_v4();
+
     let exp = time
         .checked_add_signed(Duration::minutes(expiry))
         .expect("Unable to create expiry")
@@ -237,7 +240,7 @@ fn generate_httpproxy_auth(id: &str, key: &[u8], expiry:i64) -> String {
     let claims = Claims {
         iat,
         exp,
-        aud: "hello world".to_string(),
+        jti
     };
     
     let jwt = encode(&jwt_header, &claims, &key).unwrap();

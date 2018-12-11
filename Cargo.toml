@@ -16,7 +16,7 @@ log = "0.4"
 failure = "0.1"
 derive_more = "0.13"
 base64 = "0.10"
-uuid = "0.7"
+uuid = {version = "0.7", features = ["serde", "v4"]}
 pretty_env_logger = "0.2"
 mqtt311 = { git = "https://github.com/tekjar/mqtt311" }
 # mqtt311 = { path = "../mqtt311"}
