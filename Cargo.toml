@@ -57,6 +57,7 @@ base64 = "0.10"
 
 [features]
 default = ["rustls", "jwt"]
+acknotify = []
 rustls = ["tokio-rustls", "webpki"]
 jwt = ["jsonwebtoken", "chrono", "serde", "serde_derive"]
 nativetls = ["native-tls"]

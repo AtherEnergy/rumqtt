@@ -152,7 +152,13 @@ impl MqttState {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
-                Ok((Notification::None, Request::None))
+
+                let request = Request::None;
+                let notification = Notification::None;
+                #[cfg(feature = "jwt")]
+                let notification = Notification::PubAck(pkid);
+                
+                Ok((notification, request))
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
