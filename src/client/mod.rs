@@ -57,15 +57,15 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> { 
+        let max_packet_size = opts.max_packet_size();
         let UserHandle { request_tx,
                          command_tx,
                          notification_rx, } = connection::Connection::run(opts)?;
 
-        //TODO: Remove max packet size hardcode
         let client = MqttClient { request_tx,
                                   command_tx,
-                                  max_packet_size: 1000 };
+                                  max_packet_size};
 
         Ok((client, notification_rx))
     }
