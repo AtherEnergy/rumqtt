@@ -31,7 +31,6 @@ pub mod stream {
         TlsStream,
     };
     use webpki::DNSNameRef;
-    use uuid::Uuid;
 
     pub enum NetworkStream {
         Tcp(TcpStream),
@@ -124,22 +123,22 @@ pub mod stream {
             let addr = lookup_ipv4(proxy_host, proxy_port);
             let codec = LinesCodec::new();
 
-            TcpStream::connect(&addr).and_then(|mut tcp| {
+            TcpStream::connect(&addr).and_then(|tcp| {
                                          let framed = tcp.framed(codec);
                                          future::ok(framed)
                                      })
                                      .and_then(|f| f.send(connect))
                                      .and_then(|f| f.into_future().map_err(|(e, _f)| e))
                                      .and_then(|(s, f)| {
-                                         println!("{:?}", s);
+                                         debug!("{:?}", s);
                                          f.into_future().map_err(|(e, _f)| e)
                                      })
                                      .and_then(|(s, f)| {
-                                         println!("{:?}", s);
+                                         debug!("{:?}", s);
                                          f.into_future().map_err(|(e, _f)| e)
                                      })
                                      .and_then(|(s, f)| {
-                                         println!("{:?}", s);
+                                         debug!("{:?}", s);
                                          let stream = f.into_inner();
                                          future::ok(stream)
                                      })
