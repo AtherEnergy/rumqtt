@@ -14,6 +14,7 @@ extern crate tokio_io;
 #[cfg(feature = "rustls")]
 extern crate tokio_rustls;
 extern crate tokio_timer;
+#[cfg(feature = "nativetls")]
 extern crate tokio_tls;
 #[cfg(feature = "rustls")]
 extern crate webpki;
