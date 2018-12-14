@@ -28,11 +28,8 @@ fn main() {
     let reconnect_options = ReconnectOptions::AfterFirstSuccess(10);
     let proxy = Proxy::HttpConnect(config.proxy_host, config.proxy_port, key.to_vec(), 40);
 
-    let id = "RAVI-LINUX";
-    let host = "prod-mqtt-broker.atherengineering.in";
-    let port = 1883;
-
-    let mqtt_options = MqttOptions::new(id, host, port);
+    let id = "http-connect-test";
+    let mqtt_options = MqttOptions::new(id, config.main_host, config.main_port);
 
     let mqtt_options = mqtt_options.set_keep_alive(10)
                                    .set_reconnect_opts(reconnect_options)
