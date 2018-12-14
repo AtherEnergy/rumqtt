@@ -5,8 +5,7 @@ extern crate rumqtt;
 extern crate serde_derive;
 
 use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
-use std::thread;
-use std::time::Duration;
+use std::{thread, time::Duration};
 
 // NOTES:
 // ---------

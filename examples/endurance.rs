@@ -3,14 +3,10 @@ extern crate crossbeam_channel;
 extern crate pretty_env_logger;
 extern crate rumqtt;
 
-use rumqtt::client::Notification;
-use rumqtt::Receiver;
-use rumqtt::{MqttClient, MqttOptions, QoS};
-use std::{thread, time::Duration};
-use std::collections::HashSet;
+use rumqtt::{client::Notification, MqttClient, MqttOptions, QoS, Receiver};
+use std::{collections::HashSet, thread, time::Duration};
 
 const COUNT: u16 = 10_000;
-
 
 fn handle_notifications(notifications: Receiver<Notification>, done: Receiver<bool>) {
     let mut counts = HashSet::new();
@@ -39,17 +35,13 @@ fn handle_notifications(notifications: Receiver<Notification>, done: Receiver<bo
     println!("{:?}", counts);
 }
 
-
-
 fn main() {
     pretty_env_logger::init();
     let mqtt_options = MqttOptions::new("test-id", "127.0.0.1", 1883).set_keep_alive(30);
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     let (done_tx, done_rx) = crossbeam_channel::bounded(1);
 
-    mqtt_client
-        .subscribe("hello/world", QoS::AtLeastOnce)
-        .unwrap();
+    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 
     let sleep_time = Duration::from_millis(100);
 
@@ -58,9 +50,7 @@ fn main() {
             let payload = format!("publish {}", i);
             thread::sleep(sleep_time);
 
-            mqtt_client
-                .publish("hello/world", QoS::AtLeastOnce, payload)
-                .unwrap();
+            mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
         }
 
         thread::sleep(sleep_time * 10);

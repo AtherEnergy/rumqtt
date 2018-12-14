@@ -116,11 +116,7 @@ impl MqttState {
             VecDeque::new()
         } else {
             //TODO: Write unittest for checking state during reconnection
-            self.outgoing_pub
-                .clone()
-                .into_iter()
-                .map(Packet::Publish)
-                .collect()
+            self.outgoing_pub.clone().into_iter().map(Packet::Publish).collect()
         }
     }
 
@@ -139,7 +135,7 @@ impl MqttState {
 
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
-    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
+    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {        
         if publish.payload.len() > self.opts.max_packet_size() {
             return Err(NetworkError::PacketSizeLimitExceeded);
         }
@@ -156,7 +152,15 @@ impl MqttState {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
-                Ok((Notification::None, Request::None))
+
+                let request = Request::None;
+                let notification = if cfg!(feature = "acknotify") {
+                    Notification::PubAck(pkid)
+                } else {
+                    Notification::None
+                };
+                
+                Ok((notification, request))
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
@@ -171,8 +175,13 @@ impl MqttState {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
                 self.outgoing_rel.push_back(pkid);
 
-                let notification = Notification::None;
                 let reply = Request::PubRel(pkid);
+                let notification = if cfg!(feature = "acknotify") {
+                    Notification::PubRec(pkid)
+                } else {
+                    Notification::None
+                };
+
                 Ok((notification, reply))
             }
             None => {
@@ -228,7 +237,14 @@ impl MqttState {
         match self.outgoing_rel.iter().position(|x| *x == pkid) {
             Some(index) => {
                 self.outgoing_rel.remove(index).expect("Wrong index");
-                Ok((Notification::None, Request::None))
+                let request = Request::None;
+                let notification = if cfg!(feature = "acknotify") {
+                    Notification::PubComp(pkid)
+                } else {
+                    Notification::None
+                };
+
+                Ok((notification, request))
             }
             _ => {
                 error!("Unsolicited pubcomp packet: {:?}", pkid);

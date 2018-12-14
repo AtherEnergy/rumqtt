@@ -39,6 +39,13 @@ pub enum ConnectionMethod {
     Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
+#[derive(Clone, Debug)]
+pub enum Proxy {
+    None,
+    /// Option to tunnel through http connect.
+    /// (Proxy name, Port, priave_key.der to sign jwt, Expiry in seconds)
+    HttpConnect(String, u16, Vec<u8>, i64),
+}
 
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
@@ -53,6 +60,8 @@ pub struct MqttOptions {
     client_id: String,
     /// connection method
     connection_method: ConnectionMethod,
+    /// proxy
+    proxy: Proxy,
     /// reconnection options
     reconnect: ReconnectOptions,
     /// security options
@@ -65,16 +74,19 @@ pub struct MqttOptions {
 
 impl Default for MqttOptions {
     fn default() -> Self {
-        MqttOptions { broker_addr: "127.0.0.1".into(),
-                      port: 1883,
-                      keep_alive: Duration::from_secs(30),
-                      clean_session: true,
-                      client_id: "test-client".into(),
-                      connection_method: ConnectionMethod::Tcp,
-                      reconnect: ReconnectOptions::AfterFirstSuccess(10),
-                      security: SecurityOptions::None,
-                      max_packet_size: 256 * 1024,
-                      last_will: None }
+        MqttOptions {
+            broker_addr: "127.0.0.1".into(),
+            port: 1883,
+            keep_alive: Duration::from_secs(30),
+            clean_session: true,
+            client_id: "test-client".into(),
+            connection_method: ConnectionMethod::Tcp,
+            proxy: Proxy::None,
+            reconnect: ReconnectOptions::AfterFirstSuccess(10),
+            security: SecurityOptions::None,
+            max_packet_size: 256 * 1024,
+            last_will: None,
+        }
     }
 }
 
@@ -86,16 +98,19 @@ impl MqttOptions {
             panic!("Invalid client id")
         }
 
-        MqttOptions { broker_addr: host.into(),
-                      port,
-                      keep_alive: Duration::from_secs(60),
-                      clean_session: true,
-                      client_id: id,
-                      connection_method: ConnectionMethod::Tcp,
-                      reconnect: ReconnectOptions::AfterFirstSuccess(10),
-                      security: SecurityOptions::None,
-                      max_packet_size: 256 * 1024,
-                      last_will: None }
+        MqttOptions {
+            broker_addr: host.into(),
+            port,
+            keep_alive: Duration::from_secs(60),
+            clean_session: true,
+            client_id: id,
+            connection_method: ConnectionMethod::Tcp,
+            proxy: Proxy::None,
+            reconnect: ReconnectOptions::AfterFirstSuccess(10),
+            security: SecurityOptions::None,
+            max_packet_size: 256 * 1024,
+            last_will: None,
+        }
     }
 
     pub fn broker_address(&self) -> (String, u16) {
@@ -115,6 +130,10 @@ impl MqttOptions {
 
     pub fn keep_alive(&self) -> Duration {
         self.keep_alive
+    }
+
+    pub fn client_id(&self) -> String {
+        self.client_id.clone()
     }
 
     /// Set packet size limit (in Kilo Bytes)
@@ -152,6 +171,15 @@ impl MqttOptions {
 
     pub fn connection_method(&self) -> ConnectionMethod {
         self.connection_method.clone()
+    }
+
+    pub fn set_proxy(mut self, proxy: Proxy) -> Self {
+        self.proxy = proxy;
+        self
+    }
+
+    pub fn proxy(&self) -> Proxy {
+        self.proxy.clone()
     }
 
     /// Time interval after which client should retry for new
@@ -196,13 +224,15 @@ impl MqttOptions {
             SecurityOptions::None => (None, None),
         };
 
-        let connect = Connect { protocol: Protocol::MQTT(4),
-                                keep_alive: self.keep_alive.as_secs() as u16,
-                                client_id: self.client_id.clone(),
-                                clean_session: self.clean_session,
-                                last_will: self.last_will.clone(),
-                                username,
-                                password };
+        let connect = Connect {
+            protocol: Protocol::MQTT(4),
+            keep_alive: self.keep_alive.as_secs() as u16,
+            client_id: self.client_id.clone(),
+            clean_session: self.clean_session,
+            last_will: self.last_will.clone(),
+            username,
+            password,
+        };
 
         Ok(connect)
     }
@@ -224,13 +254,39 @@ pub fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();
-    let exp = time.checked_add_signed(chrono::Duration::minutes(expiry))
-                  .expect("Unable to create expiry")
-                  .timestamp();
+    let exp = time
+        .checked_add_signed(chrono::Duration::minutes(expiry))
+        .expect("Unable to create expiry")
+        .timestamp();
 
     let claims = Claims { iat, exp, aud: project };
 
     Ok(encode(&jwt_header, &claims, &key)?)
+}
+
+//TODO: Rename feature 'jwt' to 'iotcore' & 'httpconnectproxy"
+#[cfg(feature = "jwt")]
+pub fn gen_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
+    use chrono::{Duration, Utc};
+    use jsonwebtoken::{encode, Algorithm, Header};
+
+    let time = Utc::now();
+    let jwt_header = Header::new(Algorithm::RS256);
+    let iat = time.timestamp();
+    let exp = time
+        .checked_add_signed(Duration::minutes(expiry))
+        .expect("Unable to create expiry")
+        .timestamp();
+
+    let claims = Claims {
+        iat,
+        exp,
+        aud: "hello world".to_string(),
+    };
+    let jwt = encode(&jwt_header, &claims, key).unwrap();
+    let auth = format!("Auth {}:{}", id, jwt);
+
+    Ok(base64::encode(auth.as_bytes()))
 }
 
 #[cfg(test)]
@@ -240,14 +296,16 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_reconnect_opts(ReconnectOptions::Always(10))
-                                                                         .set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883)
+            .set_reconnect_opts(ReconnectOptions::Always(10))
+            .set_clean_session(true);
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_reconnect_opts(ReconnectOptions::Always(10))
-                                                                .set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883)
+            .set_reconnect_opts(ReconnectOptions::Always(10))
+            .set_clean_session(true);
     }
 }

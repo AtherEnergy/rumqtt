@@ -14,6 +14,8 @@ crossbeam-channel = "0.3"
 log = "0.4"
 failure = "0.1"
 derive_more = "0.13"
+base64 = "0.10"
+uuid = {version = "0.7", features = ["serde", "v4"]}
 pretty_env_logger = "0.2"
 mqtt311 = { git = "https://github.com/tekjar/mqtt311" }
 # mqtt311 = { path = "../mqtt311"}
@@ -54,9 +56,11 @@ optional = true
 envy = "0.3"
 serde = "1"
 serde_derive = "1"
+base64 = "0.10"
 
 [features]
 default = ["rustls", "jwt"]
+acknotify = []
 rustls = ["tokio-rustls", "webpki"]
 jwt = ["jsonwebtoken", "chrono", "serde", "serde_derive"]
 nativetls = ["native-tls", "tokio-tls"]

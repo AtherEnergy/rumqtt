@@ -28,13 +28,15 @@ extern crate log;
 extern crate failure;
 extern crate core;
 extern crate pretty_env_logger;
+extern crate base64;
+extern crate uuid;
 
 pub mod client;
 pub mod codec;
 pub mod error;
 pub mod mqttoptions;
 
-pub use client::MqttClient;
-pub use mqtt311::{QoS, PacketIdentifier};
-pub use mqttoptions::{ConnectionMethod, MqttOptions, ReconnectOptions, SecurityOptions};
+pub use client::{MqttClient, Notification};
 pub use crossbeam_channel::Receiver;
+pub use mqtt311::*;
+pub use mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
