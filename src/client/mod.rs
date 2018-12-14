@@ -57,15 +57,19 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> { 
+    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
         let max_packet_size = opts.max_packet_size();
-        let UserHandle { request_tx,
-                         command_tx,
-                         notification_rx, } = connection::Connection::run(opts)?;
+        let UserHandle {
+            request_tx,
+            command_tx,
+            notification_rx,
+        } = connection::Connection::run(opts)?;
 
-        let client = MqttClient { request_tx,
-                                  command_tx,
-                                  max_packet_size};
+        let client = MqttClient {
+            request_tx,
+            command_tx,
+            max_packet_size,
+        };
 
         Ok((client, notification_rx))
     }
@@ -75,20 +79,23 @@ impl MqttClient {
     //    }
 
     pub fn publish<S, V>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError>
-        where S: Into<String>,
-              V: Into<Vec<u8>>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
     {
         let payload = payload.into();
         if payload.len() > self.max_packet_size {
             return Err(ClientError::PacketSizeLimitExceeded);
         }
 
-        let publish = Publish { dup: false,
-                                qos,
-                                retain: false,
-                                topic_name: topic.into(),
-                                pkid: None,
-                                payload: Arc::new(payload) };
+        let publish = Publish {
+            dup: false,
+            qos,
+            retain: false,
+            topic_name: topic.into(),
+            pkid: None,
+            payload: Arc::new(payload),
+        };
 
         let tx = &mut self.request_tx;
         tx.send(Request::Publish(publish)).wait()?;
@@ -96,12 +103,17 @@ impl MqttClient {
     }
 
     pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
-        let topic = SubscribeTopic { topic_path: topic.into(),
-                                     qos };
-        let subscribe = Subscribe { pkid: PacketIdentifier::zero(),
-                                    topics: vec![topic] };
+        let topic = SubscribeTopic {
+            topic_path: topic.into(),
+            qos,
+        };
+        let subscribe = Subscribe {
+            pkid: PacketIdentifier::zero(),
+            topics: vec![topic],
+        };
 
         let tx = &mut self.request_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;

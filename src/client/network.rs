@@ -7,7 +7,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
-    use client::network::{lookup_ipv4, generate_httpproxy_auth};
+    use client::network::{generate_httpproxy_auth, lookup_ipv4};
     use codec::MqttCodec;
     use error::ConnectError;
     use futures::{
@@ -18,8 +18,7 @@ pub mod stream {
     };
     use std::{
         io::{
-            self,
-            {BufReader, Cursor},
+            self, {BufReader, Cursor},
         },
         sync::Arc,
     };
@@ -27,8 +26,7 @@ pub mod stream {
     use tokio_codec::{Decoder, Framed};
     use tokio_rustls::{
         rustls::{internal::pemfile, ClientConfig, ClientSession},
-        TlsConnector,
-        TlsStream,
+        TlsConnector, TlsStream,
     };
     use webpki::DNSNameRef;
 
@@ -39,10 +37,12 @@ pub mod stream {
 
     impl NetworkStream {
         pub fn builder() -> NetworkStreamBuilder {
-            NetworkStreamBuilder { certificate_authority: None,
-                                   client_cert: None,
-                                   client_private_key: None,
-                                   http_proxy: None }
+            NetworkStreamBuilder {
+                certificate_authority: None,
+                client_cert: None,
+                client_private_key: None,
+                http_proxy: None,
+            }
         }
     }
 
@@ -65,15 +65,16 @@ pub mod stream {
             self
         }
 
-        pub fn set_http_proxy(mut self, id: &str, proxy_host: &str, proxy_port: u16, key: &[u8], expiry: i64) -> NetworkStreamBuilder {
-            self.http_proxy = Some((
-                id.to_owned(), 
-                proxy_host.to_owned(), 
-                proxy_port, 
-                key.to_owned(),
-                expiry
-            ));
-            
+        pub fn set_http_proxy(
+            mut self,
+            id: &str,
+            proxy_host: &str,
+            proxy_port: u16,
+            key: &[u8],
+            expiry: i64,
+        ) -> NetworkStreamBuilder {
+            self.http_proxy = Some((id.to_owned(), proxy_host.to_owned(), proxy_port, key.to_owned(), expiry));
+
             self
         }
 
@@ -105,43 +106,46 @@ pub mod stream {
             Ok(TlsConnector::from(Arc::new(config)))
         }
 
-        pub fn http_connect(&self,
-                            id: &str,
-                            proxy_host: &str,
-                            proxy_port: u16,
-                            host: &str,
-                            port: u16,
-                            key: &[u8],
-                            expiry: i64)
-                            -> impl Future<Item = TcpStream, Error = io::Error> {
-            
+        pub fn http_connect(
+            &self,
+            id: &str,
+            proxy_host: &str,
+            proxy_port: u16,
+            host: &str,
+            port: u16,
+            key: &[u8],
+            expiry: i64,
+        ) -> impl Future<Item = TcpStream, Error = io::Error> {
             let proxy_auth = generate_httpproxy_auth(id, key, expiry);
-            let connect = format!("CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\nProxy-Authorization: {}\r\n\r\n",
-                                  host, port, host, port, proxy_auth);
+            let connect = format!(
+                "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\nProxy-Authorization: {}\r\n\r\n",
+                host, port, host, port, proxy_auth
+            );
             debug!("{}", connect);
 
             let addr = lookup_ipv4(proxy_host, proxy_port);
             let codec = LinesCodec::new();
 
-            TcpStream::connect(&addr).and_then(|tcp| {
-                                         let framed = tcp.framed(codec);
-                                         future::ok(framed)
-                                     })
-                                     .and_then(|f| f.send(connect))
-                                     .and_then(|f| f.into_future().map_err(|(e, _f)| e))
-                                     .and_then(|(s, f)| {
-                                         debug!("{:?}", s);
-                                         f.into_future().map_err(|(e, _f)| e)
-                                     })
-                                     .and_then(|(s, f)| {
-                                         debug!("{:?}", s);
-                                         f.into_future().map_err(|(e, _f)| e)
-                                     })
-                                     .and_then(|(s, f)| {
-                                         debug!("{:?}", s);
-                                         let stream = f.into_inner();
-                                         future::ok(stream)
-                                     })
+            TcpStream::connect(&addr)
+                .and_then(|tcp| {
+                    let framed = tcp.framed(codec);
+                    future::ok(framed)
+                })
+                .and_then(|f| f.send(connect))
+                .and_then(|f| f.into_future().map_err(|(e, _f)| e))
+                .and_then(|(s, f)| {
+                    debug!("{:?}", s);
+                    f.into_future().map_err(|(e, _f)| e)
+                })
+                .and_then(|(s, f)| {
+                    debug!("{:?}", s);
+                    f.into_future().map_err(|(e, _f)| e)
+                })
+                .and_then(|(s, f)| {
+                    debug!("{:?}", s);
+                    let stream = f.into_inner();
+                    future::ok(stream)
+                })
         }
 
         pub fn tcp_connect(&self, host: &str, port: u16) -> impl Future<Item = TcpStream, Error = io::Error> {
@@ -149,10 +153,11 @@ pub mod stream {
             TcpStream::connect(&addr)
         }
 
-        pub fn connect(mut self,
-                       host: &str,
-                       port: u16)
-                       -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
+        pub fn connect(
+            mut self,
+            host: &str,
+            port: u16,
+        ) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
             let tls_connector = self.create_stream();
 
             let stream = match self.http_proxy {
@@ -169,18 +174,24 @@ pub mod stream {
             match tls_connector {
                 Ok(tls_connector) => {
                     let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
-                    Either::A(stream.and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
-                                    .map_err(ConnectError::from)
-                                    .and_then(|stream| {
-                                        let stream = NetworkStream::Tls(stream);
-                                        future::ok(MqttCodec.framed(stream))
-                                    }))
+                    Either::A(
+                        stream
+                            .and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
+                            .map_err(ConnectError::from)
+                            .and_then(|stream| {
+                                let stream = NetworkStream::Tls(stream);
+                                future::ok(MqttCodec.framed(stream))
+                            }),
+                    )
                 }
-                Err(ConnectError::NoCertificateAuthority) => Either::B(stream.and_then(|stream| {
-                                                                                 let stream = NetworkStream::Tcp(stream);
-                                                                                 future::ok(MqttCodec.framed(stream))
-                                                                             })
-                                                                             .map_err(ConnectError::from)),
+                Err(ConnectError::NoCertificateAuthority) => Either::B(
+                    stream
+                        .and_then(|stream| {
+                            let stream = NetworkStream::Tcp(stream);
+                            future::ok(MqttCodec.framed(stream))
+                        })
+                        .map_err(ConnectError::from),
+                ),
                 _ => unimplemented!(),
             }
         }
@@ -213,8 +224,7 @@ fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
     unreachable!("Cannot lookup address");
 }
 
-
-fn generate_httpproxy_auth(id: &str, key: &[u8], expiry:i64) -> String {
+fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
     use chrono::{Duration, Utc};
     use jsonwebtoken::{encode, Algorithm, Header};
     use uuid::Uuid;
@@ -235,13 +245,9 @@ fn generate_httpproxy_auth(id: &str, key: &[u8], expiry:i64) -> String {
         .checked_add_signed(Duration::minutes(expiry))
         .expect("Unable to create expiry")
         .timestamp();
-    
-    let claims = Claims {
-        iat,
-        exp,
-        jti
-    };
-    
+
+    let claims = Claims { iat, exp, jti };
+
     let jwt = encode(&jwt_header, &claims, &key).unwrap();
     let userid_password = format!("{}:{}", id, jwt);
     let auth = base64::encode(userid_password.as_bytes());

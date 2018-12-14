@@ -3,10 +3,7 @@ use client::{
     mqttstate::MqttState,
     network::stream::NetworkStream,
     prepend::{Prepend, StreamExt},
-    Command,
-    Notification,
-    Request,
-    UserHandle,
+    Command, Notification, Request, UserHandle,
 };
 use codec::MqttCodec;
 use crossbeam_channel::{self, Sender};
@@ -15,9 +12,7 @@ use futures::{
     future,
     stream::{self, SplitStream},
     sync::mpsc::{self, Receiver},
-    Future,
-    Sink,
-    Stream,
+    Future, Sink, Stream,
 };
 use mqtt311::Packet;
 use mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
@@ -52,19 +47,23 @@ impl Connection {
         // start the network thread to handle all mqtt network io
         thread::spawn(move || {
             let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
-            let mut connection = Connection { mqtt_state,
-                                              notification_tx,
-                                              connection_tx: Some(connection_tx),
-                                              connection_count: 0,
-                                              mqttoptions };
+            let mut connection = Connection {
+                mqtt_state,
+                notification_tx,
+                connection_tx: Some(connection_tx),
+                connection_count: 0,
+                mqttoptions,
+            };
 
             connection.mqtt_eventloop(request_rx, command_rx)
         });
 
         // return user handle to client to send requests and handle notifications
-        let user_handle = UserHandle { request_tx,
-                                       command_tx,
-                                       notification_rx };
+        let user_handle = UserHandle {
+            request_tx,
+            command_tx,
+            notification_rx,
+        };
 
         match reconnect_option {
             ReconnectOptions::AfterFirstSuccess(_) => {
@@ -209,16 +208,17 @@ impl Connection {
         let tcp_connect_future = self.tcp_connect_future();
         let connect_packet = self.mqtt_state.borrow_mut().handle_outgoing_connect().unwrap();
 
-        tcp_connect_future.and_then(move |framed| {
-                              let packet = Packet::Connect(connect_packet);
-                              framed.send(packet).map_err(ConnectError::Io)
-                          })
-                          .and_then(|framed| framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err)))
-                          .and_then(move |(response, framed)| {
-                              debug!("Mqtt connect response = {:?}", response);
-                              let mut mqtt_state = mqtt_state.borrow_mut();
-                              check_and_validate_connack(response, framed, &mut mqtt_state)
-                          })
+        tcp_connect_future
+            .and_then(move |framed| {
+                let packet = Packet::Connect(connect_packet);
+                framed.send(packet).map_err(ConnectError::Io)
+            })
+            .and_then(|framed| framed.into_future().map_err(|(err, _framed)| ConnectError::Io(err)))
+            .and_then(move |(response, framed)| {
+                debug!("Mqtt connect response = {:?}", response);
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                check_and_validate_connack(response, framed, &mut mqtt_state)
+            })
     }
 
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
@@ -232,23 +232,24 @@ impl Connection {
         // TODO: prevent this clone?
         // cloning crossbeam channel sender every time is a problem according to docs
         let notification_tx = self.notification_tx.clone();
-        let network_stream = network_stream.map_err(NetworkError::TimeOut)
-                                           .and_then(move |packet| {
-                                               debug!("Incoming packet = {:?}", packet_info(&packet));
-                                               let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
-                                               future::result(reply)
-                                           })
-                                           .and_then(move |(notification, reply)| {
-                                               let notification_tx = notification_tx.clone();
-                                               handle_notification(notification, &notification_tx);
-                                               future::ok(reply)
-                                           })
-                                           .or_else(move |e| {
-                                               let mut mqtt_state_out = mqtt_state_out.borrow_mut();
-                                               handle_stream_error(e, &mut mqtt_state_out)
-                                           })
-                                           .filter(|reply| should_forward_packet(reply))
-                                           .and_then(move |packet| future::ok(packet.into()));
+        let network_stream = network_stream
+            .map_err(NetworkError::TimeOut)
+            .and_then(move |packet| {
+                debug!("Incoming packet = {:?}", packet_info(&packet));
+                let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
+                future::result(reply)
+            })
+            .and_then(move |(notification, reply)| {
+                let notification_tx = notification_tx.clone();
+                handle_notification(notification, &notification_tx);
+                future::ok(reply)
+            })
+            .or_else(move |e| {
+                let mut mqtt_state_out = mqtt_state_out.borrow_mut();
+                handle_stream_error(e, &mut mqtt_state_out)
+            })
+            .filter(|reply| should_forward_packet(reply))
+            .and_then(move |packet| future::ok(packet.into()));
 
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
@@ -274,27 +275,28 @@ impl Connection {
     fn request_stream(&mut self, request: mpsc::Receiver<Request>) -> impl PacketStream {
         let mqtt_state = self.mqtt_state.clone();
 
-        let request_stream = request.map_err(|e| {
-                                        error!("User request error = {:?}", e);
-                                        NetworkError::Blah
-                                    })
-                                    .and_then(move |userrequest| {
-                                        let mut mqtt_state = mqtt_state.borrow_mut();
-                                        validate_userrequest(userrequest, &mut mqtt_state)
-                                    });
+        let request_stream = request
+            .map_err(|e| {
+                error!("User request error = {:?}", e);
+                NetworkError::Blah
+            })
+            .and_then(move |userrequest| {
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                validate_userrequest(userrequest, &mut mqtt_state)
+            });
 
         let mqtt_state = self.mqtt_state.clone();
         request_stream.and_then(move |packet: Packet| {
-                          let o = mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet);
-                          future::result(o)
-                      })
+            let o = mqtt_state.borrow_mut().handle_outgoing_mqtt_packet(packet);
+            future::result(o)
+        })
     }
 
     fn command_stream(&mut self, commands: mpsc::Receiver<Command>) -> impl CommandStream {
         commands.map_err(|e| {
-                    error!("User request error = {:?}", e);
-                    NetworkError::Blah
-                })
+            error!("User request error = {:?}", e);
+            NetworkError::Blah
+        })
     }
 }
 
@@ -356,14 +358,16 @@ fn should_forward_packet(reply: &Request) -> bool {
 
 fn packet_info(packet: &Packet) -> String {
     match packet {
-        Packet::Publish(p) => format!("topic = {}, \
-                                       qos = {:?}, \
-                                       pkid = {:?}, \
-                                       payload size = {:?} bytes",
-                                      p.topic_name,
-                                      p.qos,
-                                      p.pkid,
-                                      p.payload.len()),
+        Packet::Publish(p) => format!(
+            "topic = {}, \
+             qos = {:?}, \
+             pkid = {:?}, \
+             payload size = {:?} bytes",
+            p.topic_name,
+            p.qos,
+            p.pkid,
+            p.payload.len()
+        ),
 
         _ => format!("{:?}", packet),
     }

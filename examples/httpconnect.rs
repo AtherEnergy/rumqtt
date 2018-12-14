@@ -5,7 +5,6 @@ extern crate tokio;
 #[macro_use]
 extern crate serde_derive;
 
-
 use rumqtt::{MqttClient, MqttOptions, Proxy, ReconnectOptions};
 
 use rumqtt::QoS;
@@ -31,18 +30,21 @@ fn main() {
     let id = "http-connect-test";
     let mqtt_options = MqttOptions::new(id, config.main_host, config.main_port);
 
-    let mqtt_options = mqtt_options.set_keep_alive(10)
-                                   .set_reconnect_opts(reconnect_options)
-                                   .set_proxy(proxy);
+    let mqtt_options = mqtt_options
+        .set_keep_alive(10)
+        .set_reconnect_opts(reconnect_options)
+        .set_proxy(proxy);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 
-    thread::spawn(move || for i in 0..100 {
-        let payload = format!("publish {}", i);
-        thread::sleep(Duration::from_millis(100));
-        mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
+    thread::spawn(move || {
+        for i in 0..100 {
+            let payload = format!("publish {}", i);
+            thread::sleep(Duration::from_millis(100));
+            mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
+        }
     });
 
     for notification in notifications {

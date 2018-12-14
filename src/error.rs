@@ -45,8 +45,10 @@ pub enum ConnectError {
     DnsListEmpty,
     #[fail(display = "Couldn't create mqtt connection in time")]
     Timeout,
-    #[fail(display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}",
-           _0)]
+    #[fail(
+        display = "Unsolicited packet received while waiting for connack. Recived packet = {:?}",
+        _0
+    )]
     NotConnackPacket(Packet),
     #[fail(display = "Empty response")]
     NoResponse,
@@ -86,8 +88,9 @@ pub enum NetworkError {
 
 #[derive(From)]
 pub enum PollError<S1, S2>
-    where S1: Stream<Item = Packet, Error = NetworkError>,
-          S2: Stream<Item = Command, Error = NetworkError>
+where
+    S1: Stream<Item = Packet, Error = NetworkError>,
+    S2: Stream<Item = Command, Error = NetworkError>,
 {
     Network((NetworkError, Prepend<S1>, S2)),
     StreamClosed(Prepend<S1>, S2),
