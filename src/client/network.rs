@@ -118,7 +118,7 @@ pub mod stream {
             let proxy_auth = generate_httpproxy_auth(id, key, expiry);
             let connect = format!("CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\nProxy-Authorization: {}\r\n\r\n",
                                   host, port, host, port, proxy_auth);
-            println!("{}", connect);
+            debug!("{}", connect);
 
             let addr = lookup_ipv4(proxy_host, proxy_port);
             let codec = LinesCodec::new();
