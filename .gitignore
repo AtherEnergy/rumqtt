@@ -14,3 +14,5 @@ out
 .rnd
 **/*.rs.bk
 Cargo.lock
+
+toxic/toxic
