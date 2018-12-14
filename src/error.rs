@@ -82,6 +82,7 @@ pub enum NetworkError {
     NetworkStreamClosed,
     #[fail(display = "Error to poll interleave")]
     Interleave,
+
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }
