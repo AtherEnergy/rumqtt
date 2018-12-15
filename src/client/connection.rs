@@ -5,8 +5,9 @@ use crate::client::{
     Command, Notification, Request, UserHandle,
 };
 use crate::codec::MqttCodec;
-use crossbeam_channel::{self, Sender};
 use crate::error::{ConnectError, NetworkError};
+use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
+use crossbeam_channel::{self, Sender};
 use futures::{
     future::{self, Either},
     stream::{self, SplitStream},
@@ -14,9 +15,9 @@ use futures::{
     Future, Sink, Stream,
 };
 use mqtt311::Packet;
-use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
 use std::{cell::RefCell, rc::Rc, thread, time::Duration};
 use tokio::runtime::current_thread;
+use tokio::runtime::current_thread::Runtime;
 use tokio_codec::Framed;
 use tokio_timer::{timeout, Timeout};
 
@@ -30,6 +31,7 @@ pub struct Connection {
     connection_tx: Option<Sender<Result<(), ConnectError>>>,
     connection_count: u32,
     mqttoptions: MqttOptions,
+    is_network_enabled: bool,
 }
 
 impl Connection {
@@ -52,6 +54,7 @@ impl Connection {
                 connection_tx: Some(connection_tx),
                 connection_count: 0,
                 mqttoptions,
+                is_network_enabled: true,
             };
 
             connection.mqtt_eventloop(request_rx, command_rx)
@@ -84,18 +87,18 @@ impl Connection {
         let reconnect_option = self.mqttoptions.reconnect_opts();
         let mut network_request_stream = self.request_stream(request_rx.by_ref());
         let mut command_stream = self.command_stream(command_rx.by_ref());
-        let mut is_network_enabled = true;
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
-            let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, Duration::from_secs(30));
-            let (mut runtime, framed) = match self.connect(mqtt_connect_deadline) {
+            let timeout = Duration::from_secs(30);
+            let (runtime, framed) = match self.connect_timeout(mqtt_connect_future, timeout) {
                 Ok(f) => f,
                 Err(true) => continue 'reconnection,
                 Err(false) => break 'reconnection,
             };
 
             let (network_sink, network_stream) = framed.split();
+            let network_sink = network_sink.sink_map_err(|e| NetworkError::Io(e));
             let network_reply_stream = self.network_reply_stream(network_stream);
             let network_request_stream = &mut network_request_stream;
             let command_stream = &mut command_stream;
@@ -104,47 +107,32 @@ impl Connection {
             self.merge_network_request_stream(network_request_stream);
 
             let network_stream = network_request_stream.select(network_reply_stream);
-            let mqtt_future = if is_network_enabled {
-                let a = command_stream.select(network_stream).forward(network_sink).map(|(_selct, _splitsink)| ());
-                Either::A(a)
-            } else {
-                let b = command_stream.forward(network_sink).map(|(_selct, _splitsink)| ());
-                Either::B(b)
-            };
+            let mqtt_future = self.mqtt_future(command_stream, network_stream, network_sink);
 
             // let mqtt_future = network_stream.select(command_stream).forward(network_sink);
-            match runtime.block_on(mqtt_future) {
-                Err(NetworkError::UserDisconnect) => {
-                    info!("User commanded for network disconnect");
-                    is_network_enabled = false;
-                    continue 'reconnection;
-                }
-                Err(NetworkError::UserReconnect) => {
-                    info!("User commanded for network reconnect");
-                    is_network_enabled = true;
-                    continue 'reconnection;
-                }
-                Err(e) => {
-                    error!("This shouldn't have happened: Error = {:?}", e);
-                }
-                Ok(_v) => warn!("Strange!! Evenloop finished"),
-            }
+            match self.mqtt_io(runtime, mqtt_future) {
+                Err(true) => continue 'reconnection,
+                Err(false) => (),
+                Ok(_v) => ()
+            };
 
-            if should_reconnect_again(reconnect_option) {
-                continue 'reconnection;
-            } else {
-                break 'reconnection;
+            match should_reconnect_again(reconnect_option) {
+                true => continue 'reconnection,
+                false => break 'reconnection
             }
         }
     }
 
-    fn connect(
+    /// Makes a blocking mqtt connection an returns framed and reactor
+    fn connect_timeout(
         &mut self,
-        mqtt_connect_deadline: impl Future<Item = MqttFramed, Error = timeout::Error<ConnectError>>,
-    ) -> Result<(current_thread::Runtime, MqttFramed), bool> {
+        mqtt_connect_future: impl FramedFuture,
+        timeout: Duration,
+    ) -> Result<(Runtime, MqttFramed), bool> {
         // mqtt connection
         let reconnect_option = self.mqttoptions.reconnect_opts();
-        let mut rt = current_thread::Runtime::new().unwrap();
+        let mut rt = Runtime::new().unwrap();
+        let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, timeout);
 
         let framed = match rt.block_on(mqtt_connect_deadline) {
             Ok(framed) => {
@@ -161,6 +149,42 @@ impl Connection {
 
         Ok((rt, framed))
     }
+
+    fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
+        match runtime.block_on(mqtt_future) {
+            Err(NetworkError::UserDisconnect) => {
+                info!("User commanded for network disconnect");
+                self.is_network_enabled = false;
+                Err(true)
+            }
+            Err(NetworkError::UserReconnect) => {
+                info!("User commanded for network reconnect");
+                self.is_network_enabled = true;
+                Err(true)
+            }
+            Err(e) => {
+                error!("This shouldn't have happened: Error = {:?}", e);
+                Err(false)
+            }
+            Ok(_v) => {
+                warn!("Strange!! Evenloop finished");
+                Err(false)
+            }
+        }
+    }
+
+    fn mqtt_future(&self, command_stream: impl PacketStream, network_stream: impl PacketStream, network_sink: impl PacketSink) -> impl Future<Item = (), Error = NetworkError> {
+        if self.is_network_enabled {
+            Either::A(command_stream
+                    .select(network_stream)
+                    .forward(network_sink)
+                    .map(|(_selct, _splitsink)| ()))
+        } else {
+            Either::B(command_stream.forward(network_sink).map(|(_selct, _splitsink)| ()))
+        }
+    }
+
+
 
     fn handle_connection_success(&mut self) {
         self.connection_count += 1;
@@ -288,10 +312,7 @@ impl Connection {
     /// to user request stream to ensure that they are handled first. This cleanly handles last
     /// session stray (even if disconnect happens while sending last session data)because we always
     /// get back this stream from reactor after disconnection.
-    fn request_stream<'a>(
-        &mut self,
-        request: &'a mut mpsc::Receiver<Request>,
-    ) -> Prepend<impl PacketStream + 'a> {
+    fn request_stream<'a>(&mut self, request: &'a mut mpsc::Receiver<Request>) -> Prepend<impl PacketStream + 'a> {
         // process user requests and convert them to network packets
         let mqtt_state = self.mqtt_state.clone();
         let request_stream = request
@@ -315,10 +336,7 @@ impl Connection {
         packet_stream.prepend(last_session_publishes)
     }
 
-    fn command_stream<'a>(
-        &mut self,
-        commands: &'a mut mpsc::Receiver<Command>,
-    ) -> impl PacketStream + 'a {
+    fn command_stream<'a>(&mut self, commands: &'a mut mpsc::Receiver<Command>) -> impl PacketStream + 'a {
         // process user commands and raise appropriate error to the event loop
         commands
             .or_else(|_err| Err(NetworkError::Blah))
@@ -438,6 +456,9 @@ type MqttFramed = Framed<NetworkStream, MqttCodec>;
 
 trait PacketStream: Stream<Item = Packet, Error = NetworkError> {}
 impl<T> PacketStream for T where T: Stream<Item = Packet, Error = NetworkError> {}
+
+trait PacketSink: Sink<SinkItem = Packet, SinkError = NetworkError> {}
+impl<T> PacketSink for T where T: Sink<SinkItem = Packet, SinkError = NetworkError> {}
 
 trait CommandStream: Stream<Item = Command, Error = NetworkError> {}
 impl<T> CommandStream for T where T: Stream<Item = Command, Error = NetworkError> {}

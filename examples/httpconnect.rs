@@ -1,4 +1,4 @@
-use rumqtt::{MqttClient, MqttOptions, Proxy, ReconnectOptions, QoS};
+use rumqtt::{MqttClient, MqttOptions, Proxy, QoS, ReconnectOptions};
 use serde_derive::Deserialize;
 
 use std::thread;

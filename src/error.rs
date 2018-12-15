@@ -1,13 +1,13 @@
 use crate::client::{Command, Request};
 use crossbeam_channel::RecvError;
+use derive_more::From;
+use failure::Fail;
 use futures::sync::mpsc::SendError;
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt311::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
-use failure::Fail;
-use derive_more::From;
 
 #[derive(Debug, Fail, From)]
 pub enum ClientError {

@@ -1,6 +1,6 @@
-use mqtt311::{Connect, LastWill, Protocol};
-use serde_derive::{Serialize, Deserialize};
 use crate::error::ConnectError;
+use mqtt311::{Connect, LastWill, Protocol};
+use serde_derive::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.

@@ -6,8 +6,8 @@ use std::{
 
 use crate::client::{Notification, Request};
 use crate::error::{ConnectError, NetworkError};
-use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
 use crate::mqttoptions::MqttOptions;
+use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -353,8 +353,8 @@ mod test {
     use super::{MqttConnectionStatus, MqttState};
     use crate::client::{Notification, Request};
     use crate::error::NetworkError;
-    use mqtt311::*;
     use crate::mqttoptions::MqttOptions;
+    use mqtt311::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         Publish {

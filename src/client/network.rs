@@ -2,9 +2,9 @@ use std::io::{self, Read, Write};
 
 use crate::client::network::stream::NetworkStream;
 use futures::Poll;
+use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio_io::{AsyncRead, AsyncWrite};
-use serde_derive::{Serialize, Deserialize};
 
 #[cfg(feature = "rustls")]
 pub mod stream {

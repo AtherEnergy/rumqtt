@@ -1,5 +1,5 @@
-use rumqtt::{MqttClient, MqttOptions, QoS};
 use crossbeam_channel::select;
+use rumqtt::{MqttClient, MqttOptions, QoS};
 
 use std::{thread, time::Duration};
 

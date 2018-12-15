@@ -1,9 +1,9 @@
-use crossbeam_channel;
 use crate::error::{ClientError, ConnectError};
+use crate::MqttOptions;
+use crossbeam_channel;
 use futures::{sync::mpsc, Future, Sink};
 use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic};
 use std::sync::Arc;
-use crate::MqttOptions;
 
 pub mod connection;
 pub mod mqttstate;

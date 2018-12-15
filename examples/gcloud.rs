@@ -24,8 +24,7 @@ fn main() {
         + "/devices/"
         + &config.id;
 
-    let security_options =
-        SecurityOptions::GcloudIot((config.project, include_bytes!("tlsfiles/server.key.pem").to_vec(), 60));
+    let security_options = SecurityOptions::GcloudIot((config.project, include_bytes!("tlsfiles/server.key.pem").to_vec(), 60));
 
     let ca = include_bytes!("tlsfiles/server.key.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);
