@@ -2,7 +2,7 @@
 name = "rumqtt"
 version = "0.30.0"
 authors = ["raviteja <k.teza1@gmail.com>"]
-#edition = "2018"
+edition = "2018"
 
 [dependencies]
 tokio = "0.1"

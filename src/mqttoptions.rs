@@ -1,6 +1,6 @@
 use mqtt311::{Connect, LastWill, Protocol};
-
-use error::ConnectError;
+use serde_derive::{Serialize, Deserialize};
+use crate::error::ConnectError;
 use std::time::Duration;
 
 /// Control how the connection is re-established if it is lost.
@@ -291,7 +291,7 @@ pub fn gen_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> Result<String, C
 
 #[cfg(test)]
 mod test {
-    use mqttoptions::{MqttOptions, ReconnectOptions};
+    use crate::mqttoptions::{MqttOptions, ReconnectOptions};
 
     #[test]
     #[should_panic]

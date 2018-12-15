@@ -1,12 +1,6 @@
-extern crate envy;
-extern crate pretty_env_logger;
-extern crate rumqtt;
-#[macro_use]
-extern crate serde_derive;
-
 use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
+use serde_derive::Deserialize;
 use std::{thread, time::Duration};
-
 // NOTES:
 // ---------
 // Proive necessary stuff from environment variables
@@ -31,9 +25,9 @@ fn main() {
         + &config.id;
 
     let security_options =
-        SecurityOptions::GcloudIot((config.project, include_bytes!("gcloudfiles/rsa_private.der").to_vec(), 60));
+        SecurityOptions::GcloudIot((config.project, include_bytes!("tlsfiles/server.key.pem").to_vec(), 60));
 
-    let ca = include_bytes!("gcloudfiles/roots.pem").to_vec();
+    let ca = include_bytes!("tlsfiles/server.key.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)

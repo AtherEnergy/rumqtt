@@ -1,11 +1,13 @@
-use client::{prepend::Prepend, Command, Request};
+use crate::client::{Command, Request};
 use crossbeam_channel::RecvError;
-use futures::{sync::mpsc::SendError, Stream};
+use futures::sync::mpsc::SendError;
 #[cfg(feature = "jwt")]
 use jsonwebtoken;
 use mqtt311::Packet;
 use std::io::Error as IoError;
 use tokio_timer::{self, timeout};
+use failure::Fail;
+use derive_more::From;
 
 #[derive(Debug, Fail, From)]
 pub enum ClientError {
@@ -66,8 +68,6 @@ pub enum NetworkError {
     InvalidState,
     #[fail(display = "Couldn't ping in time")]
     Timeout,
-    #[fail(display = "Packet limit size exceeded")]
-    PacketSizeLimitExceeded,
     #[fail(display = "Received unsolicited acknowledgment")]
     Unsolicited,
     #[fail(display = "Tokio timer error = {}", _0)]
@@ -80,20 +80,6 @@ pub enum NetworkError {
     UserDisconnect,
     #[fail(display = "Network stream closed")]
     NetworkStreamClosed,
-    #[fail(display = "Error to poll interleave")]
-    Interleave,
-
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
-}
-
-#[derive(From)]
-pub enum PollError<S1, S2>
-where
-    S1: Stream<Item = Packet, Error = NetworkError>,
-    S2: Stream<Item = Command, Error = NetworkError>,
-{
-    Network((NetworkError, Prepend<S1>, S2)),
-    StreamClosed(Prepend<S1>, S2),
-    UserRequest(NetworkError),
 }

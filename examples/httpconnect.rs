@@ -1,13 +1,6 @@
-extern crate futures;
-extern crate pretty_env_logger;
-extern crate rumqtt;
-extern crate tokio;
-#[macro_use]
-extern crate serde_derive;
+use rumqtt::{MqttClient, MqttOptions, Proxy, ReconnectOptions, QoS};
+use serde_derive::Deserialize;
 
-use rumqtt::{MqttClient, MqttOptions, Proxy, ReconnectOptions};
-
-use rumqtt::QoS;
 use std::thread;
 use std::time::Duration;
 
@@ -22,7 +15,7 @@ struct Config {
 fn main() {
     pretty_env_logger::init();
     let config: Config = envy::from_env().unwrap();
-    let key = include_bytes!("gcloudfiles/rsa_private.der");
+    let key = include_bytes!("tlsfiles/server.key.pem");
 
     let reconnect_options = ReconnectOptions::AfterFirstSuccess(10);
     let proxy = Proxy::HttpConnect(config.proxy_host, config.proxy_port, key.to_vec(), 40);

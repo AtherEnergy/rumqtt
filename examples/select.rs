@@ -1,9 +1,6 @@
-#[macro_use]
-extern crate crossbeam_channel;
-extern crate pretty_env_logger;
-extern crate rumqtt;
-
 use rumqtt::{MqttClient, MqttOptions, QoS};
+use crossbeam_channel::select;
+
 use std::{thread, time::Duration};
 
 fn main() {

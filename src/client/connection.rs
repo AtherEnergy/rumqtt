@@ -1,13 +1,12 @@
-use client::{
-    mqttasync,
+use crate::client::{
     mqttstate::MqttState,
     network::stream::NetworkStream,
     prepend::{Prepend, StreamExt},
     Command, Notification, Request, UserHandle,
 };
-use codec::MqttCodec;
+use crate::codec::MqttCodec;
 use crossbeam_channel::{self, Sender};
-use error::{ConnectError, NetworkError, PollError};
+use crate::error::{ConnectError, NetworkError};
 use futures::{
     future::{self, Either},
     stream::{self, SplitStream},
@@ -15,7 +14,7 @@ use futures::{
     Future, Sink, Stream,
 };
 use mqtt311::Packet;
-use mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
+use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
 use std::{cell::RefCell, rc::Rc, thread, time::Duration};
 use tokio::runtime::current_thread;
 use tokio_codec::Framed;
@@ -101,6 +100,9 @@ impl Connection {
             let network_request_stream = &mut network_request_stream;
             let command_stream = &mut command_stream;
 
+            // merge previous session's unacked data into current stream
+            self.merge_network_request_stream(network_request_stream);
+
             let network_stream = network_request_stream.select(network_reply_stream);
             let mqtt_future = if is_network_enabled {
                 let a = command_stream.select(network_stream).forward(network_sink).map(|(_selct, _splitsink)| ());
@@ -115,7 +117,6 @@ impl Connection {
                 Err(NetworkError::UserDisconnect) => {
                     info!("User commanded for network disconnect");
                     is_network_enabled = false;
-                    // self.merge_network_request_stream(network_request_stream);
                     continue 'reconnection;
                 }
                 Err(NetworkError::UserReconnect) => {
@@ -126,7 +127,7 @@ impl Connection {
                 Err(e) => {
                     error!("This shouldn't have happened: Error = {:?}", e);
                 }
-                Ok(v) => warn!("Strange!! Evenloop finished"),
+                Ok(_v) => warn!("Strange!! Evenloop finished"),
             }
 
             if should_reconnect_again(reconnect_option) {
@@ -160,19 +161,6 @@ impl Connection {
 
         Ok((rt, framed))
     }
-
-    // fn mqtt_future(
-    //     &self,
-    //     is_network_enabled: bool,
-    //     network_stream: impl Stream<Item = Packet, Error = NetworkError>,
-    //     command_stream: impl Stream<Item = Packet, Error = NetworkError>,
-    // ) -> impl Future<Item = Packet, Error = NetworkError> {
-    //     if is_network_enabled {
-    //         Either::A(network_stream.select(command_stream))
-    //     } else {
-    //         Either::B(command_stream)
-    //     }
-    // }
 
     fn handle_connection_success(&mut self) {
         self.connection_count += 1;
@@ -260,8 +248,6 @@ impl Connection {
         let keep_alive = self.mqttoptions.keep_alive();
         let network_stream = Timeout::new(network_stream, keep_alive);
 
-        // TODO: prevent this clone?
-        // cloning crossbeam channel sender every time is a problem according to docs
         let notification_tx = self.notification_tx.clone();
         let network_stream = network_stream
             .map_err(NetworkError::TimeOut)
@@ -271,7 +257,6 @@ impl Connection {
                 future::result(reply)
             })
             .and_then(move |(notification, reply)| {
-                let notification_tx = notification_tx.clone();
                 handle_notification(notification, &notification_tx);
                 future::ok(reply)
             })
@@ -306,7 +291,7 @@ impl Connection {
     fn request_stream<'a>(
         &mut self,
         request: &'a mut mpsc::Receiver<Request>,
-    ) -> Prepend<impl Stream<Item = Packet, Error = NetworkError> + 'a> {
+    ) -> Prepend<impl PacketStream + 'a> {
         // process user requests and convert them to network packets
         let mqtt_state = self.mqtt_state.clone();
         let request_stream = request
@@ -333,7 +318,7 @@ impl Connection {
     fn command_stream<'a>(
         &mut self,
         commands: &'a mut mpsc::Receiver<Command>,
-    ) -> impl Stream<Item = Packet, Error = NetworkError> + 'a {
+    ) -> impl PacketStream + 'a {
         // process user commands and raise appropriate error to the event loop
         commands
             .or_else(|_err| Err(NetworkError::Blah))

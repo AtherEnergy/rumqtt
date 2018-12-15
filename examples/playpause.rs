@@ -1,6 +1,3 @@
-extern crate pretty_env_logger;
-extern crate rumqtt;
-
 use rumqtt::{MqttClient, MqttOptions, QoS};
 use std::{thread, time::Duration};
 
