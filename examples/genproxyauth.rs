@@ -1,10 +1,6 @@
-extern crate jsonwebtoken;
-#[macro_use]
-extern crate serde_derive;
-extern crate chrono;
-
 use chrono::Utc;
 use jsonwebtoken::{encode, Algorithm, Header};
+use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -14,7 +10,7 @@ struct Claims {
 }
 
 fn main() {
-    let key = include_bytes!("gcloudfiles/rsa_private.der");
+    let key = include_bytes!("tlsfiles/server.key.pem");
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = time.timestamp();

@@ -1,12 +1,11 @@
+use crate::error::{ClientError, ConnectError};
+use crate::MqttOptions;
 use crossbeam_channel;
-use error::{ClientError, ConnectError};
 use futures::{sync::mpsc, Future, Sink};
 use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic};
 use std::sync::Arc;
-use MqttOptions;
 
 pub mod connection;
-pub mod mqttasync;
 pub mod mqttstate;
 pub mod network;
 pub mod prepend;

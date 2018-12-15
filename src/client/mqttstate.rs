@@ -4,10 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use client::{Notification, Request};
-use error::{ConnectError, NetworkError};
+use crate::client::{Notification, Request};
+use crate::error::{ConnectError, NetworkError};
+use crate::mqttoptions::MqttOptions;
 use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
-use mqttoptions::MqttOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -138,10 +138,6 @@ impl MqttState {
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
-        if publish.payload.len() > self.opts.max_packet_size() {
-            return Err(NetworkError::PacketSizeLimitExceeded);
-        }
-
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
@@ -355,10 +351,10 @@ mod test {
     use std::{sync::Arc, thread, time::Duration};
 
     use super::{MqttConnectionStatus, MqttState};
-    use client::{Notification, Request};
-    use error::NetworkError;
+    use crate::client::{Notification, Request};
+    use crate::error::NetworkError;
+    use crate::mqttoptions::MqttOptions;
     use mqtt311::*;
-    use mqttoptions::MqttOptions;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         Publish {
@@ -435,26 +431,6 @@ mod test {
         let publish_out = mqtt.handle_outgoing_publish(publish.clone());
         assert_eq!(publish_out.unwrap().pkid, Some(PacketIdentifier(4)));
         assert_eq!(mqtt.outgoing_pub.len(), 4);
-    }
-
-    #[test]
-    fn outgoing_publish_handle_should_throw_error_when_packetsize_exceeds_max() {
-        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
-        let mut mqtt = MqttState::new(opts);
-
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtMostOnce,
-            retain: false,
-            pkid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![0; 257 * 1024]),
-        };
-
-        match mqtt.handle_outgoing_publish(publish) {
-            Err(NetworkError::PacketSizeLimitExceeded) => (),
-            _ => panic!("Should throw packet size limit error"),
-        }
     }
 
     #[test]
@@ -774,7 +750,7 @@ mod test {
 
     #[test]
     fn connect_should_respect_options() {
-        use mqttoptions::SecurityOptions::UsernamePassword;
+        use crate::mqttoptions::SecurityOptions::UsernamePassword;
 
         let lwt = LastWill {
             topic: String::from("LWT_TOPIC"),

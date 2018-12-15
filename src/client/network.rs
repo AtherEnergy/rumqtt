@@ -1,15 +1,16 @@
 use std::io::{self, Read, Write};
 
-use client::network::stream::NetworkStream;
+use crate::client::network::stream::NetworkStream;
 use futures::Poll;
+use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
-    use client::network::{generate_httpproxy_auth, lookup_ipv4};
-    use codec::MqttCodec;
-    use error::ConnectError;
+    use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
+    use crate::codec::MqttCodec;
+    use crate::error::ConnectError;
     use futures::{
         future::{self, Either},
         sink::Sink,
