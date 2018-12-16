@@ -85,6 +85,7 @@ impl Connection {
     //       You'll face `reactor gone` error if `framed` is used again with a new recator
     fn mqtt_eventloop(&mut self, mut request_rx: Receiver<Request>, mut command_rx: Receiver<Command>) {
         let reconnect_option = self.mqttoptions.reconnect_opts();
+        let keep_alive = self.mqttoptions.keep_alive();
         let mut network_request_stream = self.request_stream(request_rx.by_ref());
         let mut command_stream = self.command_stream(command_rx.by_ref());
 
@@ -107,6 +108,8 @@ impl Connection {
             self.merge_network_request_stream(network_request_stream);
 
             let network_stream = network_request_stream.select(network_reply_stream);
+            let network_stream = Timeout::new(network_stream, keep_alive);
+
             let mqtt_future = self.mqtt_future(command_stream, network_stream, network_sink);
 
             // let mqtt_future = network_stream.select(command_stream).forward(network_sink);
@@ -173,8 +176,21 @@ impl Connection {
         }
     }
 
-    fn mqtt_future(&self, command_stream: impl PacketStream, network_stream: impl PacketStream, network_sink: impl PacketSink) -> impl Future<Item = (), Error = NetworkError> {
+    fn mqtt_future(
+        &mut self, 
+        command_stream: impl Stream<Item = Packet, Error = NetworkError>, 
+        network_stream: impl Stream<Item = Packet, Error = timeout::Error<NetworkError>>,
+        network_sink: impl PacketSink) 
+        -> impl Future<Item = (), Error = NetworkError> {
+        // Check if network is enabled and create  a future
+        let mqtt_state = self.mqtt_state.clone();
         if self.is_network_enabled {
+            let network_stream = network_stream.or_else(move |e| {
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                handle_stream_error(e, &mut mqtt_state);
+                future::ok(Packet::Pingreq)
+            });
+
             Either::A(command_stream
                     .select(network_stream)
                     .forward(network_sink)
@@ -269,12 +285,11 @@ impl Connection {
     fn network_reply_stream(&self, network_stream: SplitStream<MqttFramed>) -> impl PacketStream {
         let mqtt_state_in = self.mqtt_state.clone();
         let mqtt_state_out = self.mqtt_state.clone();
-        let keep_alive = self.mqttoptions.keep_alive();
-        let network_stream = Timeout::new(network_stream, keep_alive);
+        // let network_stream = Timeout::new(network_stream, keep_alive);
 
         let notification_tx = self.notification_tx.clone();
         let network_stream = network_stream
-            .map_err(NetworkError::TimeOut)
+            .map_err(NetworkError::Io)
             .and_then(move |packet| {
                 debug!("Incoming packet = {:?}", packet_info(&packet));
                 let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
@@ -284,10 +299,10 @@ impl Connection {
                 handle_notification(notification, &notification_tx);
                 future::ok(reply)
             })
-            .or_else(move |e| {
-                let mut mqtt_state_out = mqtt_state_out.borrow_mut();
-                handle_stream_error(e, &mut mqtt_state_out)
-            })
+            // .or_else(move |e| {
+            //     let mut mqtt_state_out = mqtt_state_out.borrow_mut();
+            //     handle_stream_error(e, &mut mqtt_state_out)
+            // })
             .filter(|reply| should_forward_packet(reply))
             .and_then(move |packet| future::ok(packet.into()));
 
@@ -347,6 +362,24 @@ impl Connection {
     }
 }
 
+fn handle_stream_error(
+    error: timeout::Error<NetworkError>,
+    mqtt_state: &mut MqttState) 
+    -> impl PacketFuture {
+
+    let out = mqtt_state.handle_outgoing_mqtt_packet(Packet::Pingreq);      
+    future::err(error).or_else(move |e| {
+        if e.is_elapsed() {
+            match out {
+                Ok(_) => future::ok(Packet::Pingreq),
+                Err(e) => future::err(e),
+            }
+        } else {
+            future::err(e.into_inner().unwrap())
+        }
+    })
+}
+
 fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> impl PacketFuture {
     match userrequest {
         Request::Reconnect(mqttoptions) => {
@@ -364,22 +397,6 @@ fn handle_notification(notification: Notification, notification_tx: &Sender<Noti
             Ok(()) => (),
             Err(e) => error!("Notification send failed. Error = {:?}", e),
         },
-    }
-}
-
-fn handle_stream_error(error: NetworkError, mqtt_state: &mut MqttState) -> impl RequestFuture {
-    match error {
-        NetworkError::TimeOut(ref e) if e.is_elapsed() => {
-            let ping = Packet::Pingreq;
-            match mqtt_state.handle_outgoing_mqtt_packet(ping) {
-                Ok(_) => future::ok(Request::Ping),
-                Err(e) => future::err(e),
-            }
-        }
-        _ => {
-            error!("Stream failed. Error = {:?}", error);
-            future::err(error)
-        }
     }
 }
 
