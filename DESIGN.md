@@ -26,12 +26,36 @@ and running them separately on the reactor
 ##### Strategy to Detect halfopen connections. 
     * Halfopen connections can't be detected during idle read.
     * But if the read() call reads data implies the connection is live.
-    * Update network activity with read calls and only ping when necessary.
     * Write operation won't error out until the tcp write buffer is full
     * Don't update `last network activity` when tcp writes are successful. \
       They'll be successful when the buffers aren't full even when the network is down.
-    * Finally to dectect half open connections, ping when there is no network activity and
-      the next ping should verify previous ping response and disconnect if it didn't receive any
+
+Detect half open connections at broker end:
+
+Broker needs to know periodically if the connection is alive or else it'll disconnect the client to get
+rid of half open connections. If there are no outgoing packets, send a PINGREQ.
+
+Detect half open connections at client end:
+
+Checking the status of connection is not possible through successful tcp writes becuase of buffering.
+Send a PINGREQ and wait for PINGRESP. Check for previous PINGRESP before sending a PINGREQ and disconnect
+if not received. We can get rid of halfopen connections during second ping
+
+##### Play pause
+
+Sometimes we need to ask the client to stop network operations so that other high priority applications
+load/send their data faster.
+
+```
+  select! {
+    request_channel, command_channel
+  }
+```
+
+disconnect from the network when command channel sends `Pause` command and create a stream which only
+listens on the `command_channel` during next iteration.
+
+
 
 
 
