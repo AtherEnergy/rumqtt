@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     result::Result,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use crate::client::{Notification, Request};
@@ -23,7 +23,8 @@ pub(crate) struct MqttState {
     // --------  State  ----------
     connection_status: MqttConnectionStatus,
     await_pingresp: bool,
-    last_network_activity: Instant,
+    last_incoming: Instant,
+    last_outgoing: Instant,
     last_pkid: PacketIdentifier,
 
     // Stores outgoing data to handle quality of service
@@ -47,7 +48,8 @@ impl MqttState {
             opts,
             connection_status: MqttConnectionStatus::Disconnected,
             await_pingresp: false,
-            last_network_activity: Instant::now(),
+            last_incoming: Instant::now(),
+            last_outgoing: Instant::now(),
             last_pkid: PacketIdentifier(0),
             outgoing_pub: VecDeque::new(),
             outgoing_rel: VecDeque::new(),
@@ -56,21 +58,24 @@ impl MqttState {
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkError> {
-        match packet {
+        let out = match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
-                Ok(Packet::Publish(publish))
+                Packet::Publish(publish)
             }
             Packet::Pingreq => {
                 let _ping = self.handle_outgoing_ping()?;
-                Ok(Packet::Pingreq)
+                Packet::Pingreq
             }
             Packet::Subscribe(subs) => {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
-                Ok(Packet::Subscribe(subscription))
+                Packet::Subscribe(subscription)
             }
-            _ => Ok(packet),
-        }
+            _ => packet,
+        };
+
+        self.last_outgoing = Instant::now();
+        Ok(out)
     }
 
     // Takes incoming mqtt packet, applies state changes and returns notifiaction packet and
@@ -81,9 +86,8 @@ impl MqttState {
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
     pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Request), NetworkError> {
-        self.update_last_in_control_time();
 
-        match packet {
+        let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Suback(_pkid) => Ok((Notification::None, Request::None)),
@@ -92,7 +96,10 @@ impl MqttState {
             Packet::Pubrel(pkid) => self.handle_incoming_pubrel(pkid),
             Packet::Pubcomp(pkid) => self.handle_incoming_pubcomp(pkid),
             _ => panic!("{:?}", packet),
-        }
+        };
+
+        self.last_incoming = Instant::now();
+        out
     }
 
     pub fn handle_outgoing_connect(&mut self) -> Result<Connect, ConnectError> {
@@ -251,38 +258,20 @@ impl MqttState {
         }
     }
 
-    // reset the last control packet sent time
-    pub fn update_last_in_control_time(&mut self) {
-        self.last_network_activity = Instant::now();
-    }
-
     // check when the last control packet/pingreq packet
     // is received and return the status which tells if
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
     pub fn handle_outgoing_ping(&mut self) -> Result<(), NetworkError> {
-        // @ Prevents half open connections. Tcp writes will buffer up
-        // with out throwing any error (till a timeout) when internet
-        // is down. Even though broker closes the socket after timeout,
-        // EOF will be known only after reconnection.
-        // We need to unbind the socket if there in no pingresp before next ping
-        // (What about case when pings aren't sent because of constant publishes
-        // ?. A. Tcp write buffer gets filled up and write will be blocked for 10
-        // secs and then error out because of timeout.)
+        let keep_alive = self.opts.keep_alive().as_secs();
+        let elapsed_in = self.last_incoming.elapsed().as_secs();
+        let elapsed_out = self.last_outgoing.elapsed().as_secs();
 
-        let keep_alive = self.opts.keep_alive().as_secs() * 1000;
-        let deviation = 100;
-        let keep_alive = Duration::from_millis(keep_alive + deviation);
-
-        let elapsed = self.last_network_activity.elapsed();
-        if elapsed >= keep_alive {
-            error!(
-                "Elapsed time {:?} is greater than keep alive {:?}. Timeout error",
-                elapsed.as_secs(),
-                keep_alive
-            );
-            return Err(NetworkError::Timeout);
-        }
+        debug!(
+            "keep alive = {}, 
+            last incoming pkt before {} secs, 
+            last outgoing pkt before {} secs", 
+            keep_alive, elapsed_in, elapsed_out);
 
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
@@ -290,13 +279,8 @@ impl MqttState {
             return Err(NetworkError::AwaitPingResp);
         }
 
-        if self.connection_status == MqttConnectionStatus::Connected {
-            self.await_pingresp = true;
-            Ok(())
-        } else {
-            error!("State = {:?}. Shouldn't ping in this state", self.connection_status);
-            Err(NetworkError::InvalidState)
-        }
+        self.await_pingresp = true;
+        Ok(())
     }
 
     pub fn handle_incoming_pingresp(&mut self) -> Result<(Notification, Request), NetworkError> {
@@ -306,15 +290,8 @@ impl MqttState {
 
     pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {
         let pkid = self.next_pkid();
-
-        if self.connection_status == MqttConnectionStatus::Connected {
-            subscription.pkid = pkid;
-
-            Ok(subscription)
-        } else {
-            error!("State = {:?}. Shouldn't subscribe in this state", self.connection_status);
-            Err(NetworkError::InvalidState)
-        }
+        subscription.pkid = pkid;
+        Ok(subscription)
     }
 
     // pub fn handle_incoming_suback(&mut self, ack: Suback) -> Result<(), SubackError> {
@@ -332,7 +309,8 @@ impl MqttState {
             self.outgoing_pub.clear();
         }
 
-        self.last_network_activity = Instant::now();
+        self.last_incoming = Instant::now();
+        self.last_outgoing = Instant::now();
     }
 
     // http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
@@ -589,22 +567,6 @@ mod test {
             Ok(_) => panic!("Should throw pingresp await error"),
             Err(NetworkError::AwaitPingResp) => (),
             Err(e) => panic!("Should throw pingresp await error. Error = {:?}", e),
-        }
-    }
-
-    #[test]
-    fn outgoing_ping_handle_should_throw_error_if_ping_time_exceeded() {
-        let mut mqtt = build_mqttstate();
-
-        let opts = MqttOptions::default().set_keep_alive(10);
-        mqtt.opts = opts;
-
-        mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::from_secs(12));
-
-        match mqtt.handle_outgoing_ping() {
-            Err(NetworkError::Timeout) => (),
-            _ => panic!("Should throw timeout error"),
         }
     }
 

@@ -16,7 +16,6 @@ use futures::{
 };
 use mqtt311::Packet;
 use std::{cell::RefCell, rc::Rc, thread, time::Duration};
-use tokio::runtime::current_thread;
 use tokio::runtime::current_thread::Runtime;
 use tokio_codec::Framed;
 use tokio_timer::{timeout, Timeout};
@@ -283,26 +282,19 @@ impl Connection {
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
     /// channel) and creates a stream of packets to send on network
     fn network_reply_stream(&self, network_stream: SplitStream<MqttFramed>) -> impl PacketStream {
-        let mqtt_state_in = self.mqtt_state.clone();
-        let mqtt_state_out = self.mqtt_state.clone();
-        // let network_stream = Timeout::new(network_stream, keep_alive);
-
+        let mqtt_state = self.mqtt_state.clone();
         let notification_tx = self.notification_tx.clone();
         let network_stream = network_stream
             .map_err(NetworkError::Io)
             .and_then(move |packet| {
                 debug!("Incoming packet = {:?}", packet_info(&packet));
-                let reply = mqtt_state_in.borrow_mut().handle_incoming_mqtt_packet(packet);
+                let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
                 future::result(reply)
             })
             .and_then(move |(notification, reply)| {
                 handle_notification(notification, &notification_tx);
                 future::ok(reply)
             })
-            // .or_else(move |e| {
-            //     let mut mqtt_state_out = mqtt_state_out.borrow_mut();
-            //     handle_stream_error(e, &mut mqtt_state_out)
-            // })
             .filter(|reply| should_forward_packet(reply))
             .and_then(move |packet| future::ok(packet.into()));
 
@@ -371,7 +363,7 @@ fn handle_stream_error(
     future::err(error).or_else(move |e| {
         if e.is_elapsed() {
             match out {
-                Ok(_) => future::ok(Packet::Pingreq),
+                Ok(packet) => future::ok(packet),
                 Err(e) => future::err(e),
             }
         } else {

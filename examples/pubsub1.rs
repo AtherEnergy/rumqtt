@@ -5,7 +5,7 @@ fn main() {
     pretty_env_logger::init();
     let broker = "localhost";
     let port = 1883;
-    let mqtt_options = MqttOptions::new("test-id", broker, port).set_keep_alive(10);
+    let mqtt_options = MqttOptions::new("test-pubsub1", broker, port).set_keep_alive(10);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 

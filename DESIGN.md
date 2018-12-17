@@ -4,8 +4,11 @@
 mqtt::run(mqttoptions) -> Result<NotificationReceiver, Error>
 ```
 
-To report initial connect error, resolve the initial connection future outside thread spawn and move it inside after
-the connection is successful
+Since the reactor which's doing network operations runs in its own thread, returning results to the user
+becomes tricky. But the user should have an option to know the status of initial connection through API
+rather than the log. The result of the connection is passed to the user via channel as we can't
+move reactor between threads. This is also a reason behind the separation of connection and mqttio futures
+and running them separately on the reactor
 
 ##### User should be able to dynamically reconnect with different configuration
 
@@ -20,7 +23,7 @@ the connection is successful
     client.update_connection(mqttopts);
 ```
 
-##### Detect halfopen connections. 
+##### Strategy to Detect halfopen connections. 
     * Halfopen connections can't be detected during idle read.
     * But if the read() call reads data implies the connection is live.
     * Update network activity with read calls and only ping when necessary.
