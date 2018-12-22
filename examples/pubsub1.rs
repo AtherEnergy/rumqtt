@@ -15,7 +15,7 @@ fn main() {
         for i in 0..100 {
             let payload = format!("publish {}", i);
             thread::sleep(Duration::from_millis(100));
-            mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
+            mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
         }
     });
 

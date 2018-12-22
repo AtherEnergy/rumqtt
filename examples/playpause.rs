@@ -18,7 +18,7 @@ fn main() {
         for i in 0..100 {
             let payload = format!("publish {}", i);
             thread::sleep(dur);
-            c1.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
+            c1.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
         }
     });
 

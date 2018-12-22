@@ -12,7 +12,7 @@ fn main() {
         for i in 0..100 {
             let payload = format!("publish {}", i);
             thread::sleep(Duration::from_secs(1));
-            mqtt_client.publish("hello/world", QoS::AtMostOnce, payload).unwrap();
+            mqtt_client.publish("hello/world", QoS::AtMostOnce, false, payload).unwrap();
         }
     });
 

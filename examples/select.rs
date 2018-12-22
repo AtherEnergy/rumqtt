@@ -18,7 +18,7 @@ fn main() {
             let payload = format!("publish {}", i);
             thread::sleep(sleep_time);
 
-            mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
+            mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
         }
 
         thread::sleep(sleep_time * 10);
