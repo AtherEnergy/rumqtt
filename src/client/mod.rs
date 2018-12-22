@@ -2,7 +2,7 @@ use crate::error::{ClientError, ConnectError};
 use crate::MqttOptions;
 use crossbeam_channel;
 use futures::{sync::mpsc, Future, Sink};
-use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic};
+use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, Unsubscribe, SubscribeTopic};
 use std::sync::Arc;
 
 pub mod connection;
@@ -26,6 +26,7 @@ pub enum Notification {
 pub enum Request {
     Publish(Publish),
     Subscribe(Subscribe),
+    Unsubscribe(Unsubscribe),
     PubAck(PacketIdentifier),
     PubRec(PacketIdentifier),
     PubRel(PacketIdentifier),
@@ -116,6 +117,20 @@ impl MqttClient {
 
         let tx = &mut self.request_tx;
         tx.send(Request::Subscribe(subscribe)).wait()?;
+        Ok(())
+    }
+
+    pub fn unsubscribe<S>(&mut self, topic: S) -> Result<(), ClientError>
+        where
+            S: Into<String>,
+    {
+        let unsubscribe = Unsubscribe {
+            pkid: PacketIdentifier::zero(),
+            topics: vec![topic.into()],
+        };
+
+        let tx = &mut self.request_tx;
+        tx.send(Request::Unsubscribe(unsubscribe)).wait()?;
         Ok(())
     }
 

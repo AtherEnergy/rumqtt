@@ -91,6 +91,7 @@ impl MqttState {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Suback(_pkid) => Ok((Notification::None, Request::None)),
+            Packet::Unsuback(_pkid) => Ok((Notification::None, Request::None)),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Pubrec(pkid) => self.handle_incoming_pubrec(pkid),
             Packet::Pubrel(pkid) => self.handle_incoming_pubrel(pkid),
