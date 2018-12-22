@@ -100,6 +100,30 @@ impl MqttClient {
         tx.send(Request::Publish(publish)).wait()?;
         Ok(())
     }
+    
+    pub fn retained_publish<S, V>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
+    {
+        let payload = payload.into();
+        if payload.len() > self.max_packet_size {
+            return Err(ClientError::PacketSizeLimitExceeded);
+        }
+
+        let publish = Publish {
+            dup: false,
+            qos,
+            retain: true,
+            topic_name: topic.into(),
+            pkid: None,
+            payload: Arc::new(payload),
+        };
+
+        let tx = &mut self.request_tx;
+        tx.send(Request::Publish(publish)).wait()?;
+        Ok(())
+    }
 
     pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
     where
