@@ -456,6 +456,7 @@ impl From<Request> for Packet {
             Request::Ping => Packet::Pingreq,
             Request::Disconnect => Packet::Disconnect,
             Request::Subscribe(subscribe) => Packet::Subscribe(subscribe),
+            Request::Unsubscribe(unsubscribe) => Packet::Unsubscribe(unsubscribe),
             _ => unimplemented!(),
         }
     }
