@@ -25,11 +25,11 @@ pub enum SecurityOptions {
     /// No authentication.
     None,
     /// Use the specified `(username, password)` tuple to authenticate.
-    UsernamePassword((String, String)),
+    UsernamePassword(String, String),
     #[cfg(feature = "jwt")]
     /// Authenticate against a Google Cloud IoT Core project with the triple
     /// `(project name, private_key.der to sign jwt, expiry in seconds)`.
-    GcloudIot((String, Vec<u8>, i64)),
+    GcloudIot(String, Vec<u8>, i64),
 }
 
 #[derive(Clone, Debug)]
@@ -214,9 +214,9 @@ impl MqttOptions {
 
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
         let (username, password) = match self.security.clone() {
-            SecurityOptions::UsernamePassword((username, password)) => (Some(username), Some(password)),
+            SecurityOptions::UsernamePassword(username, password) => (Some(username), Some(password)),
             #[cfg(feature = "jwt")]
-            SecurityOptions::GcloudIot((projectname, key, expiry)) => {
+            SecurityOptions::GcloudIot(projectname, key, expiry) => {
                 let username = Some("unused".to_owned());
                 let password = Some(gen_iotcore_password(projectname, &key, expiry)?);
                 (username, password)

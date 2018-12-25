@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 
 fn main() {
     pretty_env_logger::init();
-    let broker = "localhost";
+    let broker = "prod-mqtt-broker.atherengineering.in";
     let port = 1883;
     let mqtt_options = MqttOptions::new("test-pubsub1", broker, port).set_keep_alive(10);
 

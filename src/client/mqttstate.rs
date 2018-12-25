@@ -725,7 +725,7 @@ mod test {
             .set_clean_session(true)
             .set_keep_alive(50)
             .set_last_will(lwt.clone())
-            .set_security_opts(UsernamePassword((String::from("USER"), String::from("PASS"))));
+            .set_security_opts(UsernamePassword(String::from("USER"), String::from("PASS")));
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);

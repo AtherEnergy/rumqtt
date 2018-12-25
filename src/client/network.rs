@@ -23,8 +23,8 @@ pub mod stream {
         },
         sync::Arc,
     };
-    use tokio::{codec::LinesCodec, io::AsyncRead, net::TcpStream};
-    use tokio_codec::{Decoder, Framed};
+    use tokio::{io::AsyncRead, net::TcpStream};
+    use tokio_codec::{Decoder, Framed, LinesCodec};
     use tokio_rustls::{
         rustls::{internal::pemfile, ClientConfig, ClientSession},
         TlsConnector, TlsStream,
