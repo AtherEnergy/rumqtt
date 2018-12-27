@@ -146,11 +146,13 @@ impl MqttState {
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
+        
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
+        info!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
         Ok(publish)
     }
 
@@ -289,9 +291,11 @@ impl MqttState {
         Ok((Notification::None, Request::None))
     }
 
-    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {
+    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {        
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
+
+        info!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);   
         Ok(subscription)
     }
 

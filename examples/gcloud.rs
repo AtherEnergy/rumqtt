@@ -24,9 +24,9 @@ fn main() {
         + "/devices/"
         + &config.id;
 
-    let security_options = SecurityOptions::GcloudIot(config.project, include_bytes!("tlsfiles/server.key.pem").to_vec(), 60);
+    let security_options = SecurityOptions::GcloudIot(config.project, include_bytes!("../../certs/rsa_private.der").to_vec(), 60);
 
-    let ca = include_bytes!("tlsfiles/server.key.pem").to_vec();
+    let ca = include_bytes!("../../certs/roots.pem").to_vec();
     let connection_method = ConnectionMethod::Tls(ca, None);
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)

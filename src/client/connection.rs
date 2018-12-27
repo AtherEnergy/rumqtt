@@ -75,7 +75,11 @@ impl Connection {
                 connection_rx.recv()??;
                 Ok(user_handle)
             }
-            ReconnectOptions::Always(_) => Ok(user_handle),
+            ReconnectOptions::Always(_) => {
+                // don't propogate the error to the user
+                let _ = connection_rx.recv()?;
+                Ok(user_handle)
+            }
         }
     }
 
