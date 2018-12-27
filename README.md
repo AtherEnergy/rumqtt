@@ -1,4 +1,6 @@
-Pure rust mqtt client
+Pure rust [MQTT] client
+
+[MQTT]: http://mqtt.org/
 
 #### What is supported
 
