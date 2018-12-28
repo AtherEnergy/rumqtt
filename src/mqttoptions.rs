@@ -32,21 +32,27 @@ pub enum SecurityOptions {
     GcloudIot(String, Vec<u8>, i64),
 }
 
+
+/// Connection method used to connect to the broker
 #[derive(Clone, Debug)]
 pub enum ConnectionMethod {
+    /// Plain text connection
     Tcp,
-    // ca and, optionally, a pair of client cert and client key
+    /// Encrypted connection. (ca data, optional client cert and key data)
     Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
 }
 
+/// Mqtt through http proxy
 #[derive(Clone, Debug)]
 pub enum Proxy {
+    /// No tunnel
     None,
-    /// Option to tunnel through http connect.
+    /// Tunnel through a proxy using http connect.
     /// (Proxy name, Port, priave_key.der to sign jwt, Expiry in seconds)
     HttpConnect(String, u16, Vec<u8>, i64),
 }
 
+/// Options to configure mqtt behaviour 
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
@@ -91,6 +97,7 @@ impl Default for MqttOptions {
 }
 
 impl MqttOptions {
+    /// New mqtt options
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         // TODO: Validate if addr is proper address type
         let id = id.into();
@@ -113,6 +120,7 @@ impl MqttOptions {
         }
     }
 
+    /// Get address of the broker
     pub fn broker_address(&self) -> (String, u16) {
         (self.broker_addr.clone(), self.port)
     }
@@ -128,10 +136,12 @@ impl MqttOptions {
         self
     }
 
+    /// Get keep alive time
     pub fn keep_alive(&self) -> Duration {
         self.keep_alive
     }
 
+    /// Get client id
     pub fn client_id(&self) -> String {
         self.client_id.clone()
     }
@@ -142,6 +152,7 @@ impl MqttOptions {
         self
     }
 
+    /// Get packet size limit
     pub fn max_packet_size(&self) -> usize {
         self.max_packet_size
     }
@@ -159,6 +170,7 @@ impl MqttOptions {
         self
     }
 
+    /// Get clean session flag
     pub fn clean_session(&self) -> bool {
         self.clean_session
     }
@@ -169,15 +181,18 @@ impl MqttOptions {
         self
     }
 
+    /// Get connection method
     pub fn connection_method(&self) -> ConnectionMethod {
         self.connection_method.clone()
     }
 
+    /// Set http proxy that you want to tunnel mqtt data through
     pub fn set_proxy(mut self, proxy: Proxy) -> Self {
         self.proxy = proxy;
         self
     }
 
+    /// Get http proxy config
     pub fn proxy(&self) -> Proxy {
         self.proxy.clone()
     }
@@ -189,6 +204,7 @@ impl MqttOptions {
         self
     }
 
+    /// Get configured reconnection option
     pub fn reconnect_opts(&self) -> ReconnectOptions {
         self.reconnect
     }
@@ -212,6 +228,7 @@ impl MqttOptions {
         self
     }
 
+    /// Create mqtt connect packet based on the configuration
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
         let (username, password) = match self.security.clone() {
             SecurityOptions::UsernamePassword(username, password) => (Some(username), Some(password)),
@@ -245,6 +262,7 @@ struct Claims {
     aud: String,
 }
 
+/// Generate google cloud iot core password
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
 pub fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
@@ -264,6 +282,8 @@ pub fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<
     Ok(encode(&jwt_header, &claims, &key)?)
 }
 
+
+/// Generate basic auth string for http proxy server
 //TODO: Rename feature 'jwt' to 'iotcore' & 'httpconnectproxy"
 #[cfg(feature = "jwt")]
 pub fn gen_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> Result<String, ConnectError> {

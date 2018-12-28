@@ -305,12 +305,6 @@ impl Connection {
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
 
-    fn network_request_stream(&mut self, previous_request_stream: impl PacketStream) -> Prepend<impl PacketStream> {
-        let mqtt_state = self.mqtt_state.clone();
-        let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
-        previous_request_stream.prepend(last_session_publishes)
-    }
-
     fn merge_network_request_stream(&mut self, previous_request_stream: &mut Prepend<impl PacketStream>) {
         let mqtt_state = self.mqtt_state.clone();
         let last_session_publishes = mqtt_state.borrow_mut().handle_reconnection();
