@@ -71,6 +71,7 @@ pub enum Command {
     Resume,
 }
 
+#[doc(hidden)]
 /// Combines handles returned by the eventloop
 pub struct UserHandle {
     request_tx: mpsc::Sender<Request>,

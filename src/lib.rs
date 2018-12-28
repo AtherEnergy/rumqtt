@@ -18,8 +18,7 @@
 //! use std::{thread, time::Duration};
 //!
 //! fn main() {
-//!     let mqtt_options = MqttOptions::new("test-pubsub1", "localhost", 1883)
-//!                                    .set_keep_alive(10); 
+//!     let mqtt_options = MqttOptions::new("test-pubsub1", "localhost", 1883);
 //!     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 //!      
 //!     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
@@ -36,7 +35,7 @@
 //!         println!("{:?}", notification)
 //!     }
 //! }
-//! 
+//! ```
 //! 
 //! 
 //! ## Select on incoming notifications using crossbeam select!
@@ -58,10 +57,12 @@
 //!             thread::sleep(sleep_time);
 //!             mqtt_client.publish("hello/world", QoS::AtLeastOnce, payload).unwrap();
 //!         }
+//!         
 //!         thread::sleep(sleep_time * 10);
 //!         done_tx.send(true).unwrap();
 //!     });
 //!
+//!     // select between mqtt notifications and other channel rx
 //!     loop {
 //!         select! {
 //!             recv(notifications) -> notification => {
@@ -71,15 +72,15 @@
 //!         }
 //!     }
 //! }
+//! ```
 //! 
-//! //! ## Clone the client to access mqtt eventloop from different threads
+//! ## Clone the client to access mqtt eventloop from different threads
 //! ```
 //! use rumqtt::{MqttClient, MqttOptions, QoS};
 //! use std::{thread, time::Duration};
 //!
 //! fn main() {
-//!     let mqtt_options = MqttOptions::new("test-pubsub1", "localhost", 1883)
-//!                                    .set_keep_alive(10); 
+//!     let mqtt_options = MqttOptions::new("test-pubsub1", "localhost", 1883);
 //!     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 //!     let mut c1 = mqtt_client.clone();
 //!     let mut c2 = mqtt_client.clone();
@@ -94,6 +95,7 @@
 //!         }
 //!     });
 //! 
+//!     // pause and resume network from this thread
 //!     thread::spawn(move || {
 //!         let dur = Duration::new(5, 0);
 //!         for i in 0..100 {
@@ -102,17 +104,19 @@
 //!         }
 //!     });
 //!
+//!     // receive incoming notifications
 //!     for notification in notifications {
 //!         println!("{:?}", notification)
 //!     }
 //! }
+//! ```
 
 #[macro_use]
 extern crate log;
 
-/// Provides apis to interact with mqtt eventloop thread
+/// Handles to interact with mqtt eventloop thread
 pub mod client;
-/// Provides apis to configure mqtt connection
+/// APIs to configure mqtt connection behaviour
 pub mod mqttoptions;
 mod codec;
 mod error;
@@ -121,4 +125,5 @@ pub use crate::client::{MqttClient, Notification};
 pub use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
 pub use crate::error::{ConnectError, ClientError};
 pub use crossbeam_channel::Receiver;
+#[doc(hidden)]
 pub use mqtt311::*;
