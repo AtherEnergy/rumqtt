@@ -10,7 +10,7 @@ use crate::mqttoptions::MqttOptions;
 use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttConnectionStatus {
+pub enum MqttConnectionStatus {
     Handshake,
     Connected,
     Disconnected,
@@ -21,7 +21,7 @@ pub(crate) struct MqttState {
     pub opts: MqttOptions,
 
     // --------  State  ----------
-    connection_status: MqttConnectionStatus,
+    pub connection_status: MqttConnectionStatus,
     await_pingresp: bool,
     last_incoming: Instant,
     last_outgoing: Instant,

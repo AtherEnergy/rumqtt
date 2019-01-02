@@ -1,5 +1,5 @@
 use crate::client::{
-    mqttstate::MqttState,
+    mqttstate::{MqttState, MqttConnectionStatus},
     network::stream::NetworkStream,
     prepend::{Prepend, StreamExt},
     Command, Notification, Request, UserHandle,
@@ -30,7 +30,6 @@ pub struct Connection {
     connection_tx: Option<Sender<Result<(), ConnectError>>>,
     connection_count: u32,
     mqttoptions: MqttOptions,
-    is_network_enabled: bool,
 }
 
 impl Connection {
@@ -53,7 +52,6 @@ impl Connection {
                 connection_tx: Some(connection_tx),
                 connection_count: 0,
                 mqttoptions,
-                is_network_enabled: true,
             };
 
             connection.mqtt_eventloop(request_rx, command_rx)
@@ -97,10 +95,14 @@ impl Connection {
             let timeout = Duration::from_secs(30);
             let (runtime, framed) = match self.connect_timeout(mqtt_connect_future, timeout) {
                 Ok(f) => f,
-                Err(true) => continue 'reconnection,
-                Err(false) => break 'reconnection,
+                _ => match should_reconnect_again(reconnect_option) {
+                    true => continue 'reconnection,
+                    false => break 'reconnection
+                }
             };
 
+            self.handle_connection_success();
+            
             let (network_sink, network_stream) = framed.split();
             let network_sink = network_sink.sink_map_err(|e| NetworkError::Io(e));
             let network_reply_stream = self.network_reply_stream(network_stream);
@@ -115,28 +117,24 @@ impl Connection {
 
             let mqtt_future = self.mqtt_future(command_stream, network_stream, network_sink);
 
-            // let mqtt_future = network_stream.select(command_stream).forward(network_sink);
-            match self.mqtt_io(runtime, mqtt_future) {
-                Err(true) => continue 'reconnection,
-                Err(false) => (),
-                Ok(_v) => ()
-            };
+            let out = self.mqtt_io(runtime, mqtt_future);
+            self.handle_disconnection();
 
-            match should_reconnect_again(reconnect_option) {
-                true => continue 'reconnection,
-                false => break 'reconnection
+            match out {
+                Err(true) => continue 'reconnection,
+                Err(false) | Ok(_) => {
+                    match should_reconnect_again(reconnect_option) {
+                        true => continue 'reconnection,
+                        false => break 'reconnection
+                    }
+                }
             }
         }
     }
 
     /// Makes a blocking mqtt connection an returns framed and reactor
-    fn connect_timeout(
-        &mut self,
-        mqtt_connect_future: impl FramedFuture,
-        timeout: Duration,
-    ) -> Result<(Runtime, MqttFramed), bool> {
+    fn connect_timeout(&mut self, mqtt_connect_future: impl FramedFuture, timeout: Duration) -> Result<(Runtime, MqttFramed), ()> {
         // mqtt connection
-        let reconnect_option = self.mqttoptions.reconnect_opts();
         let mut rt = Runtime::new().unwrap();
         let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, timeout);
 
@@ -149,23 +147,22 @@ impl Connection {
             Err(e) => {
                 error!("Connection error = {:?}", e);
                 self.handle_connection_error(e);
-                return Err(should_reconnect_again(reconnect_option));
+                return Err(());
             }
         };
 
         Ok((rt, framed))
     }
 
+    /// 
     fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
         match runtime.block_on(mqtt_future) {
             Err(NetworkError::UserDisconnect) => {
                 info!("User commanded for network disconnect");
-                self.is_network_enabled = false;
                 Err(true)
             }
             Err(NetworkError::UserReconnect) => {
                 info!("User commanded for network reconnect");
-                self.is_network_enabled = true;
                 Err(true)
             }
             Err(e) => {
@@ -186,20 +183,24 @@ impl Connection {
         network_sink: impl PacketSink) 
         -> impl Future<Item = (), Error = NetworkError> {
         // Check if network is enabled and create  a future
+        let connection_status = self.mqtt_state.borrow().connection_status;
         let mqtt_state = self.mqtt_state.clone();
-        if self.is_network_enabled {
-            let network_stream = network_stream.or_else(move |e| {
-                let mut mqtt_state = mqtt_state.borrow_mut();
-                handle_stream_error(e, &mut mqtt_state);
-                future::ok(Packet::Pingreq)
-            });
+        match connection_status {
+            MqttConnectionStatus::Connected => {
+                let network_stream = network_stream.or_else(move |e| {
+                    let mut mqtt_state = mqtt_state.borrow_mut();
+                    handle_stream_error(e, &mut mqtt_state);
+                    future::ok(Packet::Pingreq)
+                });
 
-            Either::A(command_stream
+                Either::A(command_stream
                     .select(network_stream)
                     .forward(network_sink)
                     .map(|(_selct, _splitsink)| ()))
-        } else {
-            Either::B(command_stream.forward(network_sink).map(|(_selct, _splitsink)| ()))
+            }
+            MqttConnectionStatus::Handshake | MqttConnectionStatus::Disconnected => {
+                Either::B(command_stream.forward(network_sink).map(|(_selct, _splitsink)| ()))
+            }
         }
     }
 
@@ -211,7 +212,15 @@ impl Connection {
         if self.connection_count == 1 {
             let connection_tx = self.connection_tx.take().unwrap();
             connection_tx.send(Ok(())).unwrap();
+        } else {
+            let notification = Notification::Reconnected;
+            self.notification_tx.send(notification).unwrap();
         }
+    }
+
+    fn handle_disconnection(&mut self) {
+        let notification = Notification::Disconnected;
+        self.notification_tx.send(notification).unwrap();
     }
 
     fn handle_connection_error(&mut self, error: timeout::Error<ConnectError>) {
@@ -348,9 +357,25 @@ impl Connection {
     }
 
     fn command_stream<'a>(&mut self, commands: &'a mut mpsc::Receiver<Command>) -> impl PacketStream + 'a {
-        // process user commands and raise appropriate error to the event loop
+        // process user commands and raise appropriate error to the event loop.
+        // raise error only when network is enabled during pause command or disabled
+        // during resume command. Ignores repeats otherwise
+        let mqtt_state = self.mqtt_state.clone();
         commands
             .or_else(|_err| Err(NetworkError::Blah))
+            .filter(move |usercommand| {
+                let connected = match mqtt_state.borrow().connection_status {
+                    MqttConnectionStatus::Connected => true,
+                    MqttConnectionStatus::Disconnected | MqttConnectionStatus::Handshake => false
+                };
+                
+                
+                match usercommand {
+                    Command::Pause if connected => true,
+                    Command::Resume if !connected => true,
+                    _ => false
+                }
+            })
             .and_then(|usercommand| match usercommand {
                 Command::Pause => Err(NetworkError::UserDisconnect),
                 Command::Resume => Err(NetworkError::UserReconnect),
@@ -465,6 +490,12 @@ impl From<Request> for Packet {
         }
     }
 }
+
+// macro_rules! sleep_and_reonnect {
+//     ($sleep: Duration,) => {
+        
+//     };
+// }
 
 type MqttFramed = Framed<NetworkStream, MqttCodec>;
 

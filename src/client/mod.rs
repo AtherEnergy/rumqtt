@@ -12,6 +12,8 @@ pub mod prepend;
 
 #[derive(Debug)]
 pub enum Notification {
+    Disconnected,
+    Reconnected,
     Publish(Publish),
     PubAck(PacketIdentifier),
     PubRec(PacketIdentifier),
