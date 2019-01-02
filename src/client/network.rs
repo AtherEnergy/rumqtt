@@ -8,7 +8,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
-    use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
+use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
     use crate::codec::MqttCodec;
     use crate::error::ConnectError;
     use futures::{
@@ -47,11 +47,20 @@ pub mod stream {
         }
     }
 
+    #[derive(Clone)]
+    struct HttpProxy {
+        id: String,
+        proxy_host: String,
+        proxy_port: u16,
+        key: Vec<u8>,
+        expiry: i64
+    }
+
     pub struct NetworkStreamBuilder {
         certificate_authority: Option<Vec<u8>>,
         client_cert: Option<Vec<u8>>,
         client_private_key: Option<Vec<u8>>,
-        http_proxy: Option<(String, String, u16, Vec<u8>, i64)>,
+        http_proxy: Option<HttpProxy>,
     }
 
     impl NetworkStreamBuilder {
@@ -74,7 +83,13 @@ pub mod stream {
             key: &[u8],
             expiry: i64,
         ) -> NetworkStreamBuilder {
-            self.http_proxy = Some((id.to_owned(), proxy_host.to_owned(), proxy_port, key.to_owned(), expiry));
+            self.http_proxy = Some(HttpProxy {
+                id: id.to_owned(),
+                proxy_host: proxy_host.to_owned(),
+                proxy_port: proxy_port,
+                key: key.to_owned(),
+                expiry
+            });
 
             self
         }
@@ -124,10 +139,11 @@ pub mod stream {
             );
             debug!("{}", connect);
 
-            let addr = lookup_ipv4(proxy_host, proxy_port);
             let codec = LinesCodec::new();
+            let addr = lookup_ipv4(proxy_host, proxy_port);
+            let addr = future::result(addr);
 
-            TcpStream::connect(&addr)
+            addr.and_then(|proxy_address| TcpStream::connect(&proxy_address))
                 .and_then(|tcp| {
                     let framed = tcp.framed(codec);
                     future::ok(framed)
@@ -151,7 +167,11 @@ pub mod stream {
 
         pub fn tcp_connect(&self, host: &str, port: u16) -> impl Future<Item = TcpStream, Error = io::Error> {
             let addr = lookup_ipv4(host, port);
-            TcpStream::connect(&addr)
+            let addr = future::result(addr);
+
+            addr.and_then(|addr| {
+                TcpStream::connect(&addr)
+            })
         }
 
         pub fn connect(
@@ -160,10 +180,11 @@ pub mod stream {
             port: u16,
         ) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
             let tls_connector = self.create_stream();
-
-            let stream = match self.http_proxy {
-                Some((ref id, ref proxy_host, proxy_port, ref key, expiry)) => {
-                    let s = self.http_connect(id, proxy_host, proxy_port, host, port, key, expiry);
+            let host_tcp = host.to_owned();
+            let http_proxy = self.http_proxy.clone();
+            let stream = match http_proxy {
+                Some(HttpProxy{id, proxy_host, proxy_port, key, expiry}) => {
+                    let s = self.http_connect(&id, &proxy_host, proxy_port, &host_tcp, port, &key, expiry);
                     Either::A(s)
                 }
                 None => {
@@ -174,7 +195,7 @@ pub mod stream {
 
             match tls_connector {
                 Ok(tls_connector) => {
-                    let domain = DNSNameRef::try_from_ascii_str(host).unwrap().to_owned();
+                    let domain = DNSNameRef::try_from_ascii_str(&host).unwrap().to_owned();
                     Either::A(
                         stream
                             .and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
@@ -212,13 +233,13 @@ mod stream {
     impl NetworkStream {}
 }
 
-fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
+fn lookup_ipv4(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
     use std::net::ToSocketAddrs;
 
-    let addrs = (host, port).to_socket_addrs().unwrap();
+    let addrs = (host, port).to_socket_addrs()?;
     for addr in addrs {
         if let SocketAddr::V4(_) = addr {
-            return addr;
+            return Ok(addr);
         }
     }
 
