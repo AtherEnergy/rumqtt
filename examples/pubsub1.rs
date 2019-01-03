@@ -5,10 +5,11 @@ fn main() {
     pretty_env_logger::init();
     let broker = "prod-mqtt-broker.atherengineering.in";
     let port = 1883;
-    let mqtt_options = MqttOptions::new("test-pubsub1", broker, port).set_keep_alive(10);
+    let mqtt_options = MqttOptions::new("test-pubsub2", broker, port)
+                                    .set_keep_alive(10)
+                                    .set_clean_session(false);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
-
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 
     thread::spawn(move || {
