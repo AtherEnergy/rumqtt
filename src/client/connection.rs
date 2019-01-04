@@ -67,20 +67,15 @@ impl Connection {
         };
 
         match reconnect_option {
-            ReconnectOptions::AfterFirstSuccess(_) => {
-                connection_rx.recv()??;
-                Ok(user_handle)
-            }
-            ReconnectOptions::Never => {
-                connection_rx.recv()??;
-                Ok(user_handle)
-            }
+            ReconnectOptions::AfterFirstSuccess(_) => connection_rx.recv()??,
+            ReconnectOptions::Never => connection_rx.recv()??,
             ReconnectOptions::Always(_) => {
-                // don't propogate the error to the user
+                // read the result but ignore it
                 let _ = connection_rx.recv()?;
-                Ok(user_handle)
             }
         }
+
+        Ok(user_handle)
     }
 
     // NOTE: We need to use same reactor across threads because io resources (framed) will
@@ -234,17 +229,8 @@ impl Connection {
         };
 
         if self.connection_count == 1 {
-            match self.mqttoptions.reconnect_opts() {
-                ReconnectOptions::AfterFirstSuccess(_) => {
-                    let connection_tx = self.connection_tx.take().unwrap();
-                    connection_tx.send(error).unwrap();
-                }
-                ReconnectOptions::Never => {
-                    let connection_tx = self.connection_tx.take().unwrap();
-                    connection_tx.send(error).unwrap();
-                }
-                ReconnectOptions::Always(_) => (),
-            }
+            let connection_tx = self.connection_tx.take().unwrap();
+            connection_tx.send(error).unwrap();
         }
     }
 
