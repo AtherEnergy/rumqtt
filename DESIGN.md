@@ -25,21 +25,29 @@ and running them separately on the reactor
 
 ##### Strategy to Detect halfopen connections. 
     * Halfopen connections can't be detected during idle read.
-    * But if the read() call reads data implies the connection is live.
+    * read() call reads data => client knows that the connection is live.
     * Write operation won't error out until the tcp write buffer is full
     * Don't update `last network activity` when tcp writes are successful. \
       They'll be successful when the buffers aren't full even when the network is down.
 
-Detect half open connections at broker end:
+If pings are sent based on idle reads, client won't send any data to broker when receiving qos0 publishes and the
+broker will disconnect the client
 
-Broker needs to know periodically if the connection is alive or else it'll disconnect the client to get
-rid of half open connections. If there are no outgoing packets, send a PINGREQ.
+If pings are based on idle network replys (because of incoming packets), network activity due to user requests
+(like qos1 publishes) will be ignored and spurious pings will be sent
 
-Detect half open connections at client end:
+If pings are not triggered because of user requests, which doesn't represent actual outgoing network activity because writes won't error out when the link is down until the buffers are full and internal queues will be filled until writes are blocked/errors because of kernel write buffers being full
 
-Checking the status of connection is not possible through successful tcp writes becuase of buffering.
-Send a PINGREQ and wait for PINGRESP. Check for previous PINGRESP before sending a PINGREQ and disconnect
-if not received. We can get rid of halfopen connections during second ping
+pings are sent based on idle user request writes => no pings during user requests resulting in the above problem.
+
+SOLUTION:
+
+Detect bad network based on idle network replys. This makes sure that the client is not fooled by successful publish/subscibe userrequest writes. But this will result in spurious pings when the network is good because userrequest successes are not considered. Trigger pings when there is no outgoing network activity due to incoming packets.
+
+When there are false ping wakeups during active incoming packets but no replys (like user qos1 publishes, connection receives acks but doesn't reply anythin back on network) consider `last_outgoing_time` and chuck the ping.
+
+When there are false ping wakeups when there's no incoming packets and no replys (like user qos0 publishes, connection doesn't receive acks and hence doesn't reply anythin back on network) send a `ping`. Though this ping is unnecessary for broker during good network, it helps client detect halfopen connections during bad network
+
 
 ##### Play pause
 

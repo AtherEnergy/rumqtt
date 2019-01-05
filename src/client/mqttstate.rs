@@ -57,21 +57,18 @@ impl MqttState {
         }
     }
 
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, NetworkError> {
+    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Request, NetworkError> {
         let out = match packet {
             Packet::Publish(publish) => {
                 let publish = self.handle_outgoing_publish(publish)?;
-                Packet::Publish(publish)
+                Request::Publish(publish)
             }
-            Packet::Pingreq => {
-                let _ping = self.handle_outgoing_ping()?;
-                Packet::Pingreq
-            }
+            Packet::Pingreq => self.handle_outgoing_ping()?,
             Packet::Subscribe(subs) => {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
-                Packet::Subscribe(subscription)
+                Request::Subscribe(subscription)
             }
-            _ => packet,
+            _ => unimplemented!(),
         };
 
         self.last_outgoing = Instant::now();
@@ -121,12 +118,12 @@ impl MqttState {
         }
     }
 
-    pub fn handle_reconnection(&mut self) -> VecDeque<Packet> {
+    pub fn handle_reconnection(&mut self) -> VecDeque<Request> {
         if self.opts.clean_session() {
             VecDeque::new()
         } else {
             //TODO: Write unittest for checking state during reconnection
-            self.outgoing_pub.clone().into_iter().map(Packet::Publish).collect()
+            self.outgoing_pub.clone().into_iter().map(Request::Publish).collect()
         }
     }
 
@@ -152,7 +149,7 @@ impl MqttState {
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        info!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
+        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
         Ok(publish)
     }
 
@@ -265,16 +262,10 @@ impl MqttState {
     // is received and return the status which tells if
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<(), NetworkError> {
-        let keep_alive = self.opts.keep_alive().as_secs();
-        let elapsed_in = self.last_incoming.elapsed().as_secs();
-        let elapsed_out = self.last_outgoing.elapsed().as_secs();
-
-        debug!(
-            "keep alive = {}, 
-            last incoming pkt before {} secs, 
-            last outgoing pkt before {} secs", 
-            keep_alive, elapsed_in, elapsed_out);
+    pub fn handle_outgoing_ping(&mut self) -> Result<Request, NetworkError> {
+        let keep_alive = self.opts.keep_alive();
+        let elapsed_in = self.last_incoming.elapsed();
+        let elapsed_out = self.last_outgoing.elapsed();
 
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
@@ -282,8 +273,21 @@ impl MqttState {
             return Err(NetworkError::AwaitPingResp);
         }
 
-        self.await_pingresp = true;
-        Ok(())
+
+        let packet = if elapsed_in > keep_alive || elapsed_out > keep_alive {
+            self.await_pingresp = true;
+            Request::Ping
+        } else {
+            Request::None
+        };
+
+        debug!(
+            "Ping = {:?}. keep alive = {},
+            last incoming packet before {} secs,
+            last outgoing packet before {} secs",
+            packet, keep_alive.as_secs(), elapsed_in.as_secs(), elapsed_out.as_secs());
+
+        Ok(packet)
     }
 
     pub fn handle_incoming_pingresp(&mut self) -> Result<(Notification, Request), NetworkError> {
@@ -560,7 +564,11 @@ mod test {
         thread::sleep(Duration::from_secs(10));
 
         // should ping
-        assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
+         match  mqtt.handle_outgoing_ping().unwrap() {
+            Request::Ping => (),
+            _ => assert!(false, "expecting ping")
+        }
+
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish)).unwrap();
@@ -586,12 +594,18 @@ mod test {
         thread::sleep(Duration::from_secs(10));
 
         // should ping
-        assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
+        match  mqtt.handle_outgoing_ping().unwrap() {
+            Request::Ping => (),
+            _ => assert!(false, "expecting ping")
+        }
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
 
         thread::sleep(Duration::from_secs(10));
         // should ping
-        assert_eq!((), mqtt.handle_outgoing_ping().unwrap());
+         match  mqtt.handle_outgoing_ping().unwrap() {
+            Request::Ping => (),
+            _ => assert!(false, "expecting ping")
+        }
     }
 
     #[test]
