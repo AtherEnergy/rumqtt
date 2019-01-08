@@ -78,10 +78,11 @@ impl MqttClient {
     //
     //    }
 
-    pub fn publish<S, V>(&mut self, topic: S, qos: QoS, payload: V) -> Result<(), ClientError>
+    pub fn publish<S, V, B>(&mut self, topic: S, qos: QoS, retained: B, payload: V) -> Result<(), ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
+        B: Into<bool>,
     {
         let payload = payload.into();
         if payload.len() > self.max_packet_size {
@@ -91,7 +92,7 @@ impl MqttClient {
         let publish = Publish {
             dup: false,
             qos,
-            retain: false,
+            retain: retained.into(),
             topic_name: topic.into(),
             pkid: None,
             payload: Arc::new(payload),
