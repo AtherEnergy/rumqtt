@@ -43,6 +43,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
                 certificate_authority: None,
                 client_cert: None,
                 client_private_key: None,
+                alpn_protocols: Vec::new(),
                 http_proxy: None,
             }
         }
@@ -61,6 +62,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         certificate_authority: Option<Vec<u8>>,
         client_cert: Option<Vec<u8>>,
         client_private_key: Option<Vec<u8>>,
+        alpn_protocols: Vec<Vec<u8>>,
         http_proxy: Option<HttpProxy>,
     }
 
@@ -73,6 +75,12 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         pub fn add_client_auth(mut self, cert: &[u8], private_key: &[u8]) -> NetworkStreamBuilder {
             self.client_cert = Some(cert.to_vec());
             self.client_private_key = Some(private_key.to_vec());
+            self
+        }
+
+        pub fn add_alpn_protocols(mut self, protocols: &[Vec<u8>]) -> NetworkStreamBuilder {
+            self.alpn_protocols.append(&mut protocols.to_vec());
+            debug!("{:?}", &self.alpn_protocols);
             self
         }
 
@@ -119,6 +127,8 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
                 (None, None) => (),
                 _ => unimplemented!(),
             };
+
+            config.set_protocols(&self.alpn_protocols);
 
             Ok(TlsConnector::from(Arc::new(config)))
         }

@@ -288,8 +288,14 @@ impl Connection {
         let builder = NetworkStream::builder();
 
         let builder = match connection_method {
-            ConnectionMethod::Tls(ca, Some((cert, key))) => builder.add_certificate_authority(&ca).add_client_auth(&cert, &key),
-            ConnectionMethod::Tls(ca, None) => builder.add_certificate_authority(&ca),
+            ConnectionMethod::Tls { ca, cert_and_key, alpn } => {
+                let builder = builder.add_certificate_authority(&ca).add_alpn_protocols(&alpn);
+                if let Some((ref cert, ref key)) = cert_and_key {
+                    builder.add_client_auth(cert, key)
+                } else {
+                    builder
+                }
+            },
             ConnectionMethod::Tcp => builder,
         };
 
