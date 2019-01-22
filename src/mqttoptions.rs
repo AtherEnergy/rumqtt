@@ -70,6 +70,8 @@ pub struct MqttOptions {
     max_packet_size: usize,
     /// last will and testament
     last_will: Option<LastWill>,
+    /// channel capacity
+    channel_capacity: usize
 }
 
 impl Default for MqttOptions {
@@ -86,6 +88,7 @@ impl Default for MqttOptions {
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
             last_will: None,
+            channel_capacity: 10
         }
     }
 }
@@ -110,6 +113,7 @@ impl MqttOptions {
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
             last_will: None,
+            channel_capacity: 10
         }
     }
 
@@ -210,6 +214,16 @@ impl MqttOptions {
     pub fn clear_last_will(mut self) -> Self {
         self.last_will = None;
         self
+    }
+
+    /// Set channel capacity
+    pub fn set_channel_capacity(mut self, channel_capacity: usize) -> Self {
+        self.channel_capacity = channel_capacity;
+        self
+    }
+
+    pub fn channel_capacity(&self) -> usize {
+        self.channel_capacity
     }
 
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {

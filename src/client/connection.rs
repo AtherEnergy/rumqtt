@@ -37,7 +37,7 @@ impl Connection {
     /// Takes mqtt options and tries to create initial connection on current thread and handles
     /// connection events in a new thread if the initial connection is successful
     pub fn run(mqttoptions: MqttOptions) -> Result<UserHandle, ConnectError> {
-        let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
+        let (notification_tx, notification_rx) = crossbeam_channel::bounded(mqttoptions.channel_capacity());
         let (request_tx, request_rx) = mpsc::channel::<Request>(10);
         let (command_tx, command_rx) = mpsc::channel::<Command>(5);
 
