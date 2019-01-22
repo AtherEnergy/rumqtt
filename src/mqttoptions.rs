@@ -70,8 +70,10 @@ pub struct MqttOptions {
     max_packet_size: usize,
     /// last will and testament
     last_will: Option<LastWill>,
-    /// channel capacity
-    channel_capacity: usize
+    /// request (publish, subscribe) channel capacity
+    request_channel_capacity: usize,
+    /// notification channel capacity
+    notification_channel_capacity: usize
 }
 
 impl Default for MqttOptions {
@@ -88,7 +90,8 @@ impl Default for MqttOptions {
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
             last_will: None,
-            channel_capacity: 10
+            request_channel_capacity: 10,
+            notification_channel_capacity: 10
         }
     }
 }
@@ -113,7 +116,8 @@ impl MqttOptions {
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
             last_will: None,
-            channel_capacity: 10
+            request_channel_capacity: 10,
+            notification_channel_capacity: 10
         }
     }
 
@@ -216,14 +220,26 @@ impl MqttOptions {
         self
     }
 
-    /// Set channel capacity
-    pub fn set_channel_capacity(mut self, channel_capacity: usize) -> Self {
-        self.channel_capacity = channel_capacity;
+    /// Set notification channel capacity
+    pub fn set_notification_channel_capacity(mut self, capacity: usize) -> Self {
+        self.notification_channel_capacity = capacity;
         self
     }
 
-    pub fn channel_capacity(&self) -> usize {
-        self.channel_capacity
+    /// Notification channel capacity
+    pub fn notification_channel_capacity(&self) -> usize {
+        self.notification_channel_capacity
+    }
+
+    /// Set request channel capacity
+    pub fn set_request_channel_capacity(mut self, capacity: usize) -> Self {
+        self.request_channel_capacity = capacity;
+        self
+    }
+
+    /// Request channel capacity
+    pub fn request_channel_capacity(&self) -> usize {
+        self.request_channel_capacity
     }
 
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
