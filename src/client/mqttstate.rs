@@ -123,7 +123,7 @@ impl MqttState {
             VecDeque::new()
         } else {
             //TODO: Write unittest for checking state during reconnection
-            self.outgoing_pub.clone().into_iter().map(Request::Publish).collect()
+            self.outgoing_pub.split_off(0).into_iter().map(Request::Publish).collect()
         }
     }
 
@@ -149,8 +149,12 @@ impl MqttState {
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
+        // debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
         Ok(publish)
+    }
+
+    pub fn publish_queue_len(&self) -> usize {
+        self.outgoing_pub.len()
     }
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
@@ -169,6 +173,8 @@ impl MqttState {
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
+                let queue: VecDeque<Option<PacketIdentifier>> = self.outgoing_pub.iter().map(|p| p.pkid).collect();
+                println!("queue = {:?}", queue);
                 Err(NetworkError::Unsolicited)
             }
         }

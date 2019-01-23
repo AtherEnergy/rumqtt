@@ -73,7 +73,11 @@ pub struct MqttOptions {
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// notification channel capacity
-    notification_channel_capacity: usize
+    notification_channel_capacity: usize,
+    /// rate limit for outgoing messages
+    outgoing_ratelimit: Option<u64>,
+    /// rate limit applied after queue size limit
+    outgoing_queuelimit: (usize, Duration)
 }
 
 impl Default for MqttOptions {
@@ -91,7 +95,9 @@ impl Default for MqttOptions {
             max_packet_size: 256 * 1024,
             last_will: None,
             request_channel_capacity: 10,
-            notification_channel_capacity: 10
+            notification_channel_capacity: 10,
+            outgoing_ratelimit: None,
+            outgoing_queuelimit: (100, Duration::from_secs(3)),
         }
     }
 }
@@ -117,7 +123,9 @@ impl MqttOptions {
             max_packet_size: 256 * 1024,
             last_will: None,
             request_channel_capacity: 10,
-            notification_channel_capacity: 10
+            notification_channel_capacity: 10,
+            outgoing_ratelimit: None,
+            outgoing_queuelimit: (100, Duration::from_secs(3)),
         }
     }
 
@@ -240,6 +248,32 @@ impl MqttOptions {
     /// Request channel capacity
     pub fn request_channel_capacity(&self) -> usize {
         self.request_channel_capacity
+    }
+    
+    pub fn set_outgoing_ratelimit(mut self, rate: u64) -> Self {
+        if rate == 0 {
+            panic!("zero rate is not allowed");
+        }
+
+        self.outgoing_ratelimit = Some(rate);
+        self
+    }
+
+    pub fn outgoing_ratelimit(&self) -> Option<u64> {
+        self.outgoing_ratelimit
+    }
+
+    pub fn set_outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
+        if queue_size == 0 {
+            panic!("zero queue size is not allowed")
+        }
+
+        self.outgoing_queuelimit = (queue_size, delay);
+        self
+    }
+
+    pub fn outgoing_queuelimit(&self) -> (usize, Duration) {
+        self.outgoing_queuelimit
     }
 
     pub fn connect_packet(&self) -> Result<Connect, ConnectError> {
