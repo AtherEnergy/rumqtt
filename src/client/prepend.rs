@@ -22,7 +22,7 @@ where
     S: Stream,
 {
     stream: S,
-    session: VecDeque<<S as Stream>::Item>,
+    pub session: VecDeque<<S as Stream>::Item>,
 }
 
 pub fn new<S>(stream: S, session: VecDeque<<S as Stream>::Item>) -> Prepend<S>
@@ -50,6 +50,7 @@ where
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Some(v) = self.session.pop_front() {
+            debug!("Sending previous session data");
             return Ok(Async::Ready(Some(v)));
         }
 

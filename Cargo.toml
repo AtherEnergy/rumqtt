@@ -5,7 +5,7 @@ authors = ["raviteja <k.teza1@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = "0.1"
+tokio = "^0.1.9"
 tokio-timer = "0.2.7"
 tokio-io = "0.1"
 tokio-codec = "0.1"

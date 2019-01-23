@@ -153,3 +153,23 @@ impl MqttClient {
         Ok(())
     }
 }
+
+// use std::fmt;
+
+// impl fmt::Debug for Request {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         match self {
+//             Request::Publish(p) => write!(f,
+//                 "Publish \
+//                  topic = {}, \
+//                  pkid = {:?}, \
+//                  payload size = {:?} bytes",
+//                 p.topic_name,
+//                 p.pkid,
+//                 p.payload.len()
+//             ),
+
+//             _ => write!(f, "{:?}", self),
+//         }
+//     }
+// }
