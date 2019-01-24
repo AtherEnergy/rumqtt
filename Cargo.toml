@@ -1,8 +1,10 @@
 [package]
 name = "rumqtt"
+description = "Mqtt client for your IOT needs"
 version = "0.30.0"
 authors = ["raviteja <mail@raviteja.tech"]
 edition = "2018"
+license = "UNLICENSE"
 
 [dependencies]
 tokio = "^0.1.9"
