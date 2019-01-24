@@ -6,8 +6,8 @@ use std::{
 
 use crate::client::{Notification, Request};
 use crate::error::{ConnectError, NetworkError};
-use crate::mqttoptions::MqttOptions;
-use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe};
+use crate::mqttoptions::{MqttOptions, SecurityOptions};
+use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Protocol};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MqttConnectionStatus {
@@ -102,7 +102,7 @@ impl MqttState {
 
     pub fn handle_outgoing_connect(&mut self) -> Result<Connect, ConnectError> {
         self.connection_status = MqttConnectionStatus::Handshake;
-        self.opts.connect_packet()
+        connect_packet(&self.opts)
     }
 
     pub fn handle_incoming_connack(&mut self, connack: Connack) -> Result<(), ConnectError> {
@@ -337,6 +337,56 @@ impl MqttState {
         self.last_pkid = PacketIdentifier(pkid + 1);
         self.last_pkid
     }
+}
+
+fn connect_packet(mqttoptions: &MqttOptions) -> Result<Connect, ConnectError> {
+    let (username, password) = match mqttoptions.security_opts() {
+        SecurityOptions::UsernamePassword(username, password) => (Some(username), Some(password)),
+        #[cfg(feature = "jwt")]
+        SecurityOptions::GcloudIot(projectname, key, expiry) => {
+            let username = Some("unused".to_owned());
+            let password = Some(gen_iotcore_password(projectname, &key, expiry)?);
+            (username, password)
+        }
+        SecurityOptions::None => (None, None),
+    };
+    let connect = Connect {
+        protocol: Protocol::MQTT(4),
+        keep_alive: mqttoptions.keep_alive().as_secs() as u16,
+        client_id: mqttoptions.client_id(),
+        clean_session: mqttoptions.clean_session(),
+        last_will: mqttoptions.last_will(),
+        username,
+        password,
+    };
+    Ok(connect)
+}
+
+#[cfg(feature = "jwt")]
+// Generates a new password for mqtt client authentication
+fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
+    use chrono::{self, Utc};
+    use jsonwebtoken::{encode, Algorithm, Header};
+    use serde_derive::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        iat: i64,
+        exp: i64,
+        aud: String,
+    }
+
+    let time = Utc::now();
+    let jwt_header = Header::new(Algorithm::RS256);
+    let iat = time.timestamp();
+    let exp = time
+        .checked_add_signed(chrono::Duration::minutes(expiry))
+        .expect("Unable to create expiry")
+        .timestamp();
+
+    let claims = Claims { iat, exp, aud: project };
+
+    Ok(encode(&jwt_header, &claims, &key)?)
 }
 
 #[cfg(test)]

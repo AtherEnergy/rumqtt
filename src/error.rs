@@ -1,3 +1,4 @@
+//! All errors
 use crate::client::{Command, Request};
 use crossbeam_channel::RecvError;
 use derive_more::From;

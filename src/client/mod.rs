@@ -1,3 +1,4 @@
+//! Structs to interact with mqtt eventloop
 use crate::error::{ClientError, ConnectError};
 use crate::MqttOptions;
 use crossbeam_channel;
@@ -5,11 +6,16 @@ use futures::{sync::mpsc, Future, Sink};
 use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, Unsubscribe, SubscribeTopic};
 use std::sync::Arc;
 
+#[doc(hidden)]
 pub mod connection;
+#[doc(hidden)]
 pub mod mqttstate;
+#[doc(hidden)]
 pub mod network;
+#[doc(hidden)]
 pub mod prepend;
 
+/// Incoming notifications from the broker
 #[derive(Debug)]
 pub enum Notification {
     Publish(Publish),
@@ -21,7 +27,9 @@ pub enum Notification {
     None,
 }
 
-/// Requests to network event loop
+#[doc(hidden)]
+/// Requests by the client to mqtt event loop. Request are
+/// handle one by one#[derive(Debug)]
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
@@ -37,18 +45,27 @@ pub enum Request {
     None,
 }
 
+#[doc(hidden)]
+/// Commands sent by the client to mqtt event loop. Commands
+/// are of higher priority and will be `select`ed along with
+/// [request]s
+/// 
+/// request: enum.Request.html
 #[derive(Debug)]
 pub enum Command {
     Pause,
     Resume,
 }
 
+#[doc(hidden)]
+/// Combines handles returned by the eventloop
 pub struct UserHandle {
     request_tx: mpsc::Sender<Request>,
     command_tx: mpsc::Sender<Command>,
     notification_rx: crossbeam_channel::Receiver<Notification>,
 }
 
+/// Handle to send requests and commands to the network eventloop
 #[derive(Clone)]
 pub struct MqttClient {
     request_tx: mpsc::Sender<Request>,
@@ -57,6 +74,12 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
+    /// Starts a new mqtt connection in a thread and returns [mqttclient] 
+    /// instance to send requests/commands to the event loop and a crossbeam
+    /// channel receiver to receive notifications sent by the event loop.
+    /// 
+    /// See `select.rs` example
+    /// [mqttclient]: struct.MqttClient.html
     pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
         let max_packet_size = opts.max_packet_size();
         let UserHandle {
@@ -74,10 +97,7 @@ impl MqttClient {
         Ok((client, notification_rx))
     }
 
-    //    pub fn proxy_start(opts: MqttOptions, ) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
-    //
-    //    }
-
+    /// Requests the eventloop for mqtt publish
     pub fn publish<S, V, B>(&mut self, topic: S, qos: QoS, retained: B, payload: V) -> Result<(), ClientError>
     where
         S: Into<String>,
@@ -103,6 +123,7 @@ impl MqttClient {
         Ok(())
     }
 
+    /// Requests the eventloop for mqtt subscribe
     pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
     where
         S: Into<String>,
@@ -121,6 +142,7 @@ impl MqttClient {
         Ok(())
     }
 
+    /// Requests the eventloop for mqtt unsubscribe
     pub fn unsubscribe<S>(&mut self, topic: S) -> Result<(), ClientError>
         where
             S: Into<String>,
@@ -135,18 +157,26 @@ impl MqttClient {
         Ok(())
     }
 
+    /// Commands the network eventloop to disconnect from the broker.
+    /// ReconnectOptions are not in affect here. [Resume] the
+    /// network for reconnection
+    /// 
+    /// [Resume]: struct.MqttClient.html#method.resume 
     pub fn pause(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.command_tx;
         tx.send(Command::Pause).wait()?;
         Ok(())
     }
 
+    /// Commands the network eventloop to reconnect to the broker and
+    /// resume network io
     pub fn resume(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.command_tx;
         tx.send(Command::Resume).wait()?;
         Ok(())
     }
 
+    /// Requests the event loop for disconnection
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.request_tx;
         tx.send(Request::Disconnect).wait()?;

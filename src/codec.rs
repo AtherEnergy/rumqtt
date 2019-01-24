@@ -1,8 +1,11 @@
+//! Codec to convert incoming bytes of a tcp stream into mqtt packets
+//! and outgoing mqtt packets to raw bytes
 use bytes::BytesMut;
 use mqtt311::{self, MqttRead, MqttWrite, Packet};
 use std::io::{self, Cursor, ErrorKind};
 use tokio_codec::{Decoder, Encoder};
 
+/// Mqtt codec
 #[derive(Debug)]
 pub struct MqttCodec;
 
