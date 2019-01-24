@@ -5,7 +5,7 @@ version = "0.30.0"
 authors = ["raviteja <mail@raviteja.tech"]
 documentation = "https://docs.rs/rumqtt/0.30.0/rumqtt/"
 edition = "2018"
-license = "UNLICENSE"
+license = "Unlicense"
 
 [dependencies]
 tokio = "^0.1.9"
