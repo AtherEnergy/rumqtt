@@ -1,7 +1,7 @@
 [package]
 name = "rumqtt"
 version = "0.30.0"
-authors = ["raviteja <k.teza1@gmail.com>"]
+authors = ["raviteja <mail@raviteja.tech"]
 edition = "2018"
 
 [dependencies]
@@ -18,8 +18,7 @@ derive_more = "0.13"
 base64 = "0.10"
 uuid = {version = "0.7", features = ["serde", "v4"]}
 pretty_env_logger = "0.2"
-mqtt311 = { git = "https://github.com/tekjar/mqtt311" }
-# mqtt311 = { path = "../mqtt311"}
+mqtt311 = "0.2"
 
 [dependencies.native-tls]
 version = "0.2"
