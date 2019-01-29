@@ -2,6 +2,8 @@ Pure rust [MQTT] client
 
 [MQTT]: http://mqtt.org/
 
+[![Documentation](https://docs.rs/rumqtt/badge.svg)](https://docs.rs/rumqtt)
+
 #### What is supported
 
 - [x] QoS 0, 1, 2

@@ -175,13 +175,6 @@ impl MqttClient {
         tx.send(Command::Resume).wait()?;
         Ok(())
     }
-
-    /// Requests the event loop for disconnection
-    pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        let tx = &mut self.request_tx;
-        tx.send(Request::Disconnect).wait()?;
-        Ok(())
-    }
 }
 
 // use std::fmt;
