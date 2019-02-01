@@ -49,7 +49,7 @@ pub enum Request {
 /// Commands sent by the client to mqtt event loop. Commands
 /// are of higher priority and will be `select`ed along with
 /// [request]s
-/// 
+///
 /// request: enum.Request.html
 #[derive(Debug)]
 pub enum Command {
@@ -74,10 +74,10 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    /// Starts a new mqtt connection in a thread and returns [mqttclient] 
+    /// Starts a new mqtt connection in a thread and returns [mqttclient]
     /// instance to send requests/commands to the event loop and a crossbeam
     /// channel receiver to receive notifications sent by the event loop.
-    /// 
+    ///
     /// See `select.rs` example
     /// [mqttclient]: struct.MqttClient.html
     pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
@@ -160,8 +160,8 @@ impl MqttClient {
     /// Commands the network eventloop to disconnect from the broker.
     /// ReconnectOptions are not in affect here. [Resume] the
     /// network for reconnection
-    /// 
-    /// [Resume]: struct.MqttClient.html#method.resume 
+    ///
+    /// [Resume]: struct.MqttClient.html#method.resume
     pub fn pause(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.command_tx;
         tx.send(Command::Pause).wait()?;
@@ -173,6 +173,14 @@ impl MqttClient {
     pub fn resume(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.command_tx;
         tx.send(Command::Resume).wait()?;
+        Ok(())
+    }
+
+    /// Commands the network eventloop to gracefully shutdown
+    /// the connection to the broker.
+    pub fn shutdown(&mut self) -> Result<(), ClientError> {
+        let tx = &mut self.request_tx;
+        tx.send(Request::Disconnect).wait()?;
         Ok(())
     }
 }
