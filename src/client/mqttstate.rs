@@ -13,6 +13,7 @@ use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Pub
 enum MqttConnectionStatus {
     Handshake,
     Connected,
+    Disconnecting,
     Disconnected,
 }
 
@@ -68,6 +69,7 @@ impl MqttState {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Request::Subscribe(subscription)
             }
+            Packet::Disconnect => self.handle_outgoing_disconnect()?,
             _ => unimplemented!(),
         };
 
@@ -116,6 +118,11 @@ impl MqttState {
 
             Ok(())
         }
+    }
+
+    pub fn handle_outgoing_disconnect(&mut self) -> Result<Request, NetworkError> {
+        self.connection_status = MqttConnectionStatus::Disconnecting;
+        Ok(Request::Disconnect)
     }
 
     pub fn handle_reconnection(&mut self) -> VecDeque<Request> {
