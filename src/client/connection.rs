@@ -86,7 +86,6 @@ impl Connection {
         let mut command_stream = self.command_stream(command_rx.by_ref());
 
         'reconnection: loop {
-            let reconnect_option = self.mqttoptions.reconnect_opts();
 
             let mqtt_connect_future = self.mqtt_connect();
             let timeout = Duration::from_secs(30);
@@ -119,7 +118,7 @@ impl Connection {
                 Ok(_v) => ()
             };
 
-            match should_reconnect_again(reconnect_option) {
+            match self.should_reconnect_again() {
                 true => continue 'reconnection,
                 false => break 'reconnection
             }
@@ -133,7 +132,6 @@ impl Connection {
         timeout: Duration,
     ) -> Result<(Runtime, MqttFramed), bool> {
         // mqtt connection
-        let reconnect_option = self.mqttoptions.reconnect_opts();
         let mut rt = Runtime::new().unwrap();
         let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, timeout);
 
@@ -146,11 +144,32 @@ impl Connection {
             Err(e) => {
                 error!("Connection error = {:?}", e);
                 self.handle_connection_error(e);
-                return Err(should_reconnect_again(reconnect_option));
+                return Err(self.should_reconnect_again());
             }
         };
 
         Ok((rt, framed))
+    }
+
+    fn should_reconnect_again(&self) -> bool {
+        let reconnect_options = self.mqttoptions.reconnect_opts();
+        let is_disconnecting = self.mqtt_state.clone().borrow().is_disconnecting();
+
+        let reconn_policy_action = match reconnect_options {
+            ReconnectOptions::AfterFirstSuccess(time) => {
+                let time = Duration::from_secs(time);
+                thread::sleep(time);
+                true
+            }
+            ReconnectOptions::Always(time) => {
+                let time = Duration::from_secs(time);
+                thread::sleep(time);
+                true
+            }
+            ReconnectOptions::Never => false,
+        };
+
+        reconn_policy_action && !is_disconnecting
     }
 
     fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
@@ -177,7 +196,7 @@ impl Connection {
     }
 
     fn mqtt_future(
-        &mut self, 
+        &mut self,
         command_stream: impl Stream<Item = Packet, Error = NetworkError>,
         network_request_stream: impl Stream<Item = Request, Error = NetworkError>,
         network_reply_stream: impl Stream<Item = Request, Error = NetworkError>,
@@ -436,7 +455,7 @@ fn nonthrottled_request(
 
 fn handle_stream_timeout_error(
     error: timeout::Error<NetworkError>,
-    mqtt_state: &mut MqttState) 
+    mqtt_state: &mut MqttState)
     -> impl Future<Item = Request, Error = NetworkError> {
     // check if a ping to the broker is necessary
     let out = mqtt_state.handle_outgoing_mqtt_packet(Packet::Pingreq);
@@ -523,22 +542,6 @@ fn request_info(packet: &Request) -> String {
         ),
 
         _ => format!("{:?}", packet),
-    }
-}
-
-fn should_reconnect_again(reconnect_options: ReconnectOptions) -> bool {
-    match reconnect_options {
-        ReconnectOptions::AfterFirstSuccess(time) => {
-            let time = Duration::from_secs(time);
-            thread::sleep(time);
-            true
-        }
-        ReconnectOptions::Always(time) => {
-            let time = Duration::from_secs(time);
-            thread::sleep(time);
-            true
-        }
-        ReconnectOptions::Never => false,
     }
 }
 
