@@ -6,7 +6,7 @@ use crate::client::{
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
-use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
+use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
 use crossbeam_channel::{self, Sender};
 use futures::{
     future::{self, Either},
@@ -183,6 +183,27 @@ impl Connection {
                 info!("User commanded for network reconnect");
                 self.is_network_enabled = true;
                 Err(true)
+            }
+            Err(NetworkError::NetworkStreamClosed) => {
+                // If this is expected behaviour, the client has called `disconnect` or
+                // he's using GcloudIot SecurityOptions and his / her jwt has expired
+                let is_gcp = match self.mqttoptions.security_opts() {
+                    SecurityOptions::GcloudIot(_, _, _) => true,
+                    _ => false
+                };
+                let is_disconnecting = self.mqtt_state.clone().borrow().is_disconnecting();
+
+                // generate some useful log output
+                if !(is_gcp || is_disconnecting) {
+                    error!("Network stream closed");
+                } else if is_gcp && !is_disconnecting {
+                    info!("jwt expired. continuing reconnection loop.");
+                }
+                else {
+                    info!("Shutting down gracefully");
+                }
+                // let reconnection policy handle this
+                Err(false)
             }
             Err(e) => {
                 error!("Event loop returned. Error = {:?}", e);
