@@ -4,6 +4,7 @@ description = "Mqtt client for your IOT needs"
 version = "0.30.1"
 authors = ["raviteja <mail@raviteja.tech"]
 documentation = "https://docs.rs/rumqtt"
+repository = "https://github.com/AtherEnergy/rumqtt"
 edition = "2018"
 license = "Unlicense"
 
