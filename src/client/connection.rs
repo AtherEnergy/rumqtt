@@ -185,24 +185,10 @@ impl Connection {
                 Err(true)
             }
             Err(NetworkError::NetworkStreamClosed) => {
-                // If this is expected behaviour, the client has called `disconnect` or
-                // he's using GcloudIot SecurityOptions and his / her jwt has expired
-                let is_gcp = match self.mqttoptions.security_opts() {
-                    SecurityOptions::GcloudIot(_, _, _) => true,
-                    _ => false
-                };
-                let is_disconnecting = self.mqtt_state.clone().borrow().is_disconnecting();
-
-                // generate some useful log output
-                if !(is_gcp || is_disconnecting) {
-                    error!("Network stream closed");
-                } else if is_gcp && !is_disconnecting {
-                    info!("jwt expired. continuing reconnection loop.");
-                }
-                else {
+                let mqtt_state = self.mqtt_state.clone().borrow();
+                if mqtt_state.is_disconnecting() {
                     info!("Shutting down gracefully");
                 }
-                // let reconnection policy handle this
                 Err(false)
             }
             Err(e) => {
