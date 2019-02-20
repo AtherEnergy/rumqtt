@@ -8,7 +8,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
-use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
+use crate::client::network::{generate_httpproxy_auth, resolve};
     use crate::codec::MqttCodec;
     use crate::error::ConnectError;
     use futures::{
@@ -140,8 +140,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
             debug!("{}", connect);
 
             let codec = LinesCodec::new();
-            let addr = lookup_ipv4(proxy_host, proxy_port);
-            let addr = future::result(addr);
+            let addr = future::result(resolve(proxy_host, proxy_port));
 
             addr.and_then(|proxy_address| TcpStream::connect(&proxy_address))
                 .and_then(|tcp| {
@@ -166,7 +165,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
         }
 
         pub fn tcp_connect(&self, host: &str, port: u16) -> impl Future<Item = TcpStream, Error = io::Error> {
-            let addr = lookup_ipv4(host, port);
+            let addr = resolve(host, port);
             let addr = future::result(addr);
 
             addr.and_then(|addr| {
@@ -233,17 +232,16 @@ mod stream {
     impl NetworkStream {}
 }
 
-fn lookup_ipv4(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
+fn resolve(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
     use std::net::ToSocketAddrs;
 
-    let addrs = (host, port).to_socket_addrs()?;
-    for addr in addrs {
-        if let SocketAddr::V4(_) = addr {
-            return Ok(addr);
-        }
-    }
-
-    unreachable!("Cannot lookup address");
+    (host, port).to_socket_addrs()
+        .and_then(|mut addrs| {
+            addrs.next().ok_or_else(|| {
+                let err_msg = format!("invalid hostname '{}'", host);
+                io::Error::new(io::ErrorKind::Other, err_msg)
+            })
+        })
 }
 
 fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
@@ -309,5 +307,25 @@ impl AsyncWrite for NetworkStream {
             NetworkStream::Tcp(ref mut s) => s.shutdown(),
             NetworkStream::Tls(ref mut s) => s.shutdown(),
         }
+    }
+}
+
+
+mod test {
+    #[test]
+    fn resolve() {
+        use super::resolve;
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+        let localhost_v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1883);
+        let localhost_v6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 1883);
+
+        assert!(resolve("", 1883).is_err());
+        assert_eq!(resolve("127.0.0.1", 1883).unwrap(), localhost_v4);
+        assert_eq!(resolve("::1", 1883).unwrap(), localhost_v6);
+
+        // localhost resolvs to a v4 or v6 address depending on host settings
+        let addr = resolve("localhost", 1883).unwrap();
+        assert!(addr == localhost_v4 || addr == localhost_v6);
     }
 }
