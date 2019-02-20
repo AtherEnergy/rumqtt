@@ -1,7 +1,7 @@
 extern crate pretty_env_logger;
 extern crate rumqtt;
-use rumqtt::{MqttClient, MqttOptions};
-use std::thread;
+//use rumqtt::{MqttClient, MqttOptions};
+//use std::thread;
 
 fn main() {
     // pretty_env_logger::init();
