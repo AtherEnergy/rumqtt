@@ -185,7 +185,7 @@ impl Connection {
                 Err(true)
             }
             Err(NetworkError::NetworkStreamClosed) => {
-                let mqtt_state = self.mqtt_state.clone().borrow();
+                let mqtt_state = self.mqtt_state.borrow();
                 if mqtt_state.is_disconnecting() {
                     info!("Shutting down gracefully");
                 }
