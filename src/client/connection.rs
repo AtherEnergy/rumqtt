@@ -6,7 +6,7 @@ use crate::client::{
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
-use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
+use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
 use crossbeam_channel::{self, Sender};
 use futures::{
     future::{self, Either},
@@ -96,7 +96,7 @@ impl Connection {
             };
 
             let (network_sink, network_stream) = framed.split();
-            let network_sink = network_sink.sink_map_err(|e| NetworkError::Io(e));
+            let network_sink = network_sink.sink_map_err(NetworkError::Io);
             let network_reply_stream = self.network_reply_stream(network_stream);
             let prepended_request_stream = &mut prepended_request_stream;
             let command_stream = &mut command_stream;
@@ -118,10 +118,7 @@ impl Connection {
                 Ok(_v) => ()
             };
 
-            match self.should_reconnect_again() {
-                true => continue 'reconnection,
-                false => break 'reconnection
-            }
+            if self.should_reconnect_again() { continue 'reconnection } else { break 'reconnection }
         }
     }
 
@@ -327,7 +324,7 @@ impl Connection {
                 future::ok(reply)
             })
             .filter(|reply| should_forward_packet(reply))
-            .and_then(move |packet| future::ok(packet));
+            .and_then(future::ok);
 
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }

@@ -145,7 +145,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
 
             addr.and_then(|proxy_address| TcpStream::connect(&proxy_address))
                 .and_then(|tcp| {
-                    let framed = tcp.framed(codec);
+                    let framed = Decoder::framed(codec, tcp);
                     future::ok(framed)
                 })
                 .and_then(|f| f.send(connect))
