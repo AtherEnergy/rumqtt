@@ -15,10 +15,10 @@ use futures::{
     Future, Sink, Stream,
 };
 use mqtt311::Packet;
-use std::{cell::RefCell, rc::Rc, thread, time::Duration};
+use std::{cell::RefCell, rc::Rc, thread, time::{Duration, Instant}};
 use tokio::runtime::current_thread::Runtime;
-use tokio_codec::Framed;
-use tokio_timer::{timeout, Timeout};
+use tokio::codec::Framed;
+use tokio::timer::{timeout, Delay, Timeout};
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -430,12 +430,12 @@ fn throttled_request(
 
     if current_queue_size > queue_limit {
         debug!("queue len = {}, limit = {}", current_queue_size, queue_limit);
-        let out = tokio_timer::sleep(queuelimit_delay)
+        let out = Delay::new(Instant::now() + queuelimit_delay)
                                 .map_err(|e| e.into())
                                 .map(|_| request);
         Either::A(out)
     } else {
-        let out = tokio_timer::sleep(throttle_delay)
+        let out = Delay::new(Instant::now() + throttle_delay)
                                 .map_err(|e| e.into())
                                 .map(|_| request);
         Either::B(out)
@@ -451,7 +451,7 @@ fn nonthrottled_request(
 
     if current_queue_size > queue_limit {
         debug!("queue len = {}, limit = {}", current_queue_size, queue_limit);
-        let out = tokio_timer::sleep(queuelimit_delay)
+        let out = Delay::new(Instant::now() + queuelimit_delay)
                                 .map_err(|e| e.into())
                                 .map(|_| request);
         Either::A(out)

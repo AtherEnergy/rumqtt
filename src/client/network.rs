@@ -4,7 +4,7 @@ use crate::client::network::stream::NetworkStream;
 use futures::Poll;
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
@@ -24,7 +24,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
         sync::Arc,
     };
     use tokio::{io::AsyncRead, net::TcpStream};
-    use tokio_codec::{Decoder, Framed, LinesCodec};
+    use tokio::codec::{Decoder, Framed, LinesCodec};
     use tokio_rustls::{
         rustls::{internal::pemfile, ClientConfig, ClientSession},
         TlsConnector, TlsStream,
