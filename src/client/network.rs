@@ -23,7 +23,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
         },
         sync::Arc,
     };
-    use tokio::{io::AsyncRead, net::TcpStream};
+    use tokio::net::TcpStream;
     use tokio::codec::{Decoder, Framed, LinesCodec};
     use tokio_rustls::{
         rustls::{internal::pemfile, ClientConfig, ClientSession},
@@ -31,6 +31,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
     };
     use webpki::DNSNameRef;
 
+    #[allow(clippy::large_enum_variant)]
     pub enum NetworkStream {
         Tcp(TcpStream),
         Tls(TlsStream<TcpStream, ClientSession>),
@@ -122,6 +123,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
             Ok(TlsConnector::from(Arc::new(config)))
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn http_connect(
             &self,
             id: &str,

@@ -10,6 +10,7 @@ use mqtt311::Packet;
 use std::io::Error as IoError;
 use tokio::timer::{self, timeout};
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Fail, From)]
 pub enum ClientError {
     #[fail(display = "No subscriptions")]
