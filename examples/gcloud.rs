@@ -1,6 +1,10 @@
 use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
 use serde_derive::Deserialize;
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::Path;
 use std::{thread, time::Duration};
+
 // NOTES:
 // ---------
 // Proive necessary stuff from environment variables
@@ -13,7 +17,7 @@ struct Config {
     registry: String,
 }
 
-fn main() {
+fn main() -> Result<(), io::Error> {
     pretty_env_logger::init();
     let config: Config = envy::from_env().unwrap();
 
@@ -24,9 +28,12 @@ fn main() {
         + "/devices/"
         + &config.id;
 
-    let security_options = SecurityOptions::GcloudIot(config.project, include_bytes!("../../certs/rsa_private.der").to_vec(), 60);
+    let mut rsa_private = vec!();
+    File::open(Path::new("../../certs/rsa_private.der")).and_then(|mut f| f.read_to_end(&mut rsa_private))?;
+    let security_options = SecurityOptions::GcloudIot(config.project, rsa_private, 60);
 
-    let ca = include_bytes!("../../certs/roots.pem").to_vec();
+    let mut ca = vec!();
+    File::open(Path::new("../../certs/roots.pem")).and_then(|mut f| f.read_to_end(&mut ca))?;
     let connection_method = ConnectionMethod::Tls(ca, None);
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
@@ -48,4 +55,5 @@ fn main() {
     for notification in notifications {
         println!("{:?}", notification)
     }
+    Ok(())
 }

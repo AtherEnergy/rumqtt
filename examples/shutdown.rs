@@ -16,7 +16,7 @@ fn main() {
             mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
         }
 
-        mqtt_client.disconnect().unwrap();
+        mqtt_client.shutdown().unwrap();
 
         for i in 11..21 {
             let payload = format!("publish {}", i);
