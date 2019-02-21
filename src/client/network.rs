@@ -4,7 +4,7 @@ use crate::client::network::stream::NetworkStream;
 use futures::Poll;
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "rustls")]
 pub mod stream {
@@ -23,14 +23,15 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
         },
         sync::Arc,
     };
-    use tokio::{io::AsyncRead, net::TcpStream};
-    use tokio_codec::{Decoder, Framed, LinesCodec};
+    use tokio::net::TcpStream;
+    use tokio::codec::{Decoder, Framed, LinesCodec};
     use tokio_rustls::{
         rustls::{internal::pemfile, ClientConfig, ClientSession},
         TlsConnector, TlsStream,
     };
     use webpki::DNSNameRef;
 
+    #[allow(clippy::large_enum_variant)]
     pub enum NetworkStream {
         Tcp(TcpStream),
         Tls(TlsStream<TcpStream, ClientSession>),
@@ -122,6 +123,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
             Ok(TlsConnector::from(Arc::new(config)))
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn http_connect(
             &self,
             id: &str,
@@ -145,7 +147,7 @@ use crate::client::network::{generate_httpproxy_auth, lookup_ipv4};
 
             addr.and_then(|proxy_address| TcpStream::connect(&proxy_address))
                 .and_then(|tcp| {
-                    let framed = tcp.framed(codec);
+                    let framed = Decoder::framed(codec, tcp);
                     future::ok(framed)
                 })
                 .and_then(|f| f.send(connect))

@@ -30,6 +30,7 @@ pub enum Notification {
 #[doc(hidden)]
 /// Requests by the client to mqtt event loop. Request are
 /// handle one by one#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),

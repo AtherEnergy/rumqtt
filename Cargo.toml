@@ -9,10 +9,7 @@ edition = "2018"
 license = "Unlicense"
 
 [dependencies]
-tokio = "^0.1.9"
-tokio-timer = "0.2.7"
-tokio-io = "0.1"
-tokio-codec = "0.1"
+tokio = { version = "^0.1.15", features = [ "codec", "io", "rt-full", "tcp", "timer" ], default-features = false }
 bytes = "0.4"
 futures = "0.1"
 crossbeam-channel = "0.3"

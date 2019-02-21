@@ -3,7 +3,7 @@
 use bytes::BytesMut;
 use mqtt311::{self, MqttRead, MqttWrite, Packet};
 use std::io::{self, Cursor, ErrorKind};
-use tokio_codec::{Decoder, Encoder};
+use tokio::codec::{Decoder, Encoder};
 
 /// Mqtt codec
 #[derive(Debug)]

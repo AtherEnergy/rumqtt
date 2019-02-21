@@ -6,7 +6,7 @@ use crate::client::{
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
-use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
+use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
 use crossbeam_channel::{self, Sender};
 use futures::{
     future::{self, Either},
@@ -15,10 +15,10 @@ use futures::{
     Future, Sink, Stream,
 };
 use mqtt311::Packet;
-use std::{cell::RefCell, rc::Rc, thread, time::Duration};
+use std::{cell::RefCell, rc::Rc, thread, time::{Duration, Instant}};
 use tokio::runtime::current_thread::Runtime;
-use tokio_codec::Framed;
-use tokio_timer::{timeout, Timeout};
+use tokio::codec::Framed;
+use tokio::timer::{timeout, Delay, Timeout};
 
 //  NOTES: Don't use `wait` in eventloop thread even if you
 //         are ok with blocking code. It might cause deadlocks
@@ -96,7 +96,7 @@ impl Connection {
             };
 
             let (network_sink, network_stream) = framed.split();
-            let network_sink = network_sink.sink_map_err(|e| NetworkError::Io(e));
+            let network_sink = network_sink.sink_map_err(NetworkError::Io);
             let network_reply_stream = self.network_reply_stream(network_stream);
             let prepended_request_stream = &mut prepended_request_stream;
             let command_stream = &mut command_stream;
@@ -118,10 +118,7 @@ impl Connection {
                 Ok(_v) => ()
             };
 
-            match self.should_reconnect_again() {
-                true => continue 'reconnection,
-                false => break 'reconnection
-            }
+            if self.should_reconnect_again() { continue 'reconnection } else { break 'reconnection }
         }
     }
 
@@ -185,7 +182,7 @@ impl Connection {
                 Err(true)
             }
             Err(NetworkError::NetworkStreamClosed) => {
-                let mqtt_state = self.mqtt_state.clone().borrow();
+                let mqtt_state = self.mqtt_state.borrow();
                 if mqtt_state.is_disconnecting() {
                     info!("Shutting down gracefully");
                 }
@@ -327,7 +324,7 @@ impl Connection {
                 future::ok(reply)
             })
             .filter(|reply| should_forward_packet(reply))
-            .and_then(move |packet| future::ok(packet));
+            .and_then(future::ok);
 
         network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
     }
@@ -430,12 +427,12 @@ fn throttled_request(
 
     if current_queue_size > queue_limit {
         debug!("queue len = {}, limit = {}", current_queue_size, queue_limit);
-        let out = tokio_timer::sleep(queuelimit_delay)
+        let out = Delay::new(Instant::now() + queuelimit_delay)
                                 .map_err(|e| e.into())
                                 .map(|_| request);
         Either::A(out)
     } else {
-        let out = tokio_timer::sleep(throttle_delay)
+        let out = Delay::new(Instant::now() + throttle_delay)
                                 .map_err(|e| e.into())
                                 .map(|_| request);
         Either::B(out)
@@ -451,7 +448,7 @@ fn nonthrottled_request(
 
     if current_queue_size > queue_limit {
         debug!("queue len = {}, limit = {}", current_queue_size, queue_limit);
-        let out = tokio_timer::sleep(queuelimit_delay)
+        let out = Delay::new(Instant::now() + queuelimit_delay)
                                 .map_err(|e| e.into())
                                 .map(|_| request);
         Either::A(out)

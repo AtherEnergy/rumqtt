@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/AtherEnergy/rumqtt.svg)](https://travis-ci.org/AtherEnergy/rumqtt)
+
 Pure rust [MQTT] client
 
 [MQTT]: http://mqtt.org/
