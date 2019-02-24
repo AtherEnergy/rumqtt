@@ -76,6 +76,8 @@ pub enum NetworkError {
     Timer(timer::Error),
     #[fail(display = "Tokio timer error = {}", _0)]
     TimeOut(timeout::Error<IoError>),
+    #[fail(display = "Tokio timer error")]
+    ThrottleError,
     #[fail(display = "User requested for reconnect")]
     UserReconnect,
     #[fail(display = "User requested for disconnect")]
