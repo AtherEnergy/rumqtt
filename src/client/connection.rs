@@ -15,7 +15,7 @@ use futures::{
     Future, Sink, Stream,
 };
 use mqtt311::Packet;
-use std::{cell::RefCell, rc::Rc, thread, time::{Duration, Instant}};
+use std::{cell::RefCell, io, rc::Rc, thread, time::{Duration, Instant}};
 use tokio::runtime::current_thread::Runtime;
 use tokio::codec::Framed;
 use tokio::timer::{timeout, Delay, Timeout};
@@ -113,8 +113,12 @@ impl Connection {
 
             // let mqtt_future = network_stream.select(command_stream).forward(network_sink);
             match self.mqtt_io(runtime, mqtt_future) {
-                Err(true) => continue 'reconnection,
-                Err(false) => (),
+                Err(reconnect) => {
+                    handle_notification(Notification::Disconnected, &self.notification_tx);
+                    if reconnect {
+                        continue 'reconnection
+                    }
+                }
                 Ok(_v) => ()
             };
 
@@ -236,8 +240,6 @@ impl Connection {
         }
     }
 
-
-
     fn handle_connection_success(&mut self) {
         self.connection_count += 1;
 
@@ -293,6 +295,7 @@ impl Connection {
         let mqtt_state = self.mqtt_state.clone();
         let tcp_connect_future = self.tcp_connect_future();
         let connect_packet = self.mqtt_state.borrow_mut().handle_outgoing_connect().unwrap();
+        let notification_tx = self.notification_tx.clone();
 
         tcp_connect_future
             .and_then(move |framed| {
@@ -304,6 +307,11 @@ impl Connection {
                 info!("Mqtt connect response = {:?}", response);
                 let mut mqtt_state = mqtt_state.borrow_mut();
                 check_and_validate_connack(response, framed, &mut mqtt_state)
+            })
+            .and_then(move |r| {
+                notification_tx.send(Notification::Connected)
+                    .map_err(|e| ConnectError::Io(io::Error::new(io::ErrorKind::Other, e)))
+                    .map(|_| r)
             })
     }
 
