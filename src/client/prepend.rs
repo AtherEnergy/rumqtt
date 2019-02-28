@@ -1,47 +1,48 @@
 use futures::{Async, Poll, Stream};
 use std::collections::VecDeque;
+use std::iter::IntoIterator;
 
-pub trait StreamExt: Stream {
-    fn prepend(self, first: VecDeque<Self::Item>) -> Prepend<Self>
+pub trait Prepend: Stream {
+    fn prependable(self) -> Prependable<Self>
     where
         Self: Sized,
     {
-        new(self, first)
+        new(self)
     }
 }
 
-impl<T: ?Sized> StreamExt for T where T: Stream {}
+impl<T: ?Sized> Prepend for T where T: Stream {}
 
-/// An adapter for chaining the output of two streams.
-///
-/// The resulting stream produces items from first stream and then
-/// from second stream.
 #[must_use = "streams do nothing unless polled"]
-pub struct Prepend<S>
+pub struct Prependable<S>
 where
     S: Stream,
 {
     stream: S,
-    pub session: VecDeque<<S as Stream>::Item>,
+    items: VecDeque<<S as Stream>::Item>,
 }
 
-pub fn new<S>(stream: S, session: VecDeque<<S as Stream>::Item>) -> Prepend<S>
+pub fn new<S>(stream: S) -> Prependable<S>
 where
     S: Stream,
 {
-    Prepend { stream, session }
-}
-
-impl<S> Prepend<S>
-where
-    S: futures::Stream,
-{
-    pub fn merge_session(&mut self, session: VecDeque<<S as Stream>::Item>) {
-        self.session.extend(session)
+    Prependable {
+        stream,
+        items: VecDeque::new(),
     }
 }
 
-impl<S> Stream for Prepend<S>
+impl<S> Prependable<S>
+where
+    S: futures::Stream,
+{
+    /// Insert items in between present items and wrapped stream
+    pub fn insert(&mut self, items: impl IntoIterator<Item = <S as Stream>::Item>) {
+        self.items.extend(items)
+    }
+}
+
+impl<S> Stream for Prependable<S>
 where
     S: Stream,
 {
@@ -49,11 +50,10 @@ where
     type Error = <S as Stream>::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if let Some(v) = self.session.pop_front() {
-            debug!("Sending previous session data");
-            return Ok(Async::Ready(Some(v)));
+        if let Some(v) = self.items.pop_front() {
+            Ok(Async::Ready(Some(v)))
+        } else {
+            self.stream.poll()
         }
-
-        self.stream.poll()
     }
 }

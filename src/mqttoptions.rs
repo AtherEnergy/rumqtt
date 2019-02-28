@@ -78,8 +78,8 @@ pub struct MqttOptions {
     notification_channel_capacity: usize,
     /// rate limit for outgoing messages (no. of messages per second)
     outgoing_ratelimit: Option<u64>,
-    /// rate limit applied after queue size limit (size, sleep time after every message)
-    outgoing_queuelimit: (usize, Duration)
+    /// number of concurrent in flight messages
+    in_flight: usize,
 }
 
 impl Default for MqttOptions {
@@ -99,7 +99,7 @@ impl Default for MqttOptions {
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
             outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
+            in_flight: 100,
         }
     }
 }
@@ -128,7 +128,7 @@ impl MqttOptions {
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
             outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
+            in_flight: 100,
         }
     }
 
@@ -276,20 +276,19 @@ impl MqttOptions {
         self.outgoing_ratelimit
     }
 
-    /// Sleeps for the 'delay' about of time before sending the next message if the 
-    /// specified 'queue_size's are hit
-    pub fn set_outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
-        if queue_size == 0 {
-            panic!("zero queue size is not allowed")
+    /// Set number of concurrent in flight messages
+    pub fn set_in_flight(mut self, in_flight: usize) -> Self {
+        if in_flight == 0 {
+            panic!("zero in flight is not allowed")
         }
 
-        self.outgoing_queuelimit = (queue_size, delay);
+        self.in_flight = in_flight;
         self
     }
 
-    /// Outgoing queue limit
-    pub fn outgoing_queuelimit(&self) -> (usize, Duration) {
-        self.outgoing_queuelimit
+    /// Number of concurrent in flight messages
+    pub fn in_flight(&self) -> usize {
+        self.in_flight
     }
 }
 
