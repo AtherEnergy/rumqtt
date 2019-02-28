@@ -10,7 +10,7 @@ use crate::mqttoptions::{MqttOptions, SecurityOptions};
 use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Protocol};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttConnectionStatus {
+pub enum MqttConnectionStatus {
     Handshake,
     Connected,
     Disconnecting,
@@ -56,6 +56,10 @@ impl MqttState {
             outgoing_rel: VecDeque::new(),
             incoming_pub: VecDeque::new(),
         }
+    }
+
+    pub fn connection_status(&self) -> MqttConnectionStatus {
+        self.connection_status
     }
 
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Request, NetworkError> {

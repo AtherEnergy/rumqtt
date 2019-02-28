@@ -3,8 +3,7 @@ use std::{thread, time::Duration};
 
 fn main() {
     pretty_env_logger::init();
-    //let broker = "prod-mqtt-broker.atherengineering.in";
-    let broker = "test.mosquitto.org";
+    let broker = "localhost";
     let port = 1883;
 
     let reconnection_options = ReconnectOptions::Always(10);
@@ -19,7 +18,7 @@ fn main() {
     thread::spawn(move || {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_secs(1));
             mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
         }
     });

@@ -1,5 +1,5 @@
 use crate::client::{
-    mqttstate::MqttState, network::stream::NetworkStream, prepend::Prepend, Command, Notification, Request, UserHandle,
+    mqttstate::{ MqttState, MqttConnectionStatus }, network::stream::NetworkStream, prepend::Prepend, Command, Notification, Request, UserHandle,
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
@@ -105,24 +105,17 @@ impl Connection {
                                                network_reply_stream,
                                                network_sink);
 
-            // let mqtt_future = network_stream.select(command_stream).forward(network_sink);
             match self.mqtt_io(runtime, mqtt_future) {
                 Err(true) => continue 'reconnection,
-                Err(false) => (),
-                Ok(_v) => ()
-            };
-
-            if self.should_reconnect_again() { continue 'reconnection } else { break 'reconnection }
+                Err(false) => break 'reconnection,
+                Ok(_v) => continue 'reconnection
+            }
         }
     }
     
-    /// Makes a blocking mqtt connection an returns framed and reactor
-    fn connect_timeout(
-        &mut self,
-        mqtt_connect_future: impl FramedFuture,
-        timeout: Duration,
-    ) -> Result<(Runtime, MqttFramed), bool> {
-        // mqtt connection
+    /// Makes a blocking mqtt connection an returns framed and reactor which created
+    /// the connection
+    fn connect_timeout(&mut self, mqtt_connect_future: impl FramedFuture, timeout: Duration) -> Result<(Runtime, MqttFramed), bool> {
         let mut rt = Runtime::new().unwrap();
         let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, timeout);
 
@@ -142,53 +135,51 @@ impl Connection {
         Ok((rt, framed))
     }
 
+    /// Tells if a reconnection should be triggered after sleeping for
+    /// an amount of time set by user.
     fn should_reconnect_again(&self) -> bool {
         let reconnect_options = self.mqttoptions.reconnect_opts();
-        let is_disconnecting = self.mqtt_state.clone().borrow().is_disconnecting();
 
-        let reconn_policy_action = match reconnect_options {
-            ReconnectOptions::AfterFirstSuccess(time) => {
-                let time = Duration::from_secs(time);
-                thread::sleep(time);
-                true
-            }
-            ReconnectOptions::Always(time) => {
+        match reconnect_options {
+            ReconnectOptions::AfterFirstSuccess(time) | ReconnectOptions::Always(time) => {
                 let time = Duration::from_secs(time);
                 thread::sleep(time);
                 true
             }
             ReconnectOptions::Never => false,
-        };
-
-        reconn_policy_action && !is_disconnecting
+        }
     }
 
     fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
         match runtime.block_on(mqtt_future) {
+            // don't use user defined reconnection behaviour here
             Err(NetworkError::UserDisconnect) => {
-                info!("User commanded for network disconnect");
+                debug!("User commanded for network disconnect");
                 self.is_network_enabled = false;
                 Err(true)
             }
+            // don't use user defined reconnection behaviour here
             Err(NetworkError::UserReconnect) => {
-                info!("User commanded for network reconnect");
+                debug!("User commanded for network reconnect");
                 self.is_network_enabled = true;
                 Err(true)
             }
             Err(NetworkError::NetworkStreamClosed) => {
                 let mqtt_state = self.mqtt_state.borrow();
-                if mqtt_state.is_disconnecting() {
-                    info!("Shutting down gracefully");
+                if mqtt_state.connection_status() == MqttConnectionStatus::Disconnecting {
+                    debug!("Shutting down gracefully");
+                    Err(false)
+                } else {
+                    Err(self.should_reconnect_again())
                 }
-                Err(false)
             }
             Err(e) => {
                 error!("Event loop returned. Error = {:?}", e);
-                Err(false)
+                Err(self.should_reconnect_again())
             }
             Ok(_v) => {
                 warn!("Strange!! Evenloop finished");
-                Err(false)
+                Err(self.should_reconnect_again())
             }
         }
     }
@@ -391,10 +382,7 @@ impl Connection {
     }
 }
 
-fn handle_stream_timeout_error(
-    error: timeout::Error<NetworkError>,
-    mqtt_state: &mut MqttState)
-    -> impl Future<Item = Request, Error = NetworkError> {
+fn handle_stream_timeout_error(error: timeout::Error<NetworkError>, mqtt_state: &mut MqttState) -> impl RequestFuture {
     // check if a ping to the broker is necessary
     let out = mqtt_state.handle_outgoing_mqtt_packet(Packet::Pingreq);
     future::err(error).or_else(move |e| {
@@ -545,6 +533,54 @@ impl<A, B> Stream for EitherStream<A, B>
          }
      }
  }
+
+
+#[cfg(test)]
+mod test {
+    use super::{Connection, MqttOptions, NetworkError, MqttState, ReconnectOptions};
+    use crate::client::mqttstate::MqttConnectionStatus;
+
+    use futures::future;
+    use tokio::runtime::current_thread::Runtime;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::time::Instant;
+    use mqtt311::PacketIdentifier;
+    use std::collections::VecDeque;
+
+    fn mock_mqtt_connection(reconnect_opt: ReconnectOptions, connection_status: MqttConnectionStatus) -> (Connection, Runtime) {
+        let (connection_tx, connection_rx) = crossbeam_channel::bounded(1);
+        let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
+        let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883)
+                               .set_reconnect_opts(reconnect_opt);
+
+
+        let mqtt_state = MqttState::new(mqttoptions.clone());
+        let mqtt_state = Rc::new(RefCell::new(mqtt_state));
+        let connection = Connection {
+            mqtt_state,
+            notification_tx,
+            connection_tx: Some(connection_tx),
+            connection_count: 0,
+            mqttoptions,
+            is_network_enabled: true,
+        };
+
+        let runtime = Runtime::new().unwrap();
+        (connection, runtime)
+    }
+
+    #[test]
+    fn mqtt_io_returns_reconnection_correctly() {
+        let reconnect_opt = ReconnectOptions::Always(10);
+        let connection_status = MqttConnectionStatus::Disconnecting;
+        let (mut connection, runtime) = mock_mqtt_connection(reconnect_opt, connection_status);
+
+        let network_future = future::err::<(), _>(NetworkError::NetworkStreamClosed);
+        let out = connection.mqtt_io(runtime, network_future);
+        assert_eq!(out, Err(true));
+    }
+}
 
 // fn print_last_session_state(
 //     prepend: &mut Prepend<impl RequestStream>,
