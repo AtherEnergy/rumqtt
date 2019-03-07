@@ -58,6 +58,8 @@ pub enum ConnectError {
     NoResponse,
     #[fail(display = "Builder doesn't contain certificate authority")]
     NoCertificateAuthority,
+    #[fail(display = "Dummy unused error")]
+    Unused,
 }
 
 #[derive(Debug, Fail, From)]

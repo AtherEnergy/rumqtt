@@ -1,10 +1,9 @@
 //! Structs to interact with mqtt eventloop
 use crate::error::{ClientError, ConnectError};
 use crate::MqttOptions;
-use crossbeam_channel;
-use futures::{sync::mpsc, Future, Sink};
+use futures::{sync::mpsc, sync::oneshot, Future, Sink};
 use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, Unsubscribe, SubscribeTopic};
-use std::sync::Arc;
+use std::{sync::Arc, ops::Deref};
 
 #[doc(hidden)]
 pub mod connection;
@@ -16,7 +15,7 @@ pub mod network;
 pub mod prepend;
 
 /// Incoming notifications from the broker
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Notification {
     Connected,
     Disconnected,
@@ -60,20 +59,34 @@ pub enum Command {
     Resume,
 }
 
-#[doc(hidden)]
-/// Combines handles returned by the eventloop
-pub struct UserHandle {
-    request_tx: mpsc::Sender<Request>,
-    command_tx: mpsc::Sender<Command>,
-    notification_rx: crossbeam_channel::Receiver<Notification>,
-}
-
 /// Handle to send requests and commands to the network eventloop
 #[derive(Clone)]
 pub struct MqttClient {
     request_tx: mpsc::Sender<Request>,
     command_tx: mpsc::Sender<Command>,
     max_packet_size: usize,
+}
+
+/// Notification reception handle
+pub struct Notifications {
+    pub notification_rx: crossbeam_channel::Receiver<Notification>,
+    _notification_closed_rx: oneshot::Receiver<()>,
+}
+
+impl Iterator for Notifications {
+    type Item = Notification;
+
+    fn next(&mut self) -> Option<Notification> {
+        self.notification_rx.recv().ok()
+    }
+}
+
+impl Deref for Notifications {
+    type Target = crossbeam_channel::Receiver<Notification>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.notification_rx
+    }
 }
 
 impl MqttClient {
@@ -83,12 +96,13 @@ impl MqttClient {
     ///
     /// See `select.rs` example
     /// [mqttclient]: struct.MqttClient.html
-    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub fn start(opts: MqttOptions) -> Result<(Self, Notifications), ConnectError> {
         let max_packet_size = opts.max_packet_size();
-        let UserHandle {
+        let connection::UserHandle {
             request_tx,
             command_tx,
             notification_rx,
+            notification_closed_rx,
         } = connection::Connection::run(opts)?;
 
         let client = MqttClient {
@@ -97,7 +111,12 @@ impl MqttClient {
             max_packet_size,
         };
 
-        Ok((client, notification_rx))
+        let notifications = Notifications {
+            notification_rx,
+            _notification_closed_rx: notification_closed_rx,
+        };
+
+        Ok((client, notifications))
     }
 
     /// Requests the eventloop for mqtt publish
