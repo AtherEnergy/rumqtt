@@ -27,7 +27,7 @@ use tokio::timer::{timeout, Delay, Timeout};
 pub struct Connection {
     mqtt_state: Rc<RefCell<MqttState>>,
     notification_tx: Sender<Notification>,
-    connection_tx: Option<Sender<Result<(), ConnectError>>>,
+    connection_tx: Sender<Result<(), ConnectError>>,
     connection_count: u32,
     mqttoptions: MqttOptions,
     is_network_enabled: bool,
@@ -50,7 +50,7 @@ impl Connection {
             let mut connection = Connection {
                 mqtt_state,
                 notification_tx,
-                connection_tx: Some(connection_tx),
+                connection_tx,
                 connection_count: 0,
                 mqttoptions,
                 is_network_enabled: true,
@@ -244,8 +244,7 @@ impl Connection {
         self.connection_count += 1;
 
         if self.connection_count == 1 {
-            let connection_tx = self.connection_tx.take().unwrap();
-            connection_tx.send(Ok(())).unwrap();
+            self.connection_tx.send(Ok(())).unwrap();
         }
     }
 
@@ -258,8 +257,7 @@ impl Connection {
         };
 
         if self.connection_count == 1 {
-            let connection_tx = self.connection_tx.take().unwrap();
-            connection_tx.send(error).unwrap();
+            self.connection_tx.send(error).unwrap();
         }
     }
 
