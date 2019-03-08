@@ -62,6 +62,8 @@ pub struct MqttOptions {
     client_id: String,
     /// connection method
     connection_method: ConnectionMethod,
+    /// connection attempt timeout in seconds
+    connect_timeout: Duration,
     /// proxy
     proxy: Proxy,
     /// reconnection options
@@ -93,6 +95,7 @@ impl Default for MqttOptions {
             connection_method: ConnectionMethod::Tcp,
             proxy: Proxy::None,
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
+            connect_timeout: Duration::from_secs(30),
             security: SecurityOptions::None,
             max_packet_size: 256 * 1024,
             last_will: None,
@@ -116,19 +119,8 @@ impl MqttOptions {
         MqttOptions {
             broker_addr: host.into(),
             port,
-            keep_alive: Duration::from_secs(60),
-            clean_session: true,
             client_id: id,
-            connection_method: ConnectionMethod::Tcp,
-            proxy: Proxy::None,
-            reconnect: ReconnectOptions::AfterFirstSuccess(10),
-            security: SecurityOptions::None,
-            max_packet_size: 256 * 1024,
-            last_will: None,
-            request_channel_capacity: 10,
-            notification_channel_capacity: 10,
-            outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
+            ..Default::default()
         }
     }
 
@@ -209,6 +201,17 @@ impl MqttOptions {
     pub fn set_reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
         self.reconnect = opts;
         self
+    }
+
+    /// Set timeout for a connection attempt
+    pub fn set_connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = timeout;
+        self
+    }
+
+    /// Timeout for a connection attempt
+    pub fn connect_timeout(&self) -> Duration {
+        self.connect_timeout
     }
 
     /// Reconnection options

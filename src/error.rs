@@ -54,12 +54,18 @@ pub enum ConnectError {
         _0
     )]
     NotConnackPacket(Packet),
+    #[fail(display = "Tokio timer error = {}", _0)]
+    Timer(timer::Error),
+    #[fail(display = "Tokio timer error = {}", _0)]
+    TimeOut(timeout::Error<IoError>),
     #[fail(display = "Empty response")]
     NoResponse,
     #[fail(display = "Builder doesn't contain certificate authority")]
     NoCertificateAuthority,
     #[fail(display = "Dummy unused error")]
     Unused,
+    #[fail(display = "Network error. Error = {}", _0)]
+    NetworkError(NetworkError)
 }
 
 #[derive(Debug, Fail, From)]

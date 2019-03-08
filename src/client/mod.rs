@@ -15,10 +15,10 @@ pub mod network;
 pub mod prepend;
 
 /// Incoming notifications from the broker
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Notification {
     Connected,
-    Disconnected,
+    Disconnected(Result<(), ConnectError>),
     Publish(Publish),
     PubAck(PacketIdentifier),
     PubRec(PacketIdentifier),
