@@ -563,20 +563,23 @@ impl Sink for BlackHole {
 #[cfg(test)]
 mod test {
     use super::{Connection, MqttOptions, MqttState, NetworkError, ReconnectOptions};
-    use crate::client::mqttstate::MqttConnectionStatus;
 
-    use futures::future;
-    use mqtt311::PacketIdentifier;
+    use futures::{
+        future,
+        stream::{self, Stream},
+    };
+    use mqtt311::Packet;
+    use mqtt311::Publish;
+    use mqtt311::QoS;
     use std::cell::RefCell;
-    use std::collections::VecDeque;
     use std::rc::Rc;
+    use std::sync::Arc;
     use std::time::Instant;
     use tokio::runtime::current_thread::Runtime;
 
-    fn mock_mqtt_connection(reconnect_opt: ReconnectOptions, connection_status: MqttConnectionStatus) -> (Connection, Runtime) {
-        let (connection_tx, connection_rx) = crossbeam_channel::bounded(1);
-        let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
-        let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
+    fn mock_mqtt_connection(mqttoptions: MqttOptions) -> (Connection, Runtime) {
+        let (connection_tx, _connection_rx) = crossbeam_channel::bounded(1);
+        let (notification_tx, _notification_rx) = crossbeam_channel::bounded(10);
 
         let mqtt_state = MqttState::new(mqttoptions.clone());
         let mqtt_state = Rc::new(RefCell::new(mqtt_state));
@@ -593,15 +596,59 @@ mod test {
         (connection, runtime)
     }
 
+    fn sample_outgoing_publishes() -> Vec<Packet> {
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            pkid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        let mut publishes = vec![];
+        for _i in 0..100 {
+            let packet = Packet::Publish(publish.clone());
+            publishes.push(packet);
+        }
+
+        publishes
+    }
+
     #[test]
-    fn mqtt_io_returns_reconnection_correctly() {
+    fn mqtt_io_returns_reconnection_status_correctly() {
         let reconnect_opt = ReconnectOptions::Always(10);
-        let connection_status = MqttConnectionStatus::Disconnecting;
-        let (mut connection, runtime) = mock_mqtt_connection(reconnect_opt, connection_status);
+
+        let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
+
+        let (mut connection, runtime) = mock_mqtt_connection(mqttoptions);
 
         let network_future = future::err::<(), _>(NetworkError::NetworkStreamClosed);
         let out = connection.mqtt_io(runtime, network_future);
         assert_eq!(out, Err(true));
+    }
+
+    #[test]
+    fn rate_limiting_to_the_stream_behaves_right() {
+        let mqttoptions = MqttOptions::default().set_outgoing_ratelimit(5);
+        let (mut connection, mut runtime) = mock_mqtt_connection(mqttoptions);
+
+        let publishes = sample_outgoing_publishes();
+        let packet_stream = stream::iter_ok(publishes);
+        let rate_limited_stream = connection
+            .rate_limited_network_stream(packet_stream)
+            .for_each(|_v| future::ok(()));
+
+        // TODO: Is there anything similar to kotlin's measureTimeMillis?
+        let start = Instant::now();
+        runtime.block_on(rate_limited_stream).unwrap();
+        let end = Instant::now();
+        let duration = end - start;
+
+        match duration.as_secs() {
+            19 | 20 => (),
+            _ => panic!("bad rate limiting. time delta = {:?}", end - start),
+        }
     }
 }
 
