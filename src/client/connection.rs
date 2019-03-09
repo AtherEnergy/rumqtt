@@ -1,12 +1,15 @@
 use crate::client::{
-    mqttstate::{ MqttState, MqttConnectionStatus }, network::stream::NetworkStream, prepend::Prepend, Command, Notification, Request, UserHandle,
+    mqttstate::{MqttConnectionStatus, MqttState},
+    network::stream::NetworkStream,
+    prepend::Prepend,
+    Command, Notification, Request, UserHandle,
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
 use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
 use crossbeam_channel::{self, Sender};
 use futures::{
-    future,
+    future::{self, Either},
     stream::{self, poll_fn, SplitStream},
     sync::mpsc::{self, Receiver},
     Async, Future, Poll, Sink, Stream,
@@ -82,16 +85,11 @@ impl Connection {
 
         'reconnection: loop {
             let mqtt_connect_future = self.mqtt_connect();
-            let timeout = Duration::from_secs(30);
-            let (runtime, framed) = match self.connect_timeout(mqtt_connect_future, timeout) {
+            let (runtime, framed) = match self.connect_or_not(mqtt_connect_future) {
                 Ok(f) => f,
                 Err(true) => continue 'reconnection,
                 Err(false) => break 'reconnection,
             };
-
-            let (network_sink, network_stream) = framed.split();
-            let network_sink = network_sink.sink_map_err(NetworkError::Io);
-            let network_reply_stream = self.network_reply_stream(network_stream);
 
             let network_request_stream = &mut network_request_stream;
             // Insert previous session. If this is the first connect, the buffer in
@@ -100,24 +98,26 @@ impl Connection {
             let network_request_stream = self.limit_in_flight_request_stream(network_request_stream);
             let network_request_stream = self.request_stream(network_request_stream);
 
-            let mqtt_future = self.mqtt_future(&mut command_stream,
-                                               network_request_stream,
-                                               network_reply_stream,
-                                               network_sink);
+            let mqtt_future = self.mqtt_future(&mut command_stream, network_request_stream, framed);
 
             match self.mqtt_io(runtime, mqtt_future) {
                 Err(true) => continue 'reconnection,
                 Err(false) => break 'reconnection,
-                Ok(_v) => continue 'reconnection
+                Ok(_v) => continue 'reconnection,
             }
         }
     }
-    
+
     /// Makes a blocking mqtt connection an returns framed and reactor which created
-    /// the connection
-    fn connect_timeout(&mut self, mqtt_connect_future: impl FramedFuture, timeout: Duration) -> Result<(Runtime, MqttFramed), bool> {
+    /// the connection when `is_network_enabled` flag is set true
+    fn connect_or_not(&mut self, mqtt_connect_future: impl FramedFuture) -> Result<(Runtime, Option<MqttFramed>), bool> {
         let mut rt = Runtime::new().unwrap();
+        let timeout = Duration::from_secs(30);
         let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, timeout);
+
+        if !self.is_network_enabled {
+            return Ok((rt, None));
+        }
 
         let framed = match rt.block_on(mqtt_connect_deadline) {
             Ok(framed) => {
@@ -132,7 +132,7 @@ impl Connection {
             }
         };
 
-        Ok((rt, framed))
+        Ok((rt, Some(framed)))
     }
 
     /// Tells if a reconnection should be triggered after sleeping for
@@ -186,39 +186,40 @@ impl Connection {
 
     fn mqtt_future(
         &mut self,
-        command_stream: impl Stream<Item = Packet, Error = NetworkError>,
-        network_request_stream: impl Stream<Item = Request, Error = NetworkError>,
-        network_reply_stream: impl Stream<Item = Request, Error = NetworkError>,
-        network_sink: impl PacketSink)
-        -> impl Future<Item = (), Error = NetworkError> {
+        command_stream: impl PacketStream,
+        network_request_stream: impl RequestStream,
+        framed: Option<Framed<NetworkStream, MqttCodec>>,
+    ) -> impl Future<Item = (), Error = NetworkError> {
         // check if the network is enabled and create a future
-        let mqtt_state = self.mqtt_state.clone();
-        let keep_alive = self.mqttoptions.keep_alive();
-
-        // convert a reply request stream to reply packet stream after filtering
-        // unnecessary requests
-        let network_reply_stream = Timeout::new(network_reply_stream, keep_alive)
-                                        .or_else(move |e| {
-                                            let mut mqtt_state = mqtt_state.borrow_mut();
-                                            handle_stream_timeout_error(e, &mut mqtt_state)
-                                        })
-                                        .filter(|reply| should_forward_packet(reply))
-                                        .and_then(move |packet| future::ok(packet.into()));
-
-        // convert a request request stream to request packet stream after filtering
-        // unnecessary requests
-        let network_request_stream = network_request_stream
-                                        .and_then(move |packet| future::ok(packet.into()));
-        let network_stream = network_reply_stream.select(network_request_stream);
-
-        let stream = if self.is_network_enabled {
-            EitherStream::A(command_stream.select(network_stream))
-        } else {
-            EitherStream::B(command_stream)
+        let network = match framed {
+            Some(f) => {
+                let (network_sink, network_stream) = f.split();
+                let network_sink = network_sink.sink_map_err(NetworkError::Io);
+                let network_reply_stream = self.network_reply_stream(network_stream);
+                Ok((network_reply_stream, network_sink, command_stream))
+            }
+            None => Err(command_stream),
         };
 
-        let throttled_stream = self.rate_limited_network_stream(stream);
-        throttled_stream.forward(network_sink).map(|(_, _)| ())
+        match network {
+            Ok((network_reply_stream, network_sink, command_stream)) => {
+                // convert a request stream to request packet stream after filtering
+                // unnecessary requests
+                let network_request_stream = network_request_stream.and_then(move |packet| future::ok(packet.into()));
+                let network_stream = network_reply_stream.select(network_request_stream);
+
+                // TODO: Throttle only network stream
+                let stream = command_stream.select(network_stream);
+                let throttled_stream = self.rate_limited_network_stream(stream);
+                let f = throttled_stream.forward(network_sink).map(|_| ());
+                Either::A(f)
+            }
+            Err(command_stream) => {
+                let dummy_sink = BlackHole;
+                let f = command_stream.forward(dummy_sink).map(|_| ());
+                Either::B(f)
+            }
+        }
     }
 
     fn handle_connection_success(&mut self) {
@@ -292,9 +293,11 @@ impl Connection {
 
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
     /// channel) and creates a stream of packets to send on network
-    fn network_reply_stream(&self, network_stream: SplitStream<MqttFramed>) -> impl RequestStream {
+    fn network_reply_stream(&self, network_stream: SplitStream<MqttFramed>) -> impl PacketStream {
         let mqtt_state = self.mqtt_state.clone();
+        let keep_alive = self.mqttoptions.keep_alive();
         let notification_tx = self.notification_tx.clone();
+
         let network_stream = network_stream
             .map_err(NetworkError::Io)
             .and_then(move |packet| {
@@ -309,7 +312,15 @@ impl Connection {
             .filter(|reply| should_forward_packet(reply))
             .and_then(future::ok);
 
-        network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
+        let network_reply_stream = network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)));
+        let mqtt_state = self.mqtt_state.clone();
+        Timeout::new(network_reply_stream, keep_alive)
+            .or_else(move |e| {
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                handle_stream_timeout_error(e, &mut mqtt_state)
+            })
+            .filter(|reply| should_forward_packet(reply))
+            .and_then(move |packet| future::ok(packet.into()))
     }
 
     /// Handles all incoming user and session requests and creates a stream of packets to send
@@ -351,7 +362,7 @@ impl Connection {
             if mqtt_state.borrow().publish_queue_len() >= in_flight {
                 match stream.peek() {
                     Err(_) => stream.poll(),
-                    _ => Ok(Async::NotReady)
+                    _ => Ok(Async::NotReady),
                 }
             } else {
                 stream.poll()
@@ -363,8 +374,8 @@ impl Connection {
     fn rate_limited_network_stream(&mut self, request: impl PacketStream) -> impl PacketStream {
         if let Some(rate) = self.mqttoptions.outgoing_ratelimit() {
             let duration = Duration::from_nanos(1_000_000_000 / rate);
-            let throttled = request.throttle(duration)
-                .map_err(|_| NetworkError::ThrottleError);
+            let throttled = request.throttle(duration).map_err(|_| NetworkError::ThrottleError);
+
             EitherStream::A(throttled)
         } else {
             EitherStream::B(request)
@@ -385,13 +396,7 @@ impl Connection {
 fn handle_stream_timeout_error(error: timeout::Error<NetworkError>, mqtt_state: &mut MqttState) -> impl RequestFuture {
     // check if a ping to the broker is necessary
     let out = mqtt_state.handle_outgoing_mqtt_packet(Packet::Pingreq);
-    future::err(error).or_else(move |e| {
-        if e.is_elapsed() {
-            out
-        } else {
-            Err(e.into_inner().unwrap())
-        }
-    })
+    future::err(error).or_else(move |e| if e.is_elapsed() { out } else { Err(e.into_inner().unwrap()) })
 }
 
 fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> impl PacketFuture {
@@ -485,7 +490,6 @@ impl From<Request> for Packet {
     }
 }
 
-
 type MqttFramed = Framed<NetworkStream, MqttCodec>;
 
 trait PacketStream: Stream<Item = Packet, Error = NetworkError> {}
@@ -520,40 +524,59 @@ pub enum EitherStream<A, B> {
 }
 
 impl<A, B> Stream for EitherStream<A, B>
-     where A: Stream,
-           B: Stream<Item = A::Item, Error = A::Error>
- {
-     type Item = A::Item;
-     type Error = A::Error;
+where
+    A: Stream,
+    B: Stream<Item = A::Item, Error = A::Error>,
+{
+    type Item = A::Item;
+    type Error = A::Error;
 
-      fn poll(&mut self) -> Poll<Option<A::Item>, A::Error> {
-         match *self {
-             EitherStream::A(ref mut a) => a.poll(),
-             EitherStream::B(ref mut b) => b.poll(),
-         }
-     }
- }
+    fn poll(&mut self) -> Poll<Option<A::Item>, A::Error> {
+        match *self {
+            EitherStream::A(ref mut a) => a.poll(),
+            EitherStream::B(ref mut b) => b.poll(),
+        }
+    }
+}
 
+use futures::{AsyncSink, StartSend};
+#[derive(Debug)]
+struct BlackHole;
+
+impl Sink for BlackHole {
+    type SinkItem = Packet;
+    type SinkError = NetworkError;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        Ok(AsyncSink::Ready)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        Ok(Async::Ready(()))
+    }
+
+    fn close(&mut self) -> Poll<(), Self::SinkError> {
+        Ok(Async::Ready(()))
+    }
+}
 
 #[cfg(test)]
 mod test {
-    use super::{Connection, MqttOptions, NetworkError, MqttState, ReconnectOptions};
+    use super::{Connection, MqttOptions, MqttState, NetworkError, ReconnectOptions};
     use crate::client::mqttstate::MqttConnectionStatus;
 
     use futures::future;
-    use tokio::runtime::current_thread::Runtime;
+    use mqtt311::PacketIdentifier;
     use std::cell::RefCell;
+    use std::collections::VecDeque;
     use std::rc::Rc;
     use std::time::Instant;
-    use mqtt311::PacketIdentifier;
-    use std::collections::VecDeque;
+    use tokio::runtime::current_thread::Runtime;
 
     fn mock_mqtt_connection(reconnect_opt: ReconnectOptions, connection_status: MqttConnectionStatus) -> (Connection, Runtime) {
         let (connection_tx, connection_rx) = crossbeam_channel::bounded(1);
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
-        let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883)
-                               .set_reconnect_opts(reconnect_opt);
-
+        let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
 
         let mqtt_state = MqttState::new(mqttoptions.clone());
         let mqtt_state = Rc::new(RefCell::new(mqtt_state));
