@@ -7,6 +7,7 @@ use std::{
 use crate::client::{Notification, Request};
 use crate::error::{ConnectError, NetworkError};
 use crate::mqttoptions::{MqttOptions, SecurityOptions};
+use futures::sync::oneshot;
 use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Protocol};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,9 @@ pub(crate) struct MqttState {
 
     // Store incoming data to handle quality of service
     incoming_pub: VecDeque<PacketIdentifier>, // QoS2 publishes
+
+    // Sender half of notification dropped indication
+    notification_state: oneshot::Sender<()>,
 }
 
 /// Design: `MqttState` methods will just modify the state of the object
@@ -44,7 +48,7 @@ pub(crate) struct MqttState {
 ///         async/await
 
 impl MqttState {
-    pub fn new(opts: MqttOptions) -> Self {
+    pub fn new(opts: MqttOptions, notification_state: oneshot::Sender<()>) -> Self {
         MqttState {
             opts,
             connection_status: MqttConnectionStatus::Disconnected,
@@ -55,6 +59,7 @@ impl MqttState {
             outgoing_pub: VecDeque::new(),
             outgoing_rel: VecDeque::new(),
             incoming_pub: VecDeque::new(),
+            notification_state,
         }
     }
 
@@ -168,11 +173,8 @@ impl MqttState {
         self.outgoing_pub.len()
     }
 
-    pub fn is_disconnecting(&self) -> bool {
-        match self.connection_status {
-            MqttConnectionStatus::Disconnecting => true,
-            _ => false
-        }
+    pub fn send_notifications(&self) -> bool {
+        !self.notification_state.is_canceled()
     }
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
@@ -410,6 +412,7 @@ fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<Stri
 #[cfg(test)]
 mod test {
     use std::{sync::Arc, thread, time::Duration};
+    use futures::sync::oneshot;
 
     use super::{MqttConnectionStatus, MqttState};
     use crate::client::{Notification, Request};
@@ -441,7 +444,7 @@ mod test {
 
     fn build_mqttstate() -> MqttState {
         let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
-        MqttState::new(opts)
+        MqttState::new(opts, oneshot::channel::<()>().0)
     }
 
     #[test]
@@ -819,7 +822,8 @@ mod test {
             .set_keep_alive(50)
             .set_last_will(lwt.clone())
             .set_security_opts(UsernamePassword(String::from("USER"), String::from("PASS")));
-        let mut mqtt = MqttState::new(opts);
+
+        let mut mqtt = MqttState::new(opts, oneshot::channel::<()>().0);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         let pkt = mqtt.handle_outgoing_connect().unwrap();

@@ -58,6 +58,8 @@ pub enum ConnectError {
     NoResponse,
     #[fail(display = "Builder doesn't contain certificate authority")]
     NoCertificateAuthority,
+    #[fail(display = "Network error. Error = {}", _0)]
+    NetworkError(NetworkError),
 }
 
 #[derive(Debug, Fail, From)]
@@ -84,8 +86,6 @@ pub enum NetworkError {
     UserDisconnect,
     #[fail(display = "Network stream closed")]
     NetworkStreamClosed,
-    #[fail(display = "Throttle error while rate limiting")]
-    Throttle,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }

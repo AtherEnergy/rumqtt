@@ -2,7 +2,7 @@ use crate::client::{
     mqttstate::{MqttConnectionStatus, MqttState},
     network::stream::NetworkStream,
     prepend::Prepend,
-    Command, Notification, Request, UserHandle,
+    Command, Notification, Request,
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
@@ -10,18 +10,27 @@ use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions}
 use crossbeam_channel::{self, Sender};
 use futures::{
     future::{self, Either},
-    stream::{self, poll_fn, SplitStream},
+    stream::{once, poll_fn, SplitStream},
     sync::mpsc::{self, Receiver},
+    sync::oneshot,
     Async, Future, Poll, Sink, Stream,
 };
 use mqtt311::Packet;
-use std::{cell::RefCell, rc::Rc, thread, time::Duration};
+use std::{cell::RefCell, rc::Rc, thread, time::{Duration}};
+use tokio::runtime::current_thread::Runtime;
 use tokio::codec::Framed;
 use tokio::prelude::StreamExt;
-use tokio::runtime::current_thread::Runtime;
 use tokio::timer::{timeout, Timeout};
 
-pub struct Connection {
+/// Combines handles returned by the eventloop
+pub(crate) struct UserHandle {
+    pub request_tx: mpsc::Sender<Request>,
+    pub command_tx: mpsc::Sender<Command>,
+    pub notification_rx: crossbeam_channel::Receiver<Notification>,
+    pub notification_closed_rx: oneshot::Receiver<()>,
+}
+
+pub(crate) struct Connection {
     mqtt_state: Rc<RefCell<MqttState>>,
     notification_tx: Sender<Notification>,
     connection_tx: Option<Sender<Result<(), ConnectError>>>,
@@ -33,8 +42,9 @@ pub struct Connection {
 impl Connection {
     /// Takes mqtt options and tries to create initial connection on current thread and handles
     /// connection events in a new thread if the initial connection is successful
-    pub fn run(mqttoptions: MqttOptions) -> Result<UserHandle, ConnectError> {
+    pub(crate) fn run(mqttoptions: MqttOptions) -> Result<UserHandle, ConnectError> {
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(mqttoptions.notification_channel_capacity());
+        let (notification_closed_tx, notification_closed_rx) = oneshot::channel::<()>();
         let (request_tx, request_rx) = mpsc::channel::<Request>(mqttoptions.request_channel_capacity());
         let (command_tx, command_rx) = mpsc::channel::<Command>(5);
 
@@ -43,7 +53,7 @@ impl Connection {
 
         // start the network thread to handle all mqtt network io
         thread::spawn(move || {
-            let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
+            let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone(), notification_closed_tx)));
             let mut connection = Connection {
                 mqtt_state,
                 notification_tx,
@@ -61,6 +71,7 @@ impl Connection {
             request_tx,
             command_tx,
             notification_rx,
+            notification_closed_rx,
         };
 
         match reconnect_option {
@@ -151,34 +162,44 @@ impl Connection {
     }
 
     fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
+        let mqtt_state = self.mqtt_state.clone();
+        let notification_tx = self.notification_tx.clone();
+        let notify = move |n| {
+            if mqtt_state.borrow().send_notifications() {
+                let err = notification_tx.send(n);
+                drop(err);
+            }
+        };
+
         match runtime.block_on(mqtt_future) {
             // don't use user defined reconnection behaviour here
             Err(NetworkError::UserDisconnect) => {
                 debug!("User commanded for network disconnect");
                 self.is_network_enabled = false;
+                notify(Notification::Disconnected(Ok(())));
                 Err(true)
             }
             // don't use user defined reconnection behaviour here
             Err(NetworkError::UserReconnect) => {
                 debug!("User commanded for network reconnect");
+                // No connection notification here!
                 self.is_network_enabled = true;
                 Err(true)
             }
-            Err(NetworkError::NetworkStreamClosed) => {
+            Err(e) => {
                 let mqtt_state = self.mqtt_state.borrow();
                 if mqtt_state.connection_status() == MqttConnectionStatus::Disconnecting {
                     debug!("Shutting down gracefully");
+                    notify(Notification::Disconnected(Ok(())));
                     Err(false)
                 } else {
+                    notify(Notification::Disconnected(Err(ConnectError::NetworkError(e))));
                     Err(self.should_reconnect_again())
                 }
             }
-            Err(e) => {
-                error!("Event loop returned. Error = {:?}", e);
-                Err(self.should_reconnect_again())
-            }
             Ok(_v) => {
                 warn!("Strange!! Evenloop finished");
+                notify(Notification::Disconnected(Ok(())));
                 Err(self.should_reconnect_again())
             }
         }
@@ -225,9 +246,16 @@ impl Connection {
     fn handle_connection_success(&mut self) {
         self.connection_count += 1;
 
-        if self.connection_count == 1 {
-            let connection_tx = self.connection_tx.take().unwrap();
-            connection_tx.send(Ok(())).unwrap();
+        if self.mqtt_state.borrow().send_notifications() {
+            // Ignore SendError here because the notification handle could be dropped
+            // after checking it here. That's ok.
+            let result = self.notification_tx.send(Notification::Connected);
+            drop(result);
+        }
+
+        if let Some(connection_tx) = self.connection_tx.take() {
+            // TODO: Error handling
+            connection_tx.send(Ok(())).expect("Channel error")
         }
     }
 
@@ -239,9 +267,15 @@ impl Connection {
             None => Err(ConnectError::Timeout),
         };
 
-        if self.connection_count == 1 {
-            let connection_tx = self.connection_tx.take().unwrap();
-            connection_tx.send(error).unwrap();
+
+        if let Some(connection_tx) = self.connection_tx.take() {
+            // TODO: Error handling
+            connection_tx.send(error).expect("Channel error");
+        } else if self.mqtt_state.borrow().send_notifications() {
+            let result = self.notification_tx.send(Notification::Disconnected(error));
+            // Ignore SendError here because the notification handle could be dropped
+            // after checking it here. That's ok.
+            drop(result);
         }
     }
 
@@ -295,32 +329,37 @@ impl Connection {
     /// channel) and creates a stream of packets to send on network
     fn network_reply_stream(&self, network_stream: SplitStream<MqttFramed>) -> impl PacketStream {
         let mqtt_state = self.mqtt_state.clone();
+        let mqtt_state_notification = self.mqtt_state.clone();
         let keep_alive = self.mqttoptions.keep_alive();
         let notification_tx = self.notification_tx.clone();
-
         let network_stream = network_stream
             .map_err(NetworkError::Io)
             .and_then(move |packet| {
                 debug!("Incoming packet = {:?}", packet_info(&packet));
-                let reply = mqtt_state.borrow_mut().handle_incoming_mqtt_packet(packet);
-                future::result(reply)
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                mqtt_state.handle_incoming_mqtt_packet(packet)
             })
             .and_then(move |(notification, reply)| {
-                handle_notification(notification, &notification_tx);
-                future::ok(reply)
+                let mqtt_state = mqtt_state_notification.borrow();
+                match notification {
+                    Notification::None => (),
+                    // Ignore error on notification_tx send, since the receiver can be dropped at any time
+                    _ if mqtt_state.send_notifications() => drop(notification_tx.send(notification)),
+                    _ => (),
+                }
+                Ok(reply)
             })
-            .filter(|reply| should_forward_packet(reply))
-            .and_then(future::ok);
+            .filter(should_forward_packet)
+            .chain(once(Err(NetworkError::NetworkStreamClosed)));
 
-        let network_reply_stream = network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)));
         let mqtt_state = self.mqtt_state.clone();
-        Timeout::new(network_reply_stream, keep_alive)
+        Timeout::new(network_stream, keep_alive)
             .or_else(move |e| {
                 let mut mqtt_state = mqtt_state.borrow_mut();
                 handle_stream_timeout_error(e, &mut mqtt_state)
             })
-            .filter(|reply| should_forward_packet(reply))
-            .and_then(move |packet| future::ok(packet.into()))
+            .filter(should_forward_packet)
+            .map(std::convert::Into::into)
     }
 
     /// Handles all incoming user and session requests and creates a stream of packets to send
@@ -406,16 +445,6 @@ fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> imp
             future::err(NetworkError::UserReconnect)
         }
         _ => future::ok(userrequest.into()),
-    }
-}
-
-fn handle_notification(notification: Notification, notification_tx: &Sender<Notification>) {
-    match notification {
-        Notification::None => (),
-        _ => match notification_tx.try_send(notification) {
-            Ok(()) => (),
-            Err(e) => error!("Notification send failed. Error = {:?}", e),
-        },
     }
 }
 
@@ -547,7 +576,7 @@ impl Sink for BlackHole {
     type SinkItem = Packet;
     type SinkError = NetworkError;
 
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+    fn start_send(&mut self, _item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         Ok(AsyncSink::Ready)
     }
 
@@ -562,11 +591,13 @@ impl Sink for BlackHole {
 
 #[cfg(test)]
 mod test {
-    use super::{Connection, MqttOptions, MqttState, NetworkError, ReconnectOptions};
+    use super::{Connection, MqttOptions, MqttState, ConnectError, NetworkError, Notification, ReconnectOptions};
+    use crossbeam_channel::Receiver;
 
     use futures::{
         future,
         stream::{self, Stream},
+        sync::oneshot,
     };
     use mqtt311::Packet;
     use mqtt311::Publish;
@@ -577,11 +608,12 @@ mod test {
     use std::time::Instant;
     use tokio::runtime::current_thread::Runtime;
 
-    fn mock_mqtt_connection(mqttoptions: MqttOptions) -> (Connection, Runtime) {
+    fn mock_mqtt_connection(mqttoptions: MqttOptions) -> (Connection, Runtime, (Receiver<Notification>, oneshot::Receiver<()>)) {
         let (connection_tx, _connection_rx) = crossbeam_channel::bounded(1);
-        let (notification_tx, _notification_rx) = crossbeam_channel::bounded(10);
+        let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
+        let (notification_closed_tx, notification_closed_rx) = oneshot::channel::<()>();
 
-        let mqtt_state = MqttState::new(mqttoptions.clone());
+        let mqtt_state = MqttState::new(mqttoptions.clone(), notification_closed_tx);
         let mqtt_state = Rc::new(RefCell::new(mqtt_state));
         let connection = Connection {
             mqtt_state,
@@ -593,7 +625,7 @@ mod test {
         };
 
         let runtime = Runtime::new().unwrap();
-        (connection, runtime)
+        (connection, runtime, (notification_rx, notification_closed_rx))
     }
 
     fn sample_outgoing_publishes() -> Vec<Packet> {
@@ -621,7 +653,7 @@ mod test {
 
         let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
 
-        let (mut connection, runtime) = mock_mqtt_connection(mqttoptions);
+        let (mut connection, runtime, (_, _)) = mock_mqtt_connection(mqttoptions);
 
         let network_future = future::err::<(), _>(NetworkError::NetworkStreamClosed);
         let out = connection.mqtt_io(runtime, network_future);
@@ -629,9 +661,25 @@ mod test {
     }
 
     #[test]
+    fn connection_status_connected_disconnected() {
+        let reconnect_opt = ReconnectOptions::Always(10);
+
+        let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
+
+        let (mut connection, runtime, (notifications, _notification_closed_rx)) = mock_mqtt_connection(mqttoptions);
+
+        let network_future = future::err::<(), _>(NetworkError::NetworkStreamClosed);
+        let _ = connection.mqtt_io(runtime, network_future);
+        match notifications.recv().expect("Failed to recv") {
+            Notification::Disconnected(Err(ConnectError::NetworkError(NetworkError::NetworkStreamClosed))) => (),
+            n => panic!("Invalid notification: {:?}", n),
+        }
+    }
+
+    #[test]
     fn rate_limiting_to_the_stream_behaves_right() {
         let mqttoptions = MqttOptions::default().set_outgoing_ratelimit(5);
-        let (mut connection, mut runtime) = mock_mqtt_connection(mqttoptions);
+        let (mut connection, mut runtime, (_, _)) = mock_mqtt_connection(mqttoptions);
 
         let publishes = sample_outgoing_publishes();
         let packet_stream = stream::iter_ok(publishes);
