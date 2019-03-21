@@ -139,7 +139,7 @@ impl MqttOptions {
 
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(mut self, secs: u16) -> Self {
+    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         if secs < 10 {
             panic!("Keep alives should be >= 10 secs");
         }
@@ -159,7 +159,7 @@ impl MqttOptions {
     }
 
     /// Set packet size limit (in Kilo Bytes)
-    pub fn set_max_packet_size(mut self, sz: usize) -> Self {
+    pub fn set_max_packet_size(&mut self, sz: usize) -> &mut Self {
         self.max_packet_size = sz * 1024;
         self
     }
@@ -175,7 +175,7 @@ impl MqttOptions {
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
-    pub fn set_clean_session(mut self, clean_session: bool) -> Self {
+    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
         self
     }
@@ -186,7 +186,7 @@ impl MqttOptions {
     }
 
     /// Set how to connect to a MQTT Broker (either TCP or Tls)
-    pub fn set_connection_method(mut self, opts: ConnectionMethod) -> Self {
+    pub fn set_connection_method(&mut self, opts: ConnectionMethod) -> &mut Self {
         self.connection_method = opts;
         self
     }
@@ -195,7 +195,7 @@ impl MqttOptions {
         self.connection_method.clone()
     }
 
-    pub fn set_proxy(mut self, proxy: Proxy) -> Self {
+    pub fn set_proxy(&mut self, proxy: Proxy) -> &mut Self {
         self.proxy = proxy;
         self
     }
@@ -206,7 +206,7 @@ impl MqttOptions {
 
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections. By default, no retry will happen
-    pub fn set_reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
+    pub fn set_reconnect_opts(&mut self, opts: ReconnectOptions) -> &mut Self {
         self.reconnect = opts;
         self
     }
@@ -218,7 +218,7 @@ impl MqttOptions {
 
     /// Set security option
     /// Supports username-password auth, tls client cert auth, gcloud iotcore jwt auth
-    pub fn set_security_opts(mut self, opts: SecurityOptions) -> Self {
+    pub fn set_security_opts(&mut self, opts: SecurityOptions) -> &mut Self {
         self.security = opts;
         self
     }
@@ -229,7 +229,7 @@ impl MqttOptions {
     }
 
     /// Set last will and testament
-    pub fn set_last_will(mut self, last_will: LastWill) -> Self {
+    pub fn set_last_will(&mut self, last_will: LastWill) -> &mut Self {
         self.last_will = Some(last_will);
         self
     }
@@ -240,7 +240,7 @@ impl MqttOptions {
     }
 
     /// Set notification channel capacity
-    pub fn set_notification_channel_capacity(mut self, capacity: usize) -> Self {
+    pub fn set_notification_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.notification_channel_capacity = capacity;
         self
     }
@@ -251,7 +251,7 @@ impl MqttOptions {
     }
 
     /// Set request channel capacity
-    pub fn set_request_channel_capacity(mut self, capacity: usize) -> Self {
+    pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.request_channel_capacity = capacity;
         self
     }
@@ -262,7 +262,7 @@ impl MqttOptions {
     }
     
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_outgoing_ratelimit(mut self, rate: u64) -> Self {
+    pub fn set_outgoing_ratelimit(&mut self, rate: u64) -> &mut Self {
         if rate == 0 {
             panic!("zero rate is not allowed");
         }
@@ -278,7 +278,7 @@ impl MqttOptions {
 
     /// Sleeps for the 'delay' about of time before sending the next message if the 
     /// specified 'queue_size's are hit
-    pub fn set_outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
+    pub fn set_outgoing_queuelimit(&mut self, queue_size: usize, delay: Duration) -> &mut Self {
         if queue_size == 0 {
             panic!("zero queue size is not allowed")
         }
