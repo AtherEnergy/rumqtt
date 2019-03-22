@@ -8,12 +8,12 @@ fn main() {
     let port = 1883;
 
     let reconnection_options = ReconnectOptions::Always(10);
-    let mqtt_options = MqttOptions::new("test-pubsub2", broker, port)
-                                    .set_keep_alive(10)
-                                    .set_reconnect_opts(reconnection_options)
-                                    .set_clean_session(false);
+    let mut opts = MqttOptions::new("test-pubsub2", broker, port);
+    opts.set_keep_alive(10);
+    opts.set_reconnect_opts(reconnection_options);
+    opts.set_clean_session(false);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 
     thread::spawn(move || {
