@@ -367,7 +367,7 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Result<Connect, ConnectError> {
     let connect = Connect {
         protocol: Protocol::MQTT(4),
         keep_alive: mqttoptions.keep_alive().as_secs() as u16,
-        client_id: mqttoptions.client_id(),
+        client_id: mqttoptions.client_id().to_owned(),
         clean_session: mqttoptions.clean_session(),
         last_will: mqttoptions.last_will(),
         username,
@@ -379,7 +379,7 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Result<Connect, ConnectError> {
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
 fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
-    use chrono::{self, Utc};
+    use chrono::Utc;
     use jsonwebtoken::{encode, Algorithm, Header};
     use serde_derive::{Deserialize, Serialize};
 
@@ -436,7 +436,11 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
+        let opts = MqttOptions::builder()
+            .client_id("test-id")
+            .host("127.0.0.1")
+            .port(1883)
+            .build();
         MqttState::new(opts)
     }
 
@@ -628,9 +632,7 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-        let mut opts = MqttOptions::default();
-        opts.set_keep_alive(10);
-        mqtt.opts = opts;
+        mqtt.opts = MqttOptions::builder().keep_alive(10).build();
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(10));
 
@@ -657,11 +659,7 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
-
-        let mut opts = MqttOptions::default();
-        opts.set_keep_alive(10);
-        mqtt.opts = opts;
-
+        mqtt.opts = MqttOptions::builder().keep_alive(10).build();
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(10));
 
@@ -708,12 +706,8 @@ mod test {
     #[test]
     fn previous_session_handle_should_reset_everything_except_queues_in_persistent_session() {
         let mut mqtt = build_mqttstate();
-
         mqtt.await_pingresp = true;
-
-        let mut opts = MqttOptions::default();
-        opts.set_clean_session(false);
-        mqtt.opts = opts;
+        mqtt.opts = MqttOptions::builder().clean_session(false).build();
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
@@ -783,10 +777,7 @@ mod test {
     #[test]
     fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
         let mut mqtt = build_mqttstate();
-
-        let mut opts = MqttOptions::default();
-        opts.set_clean_session(false);
-        mqtt.opts = opts;
+        mqtt.opts = MqttOptions::builder().clean_session(false).build();
 
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
 
@@ -814,11 +805,15 @@ mod test {
             retain: true,
         };
 
-        let mut opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
-        opts.set_clean_session(true);
-        opts.set_keep_alive(50);
-        opts.set_last_will(lwt.clone());
-        opts.set_security_opts(UsernamePassword(String::from("USER"), String::from("PASS")));
+        let opts = MqttOptions::builder()
+            .client_id("test-id")
+            .host("127.0.0.1")
+            .port(1883)
+            .clean_session(true)
+            .keep_alive(50)
+            .last_will(lwt.clone())
+            .security_opts(UsernamePassword(String::from("USER"), String::from("PASS")))
+            .build();
         let mut mqtt = MqttState::new(opts);
 
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);

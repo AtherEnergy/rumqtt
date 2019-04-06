@@ -11,9 +11,13 @@ fn main() {
 
     let connection_method = ConnectionMethod::Tls(ca, Some((client_cert, client_key)));
 
-    let mut opts = MqttOptions::new(client_id, "localhost", 8883);
-    opts.set_keep_alive(10);
-    opts.set_connection_method(connection_method);
+    let opts = MqttOptions::builder()
+        .client_id(client_id)
+        .host("localhost")
+        .port(8883)
+        .keep_alive(10)
+        .connection_method(connection_method)
+        .build();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     let topic = "hello/world";

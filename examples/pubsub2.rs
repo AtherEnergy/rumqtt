@@ -3,8 +3,12 @@ use std::{thread, time::Duration};
 
 fn main() {
     pretty_env_logger::init();
-    let mut opts = MqttOptions::new("test-pubsub2", "127.0.0.1", 1883);
-    opts.set_keep_alive(10);
+    let opts = MqttOptions::builder()
+        .client_id("test-pubsub2")
+        .host("127.0.0.1")
+        .port(1883)
+        .keep_alive(10)
+        .build();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
    //mqtt_client.subscribe("hello/world", QoS::ExactlyOnce).unwrap();

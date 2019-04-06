@@ -265,7 +265,8 @@ impl Connection {
     /// which makes a new tcp or tls connection to the broker.
     /// Note that this doesn't actual connect to the broker
     fn tcp_connect_future(&self) -> impl Future<Item = MqttFramed, Error = ConnectError> {
-        let (host, port) = self.mqttoptions.broker_address();
+        let host = self.mqttoptions.host();
+        let port = self.mqttoptions.port();
         let connection_method = self.mqttoptions.connection_method();
         let proxy = self.mqttoptions.proxy();
 
@@ -285,7 +286,7 @@ impl Connection {
             }
         };
 
-        builder.connect(&host, port)
+        builder.connect(host, port)
     }
 
     /// Composes a new future which is a combination of tcp connect + mqtt handshake

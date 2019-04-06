@@ -3,8 +3,12 @@ use std::{thread, time::Duration};
 
 fn main() {
     pretty_env_logger::init();
-    let mut opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
-    opts.set_keep_alive(10);
+    let opts = MqttOptions::builder()
+        .client_id("test-id")
+        .host("127.0.0.1")
+        .port(1883)
+        .keep_alive(10)
+        .build();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
 

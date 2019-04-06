@@ -21,10 +21,14 @@ fn main() {
     let proxy = Proxy::HttpConnect(config.proxy_host, config.proxy_port, key.to_vec(), 40);
 
     let id = "http-connect-test";
-    let mut opts = MqttOptions::new(id, config.main_host, config.main_port);
-    opts.set_keep_alive(10);
-    opts.set_reconnect_opts(reconnect_options);
-    opts.set_proxy(proxy);
+    let opts = MqttOptions::builder()
+        .client_id(id)
+        .host(config.main_host)
+        .port(config.main_port)
+        .keep_alive(10)
+        .reconnect_opts(reconnect_options)
+        .proxy(proxy)
+        .build();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
 
