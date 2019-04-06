@@ -21,11 +21,11 @@ jobs:
       script: cargo test
     # - stage: check
     #   name : Rustfmt
-    #   install: rustup component add rustfmt-preview
+    #   install: rustup component add rustfmt
     #   script: cargo fmt -- --check
     # - stage: check
     #   name: Clippy
-    #   install: rustup component add clippy-preview
+    #   install: rustup component add clippy
     #   script: cargo clippy
 stages:
   - name: check
