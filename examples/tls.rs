@@ -17,7 +17,8 @@ fn main() {
         .port(8883)
         .keep_alive(10)
         .connection_method(connection_method)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     let topic = "hello/world";

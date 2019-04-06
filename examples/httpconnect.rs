@@ -28,7 +28,8 @@ fn main() {
         .keep_alive(10)
         .reconnect_opts(reconnect_options)
         .proxy(proxy)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
 

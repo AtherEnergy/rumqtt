@@ -43,7 +43,8 @@ fn main() -> Result<(), io::Error> {
         .keep_alive(10)
         .connection_method(connection_method)
         .security_opts(security_options)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";

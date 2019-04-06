@@ -9,7 +9,8 @@ fn main() {
         .port(1883)
         .keep_alive(10)
         .reconnect_opts(reconnect_options)
-        .build();
+        .build()
+        .unwrap();
 
     let (_client, notifications) = MqttClient::start(opts).unwrap();
 

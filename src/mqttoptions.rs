@@ -1,4 +1,5 @@
 //! Options to set mqtt client behaviour
+use failure::{err_msg, format_err, Error};
 use mqtt311::LastWill;
 use std::time::Duration;
 
@@ -115,12 +116,7 @@ impl MqttOptions {
     where
         T: Into<String>,
     {
-        let client_id = client_id.into();
-        if client_id.starts_with(' ') || client_id.is_empty() {
-            panic!("Invalid client id")
-        }
-
-        self.client_id = client_id;
+        self.client_id = client_id.into();
         self
     }
 
@@ -156,10 +152,6 @@ impl MqttOptions {
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, secs: u64) -> &mut Self {
-        if secs < 10 {
-            panic!("Keep alives should be >= 10 secs");
-        }
-
         self.keep_alive = Duration::from_secs(secs);
         self
     }
@@ -274,10 +266,6 @@ impl MqttOptions {
     
     /// Enables throttling and sets outoing message rate to the specified 'rate'
     pub fn set_outgoing_ratelimit(&mut self, rate: u64) -> &mut Self {
-        if rate == 0 {
-            panic!("zero rate is not allowed");
-        }
-
         self.outgoing_ratelimit = Some(rate);
         self
     }
@@ -290,10 +278,6 @@ impl MqttOptions {
     /// Sleeps for the 'delay' about of time before sending the next message if the 
     /// specified 'queue_size's are hit
     pub fn set_outgoing_queuelimit(&mut self, queue_size: usize, delay: Duration) -> &mut Self {
-        if queue_size == 0 {
-            panic!("zero queue size is not allowed")
-        }
-
         self.outgoing_queuelimit = (queue_size, delay);
         self
     }
@@ -426,8 +410,26 @@ impl MqttOptionsBuilder {
     }
 
     /// Build the MqttOptions
-    pub fn build(self) -> MqttOptions {
-        self.inner
+    pub fn build(self) -> Result<MqttOptions, Error> {
+        let opts = self.inner;
+
+        if opts.client_id.starts_with(' ') || opts.client_id.is_empty() {
+            return Err(format_err!("invalid client id = '{}'", opts.client_id()));
+        }
+
+        if opts.keep_alive.as_secs() < 10 {
+            return Err(format_err!("invalid keep alive = '{}', should be >= 10 secs", opts.keep_alive().as_secs()));
+        }
+
+        if let Some(0) = opts.outgoing_ratelimit() {
+            return Err(err_msg("invalid outgoing rate, it can't be a zero"));
+        }
+
+        if let (0, _) = opts.outgoing_queuelimit() {
+            return Err(err_msg("invalid outgoing queue size, it can't be a zero"));
+        }
+
+        Ok(opts)
     }
 
 }
@@ -439,24 +441,26 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::builder()
+        MqttOptions::builder()
             .client_id(" client_a")
             .host("127.0.0.1")
             .port(1883)
             .reconnect_opts(ReconnectOptions::Always(10))
             .clean_session(true)
-            .build();
+            .build()
+            .unwrap();
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::builder()
+        MqttOptions::builder()
             .client_id("")
             .host("127.0.0.1")
             .port(1883)
             .reconnect_opts(ReconnectOptions::Always(10))
             .clean_session(true)
-            .build();
+            .build()
+            .unwrap();
     }
 }

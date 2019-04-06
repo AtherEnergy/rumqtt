@@ -8,7 +8,8 @@ fn main() {
         .host("127.0.0.1")
         .port(1883)
         .keep_alive(10)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
    //mqtt_client.subscribe("hello/world", QoS::ExactlyOnce).unwrap();

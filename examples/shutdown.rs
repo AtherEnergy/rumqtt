@@ -8,7 +8,8 @@ fn main() {
         .host("localhost")
         .port(1883)
         .keep_alive(10)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
 

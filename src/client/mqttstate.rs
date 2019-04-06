@@ -440,7 +440,8 @@ mod test {
             .client_id("test-id")
             .host("127.0.0.1")
             .port(1883)
-            .build();
+            .build()
+            .unwrap();
         MqttState::new(opts)
     }
 
@@ -632,7 +633,7 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-        mqtt.opts = MqttOptions::builder().keep_alive(10).build();
+        mqtt.opts = MqttOptions::builder().keep_alive(10).build().unwrap();
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(10));
 
@@ -659,7 +660,7 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
-        mqtt.opts = MqttOptions::builder().keep_alive(10).build();
+        mqtt.opts = MqttOptions::builder().keep_alive(10).build().unwrap();
         mqtt.connection_status = MqttConnectionStatus::Connected;
         thread::sleep(Duration::from_secs(10));
 
@@ -707,7 +708,7 @@ mod test {
     fn previous_session_handle_should_reset_everything_except_queues_in_persistent_session() {
         let mut mqtt = build_mqttstate();
         mqtt.await_pingresp = true;
-        mqtt.opts = MqttOptions::builder().clean_session(false).build();
+        mqtt.opts = MqttOptions::builder().clean_session(false).build().unwrap();
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
@@ -777,7 +778,7 @@ mod test {
     #[test]
     fn connack_handle_should_return_list_of_incomplete_messages_to_be_sent_in_persistent_session() {
         let mut mqtt = build_mqttstate();
-        mqtt.opts = MqttOptions::builder().clean_session(false).build();
+        mqtt.opts = MqttOptions::builder().clean_session(false).build().unwrap();
 
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
 
@@ -813,9 +814,10 @@ mod test {
             .keep_alive(50)
             .last_will(lwt.clone())
             .security_opts(UsernamePassword(String::from("USER"), String::from("PASS")))
-            .build();
-        let mut mqtt = MqttState::new(opts);
+            .build()
+            .unwrap();
 
+        let mut mqtt = MqttState::new(opts);
         assert_eq!(mqtt.connection_status, MqttConnectionStatus::Disconnected);
         let pkt = mqtt.handle_outgoing_connect().unwrap();
         assert_eq!(

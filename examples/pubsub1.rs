@@ -11,7 +11,8 @@ fn main() {
         .keep_alive(10)
         .reconnect_opts(ReconnectOptions::Always(10))
         .clean_session(false)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();

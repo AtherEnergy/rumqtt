@@ -22,7 +22,8 @@
 //!         .client_id("test-pubsub1")
 //!         .host("localhost")
 //!         .port(1883)
-//!         .build();
+//!         .build()
+//!         .unwrap();
 //!     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 //!      
 //!     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
@@ -53,7 +54,8 @@
 //!         .client_id("test-pubsub1")
 //!         .host("localhost")
 //!         .port(1883)
-//!         .build();
+//!         .build()
+//!         .unwrap();
 //!     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 //!     let (done_tx, done_rx) = crossbeam_channel::bounded(1);
 //! 
@@ -92,7 +94,8 @@
 //!         .client_id("test-pubsub1")
 //!         .host("localhost")
 //!         .port(1883)
-//!         .build();
+//!         .build()
+//!         .unwrap();
 //!     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 //!     let mut c1 = mqtt_client.clone();
 //!     let mut c2 = mqtt_client.clone();

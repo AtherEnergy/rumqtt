@@ -10,7 +10,8 @@ fn main() {
         .host("127.0.0.1")
         .port(1883)
         .keep_alive(30)
-        .build();
+        .build()
+        .unwrap();
 
     let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     let (done_tx, done_rx) = crossbeam_channel::bounded(1);
