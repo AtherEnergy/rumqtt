@@ -31,6 +31,7 @@ pub struct Connection {
     connection_count: u32,
     mqttoptions: MqttOptions,
     is_network_enabled: bool,
+    has_connected_once: bool,
 }
 
 impl Connection {
@@ -54,6 +55,7 @@ impl Connection {
                 connection_count: 0,
                 mqttoptions,
                 is_network_enabled: true,
+                has_connected_once: false,
             };
 
             connection.mqtt_eventloop(request_rx, command_rx)
@@ -67,8 +69,10 @@ impl Connection {
         };
 
         match reconnect_option {
-            ReconnectOptions::AfterFirstSuccess(_) => connection_rx.recv()??,
-            ReconnectOptions::Never => connection_rx.recv()??,
+            // We need to wait for a successful connection in all cases except for when we always
+            // want to reconnect
+            ReconnectOptions::AfterFirstSuccess(_) => { connection_rx.recv()??; },
+            ReconnectOptions::Never => { connection_rx.recv()??  },
             ReconnectOptions::Always(_) => {
                 // read the result but ignore it
                 let _ = connection_rx.recv()?;
@@ -156,7 +160,7 @@ impl Connection {
             ReconnectOptions::AfterFirstSuccess(time) => {
                 let time = Duration::from_secs(time);
                 thread::sleep(time);
-                true
+                self.has_connected_once
             }
             ReconnectOptions::Always(time) => {
                 let time = Duration::from_secs(time);
@@ -240,6 +244,7 @@ impl Connection {
 
     fn handle_connection_success(&mut self) {
         self.connection_count += 1;
+        self.has_connected_once = true;
 
         if self.connection_count == 1 {
             let connection_tx = self.connection_tx.take().unwrap();

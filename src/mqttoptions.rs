@@ -260,7 +260,7 @@ impl MqttOptions {
     pub fn request_channel_capacity(&self) -> usize {
         self.request_channel_capacity
     }
-    
+
     /// Enables throttling and sets outoing message rate to the specified 'rate'
     pub fn set_outgoing_ratelimit(mut self, rate: u64) -> Self {
         if rate == 0 {
@@ -276,7 +276,7 @@ impl MqttOptions {
         self.outgoing_ratelimit
     }
 
-    /// Sleeps for the 'delay' about of time before sending the next message if the 
+    /// Sleeps for the 'delay' about of time before sending the next message if the
     /// specified 'queue_size's are hit
     pub fn set_outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
         if queue_size == 0 {
