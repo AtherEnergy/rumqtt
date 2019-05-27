@@ -30,15 +30,15 @@ version = "0.2"
 optional = true
 
 [dependencies.tokio-rustls]
-version = "0.9"
+version = "0.8"
 optional = true
 
 [dependencies.webpki]
-version = "0.19"
+version = "0.18"
 optional = true
 
 [dependencies.jsonwebtoken]
-version = "6.0"
+version = "5.0.1"
 optional = true
 
 [dependencies.chrono]
