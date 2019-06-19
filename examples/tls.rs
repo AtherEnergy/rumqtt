@@ -11,11 +11,16 @@ fn main() {
 
     let connection_method = ConnectionMethod::Tls(ca, Some((client_cert, client_key)));
 
-    let mqtt_options = MqttOptions::new(client_id, "localhost", 8883)
-        .set_keep_alive(10)
-        .set_connection_method(connection_method);
+    let opts = MqttOptions::builder()
+        .client_id(client_id)
+        .host("localhost")
+        .port(8883)
+        .keep_alive(10)
+        .connection_method(connection_method)
+        .build()
+        .unwrap();
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     let topic = "hello/world";
 
     thread::spawn(move || {

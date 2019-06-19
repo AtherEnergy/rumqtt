@@ -36,12 +36,17 @@ fn main() -> Result<(), io::Error> {
     File::open(Path::new("../../certs/roots.pem")).and_then(|mut f| f.read_to_end(&mut ca))?;
     let connection_method = ConnectionMethod::Tls(ca, None);
 
-    let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
-        .set_keep_alive(10)
-        .set_connection_method(connection_method)
-        .set_security_opts(security_options);
+    let opts = MqttOptions::builder()
+        .client_id(client_id)
+        .host("mqtt.googleapis.com")
+        .port(8883)
+        .keep_alive(10)
+        .connection_method(connection_method)
+        .security_opts(security_options)
+        .build()
+        .unwrap();
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(opts).unwrap();
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
     thread::spawn(move || {

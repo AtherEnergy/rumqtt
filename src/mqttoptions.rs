@@ -1,4 +1,5 @@
 //! Options to set mqtt client behaviour
+use failure::{err_msg, format_err, Error};
 use mqtt311::LastWill;
 use std::time::Duration;
 
@@ -52,7 +53,7 @@ pub enum Proxy {
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
-    broker_addr: String,
+    host: String,
     port: u16,
     /// keep alive time to send pingreq to broker when the connection is idle
     keep_alive: Duration,
@@ -85,7 +86,7 @@ pub struct MqttOptions {
 impl Default for MqttOptions {
     fn default() -> Self {
         MqttOptions {
-            broker_addr: "127.0.0.1".into(),
+            host: "127.0.0.1".into(),
             port: 1883,
             keep_alive: Duration::from_secs(30),
             clean_session: true,
@@ -106,45 +107,52 @@ impl Default for MqttOptions {
 
 impl MqttOptions {
     /// New mqtt options
-    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        // TODO: Validate if addr is proper address type
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id")
-        }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-        MqttOptions {
-            broker_addr: host.into(),
-            port,
-            keep_alive: Duration::from_secs(60),
-            clean_session: true,
-            client_id: id,
-            connection_method: ConnectionMethod::Tcp,
-            proxy: Proxy::None,
-            reconnect: ReconnectOptions::AfterFirstSuccess(10),
-            security: SecurityOptions::None,
-            max_packet_size: 256 * 1024,
-            last_will: None,
-            request_channel_capacity: 10,
-            notification_channel_capacity: 10,
-            outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
-        }
+    /// Set client id
+    pub fn set_client_id<T>(&mut self, client_id: T) -> &mut Self
+    where
+        T: Into<String>,
+    {
+        self.client_id = client_id.into();
+        self
+    }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    /// Set port number
+    pub fn set_port(&mut self, port: u16) -> &mut Self {
+        self.port = port;
+        self
+    }
+
+    /// Port number
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Set port number
+    pub fn set_host<T>(&mut self, host: T) -> &mut Self
+    where
+        T: Into<String>,
+    {
+        self.host = host.into();
+        self
     }
 
     /// Broker address
-    pub fn broker_address(&self) -> (String, u16) {
-        (self.broker_addr.clone(), self.port)
+    pub fn host(&self) -> &str {
+        &self.host
     }
 
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(mut self, secs: u16) -> Self {
-        if secs < 10 {
-            panic!("Keep alives should be >= 10 secs");
-        }
-
-        self.keep_alive = Duration::from_secs(u64::from(secs));
+    pub fn set_keep_alive(&mut self, secs: u64) -> &mut Self {
+        self.keep_alive = Duration::from_secs(secs);
         self
     }
 
@@ -153,13 +161,8 @@ impl MqttOptions {
         self.keep_alive
     }
 
-    /// Client identifier
-    pub fn client_id(&self) -> String {
-        self.client_id.clone()
-    }
-
     /// Set packet size limit (in Kilo Bytes)
-    pub fn set_max_packet_size(mut self, sz: usize) -> Self {
+    pub fn set_max_packet_size(&mut self, sz: usize) -> &mut Self {
         self.max_packet_size = sz * 1024;
         self
     }
@@ -175,7 +178,7 @@ impl MqttOptions {
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
-    pub fn set_clean_session(mut self, clean_session: bool) -> Self {
+    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
         self
     }
@@ -186,7 +189,7 @@ impl MqttOptions {
     }
 
     /// Set how to connect to a MQTT Broker (either TCP or Tls)
-    pub fn set_connection_method(mut self, opts: ConnectionMethod) -> Self {
+    pub fn set_connection_method(&mut self, opts: ConnectionMethod) -> &mut Self {
         self.connection_method = opts;
         self
     }
@@ -195,7 +198,7 @@ impl MqttOptions {
         self.connection_method.clone()
     }
 
-    pub fn set_proxy(mut self, proxy: Proxy) -> Self {
+    pub fn set_proxy(&mut self, proxy: Proxy) -> &mut Self {
         self.proxy = proxy;
         self
     }
@@ -206,7 +209,7 @@ impl MqttOptions {
 
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections. By default, no retry will happen
-    pub fn set_reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
+    pub fn set_reconnect_opts(&mut self, opts: ReconnectOptions) -> &mut Self {
         self.reconnect = opts;
         self
     }
@@ -218,7 +221,7 @@ impl MqttOptions {
 
     /// Set security option
     /// Supports username-password auth, tls client cert auth, gcloud iotcore jwt auth
-    pub fn set_security_opts(mut self, opts: SecurityOptions) -> Self {
+    pub fn set_security_opts(&mut self, opts: SecurityOptions) -> &mut Self {
         self.security = opts;
         self
     }
@@ -229,7 +232,7 @@ impl MqttOptions {
     }
 
     /// Set last will and testament
-    pub fn set_last_will(mut self, last_will: LastWill) -> Self {
+    pub fn set_last_will(&mut self, last_will: LastWill) -> &mut Self {
         self.last_will = Some(last_will);
         self
     }
@@ -240,7 +243,7 @@ impl MqttOptions {
     }
 
     /// Set notification channel capacity
-    pub fn set_notification_channel_capacity(mut self, capacity: usize) -> Self {
+    pub fn set_notification_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.notification_channel_capacity = capacity;
         self
     }
@@ -251,7 +254,7 @@ impl MqttOptions {
     }
 
     /// Set request channel capacity
-    pub fn set_request_channel_capacity(mut self, capacity: usize) -> Self {
+    pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.request_channel_capacity = capacity;
         self
     }
@@ -262,11 +265,7 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_outgoing_ratelimit(mut self, rate: u64) -> Self {
-        if rate == 0 {
-            panic!("zero rate is not allowed");
-        }
-
+    pub fn set_outgoing_ratelimit(&mut self, rate: u64) -> &mut Self {
         self.outgoing_ratelimit = Some(rate);
         self
     }
@@ -278,11 +277,7 @@ impl MqttOptions {
 
     /// Sleeps for the 'delay' about of time before sending the next message if the
     /// specified 'queue_size's are hit
-    pub fn set_outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
-        if queue_size == 0 {
-            panic!("zero queue size is not allowed")
-        }
-
+    pub fn set_outgoing_queuelimit(&mut self, queue_size: usize, delay: Duration) -> &mut Self {
         self.outgoing_queuelimit = (queue_size, delay);
         self
     }
@@ -291,6 +286,152 @@ impl MqttOptions {
     pub fn outgoing_queuelimit(&self) -> (usize, Duration) {
         self.outgoing_queuelimit
     }
+
+    /// Create MqttOptionsBuilder
+    pub fn builder() -> MqttOptionsBuilder {
+        MqttOptionsBuilder::new()
+    }
+}
+
+pub struct MqttOptionsBuilder {
+    inner: MqttOptions,
+}
+
+impl MqttOptionsBuilder {
+
+    fn new() -> Self {
+        Self {
+            inner: MqttOptions::new(),
+        }
+    }
+
+    /// Set client id
+    pub fn client_id<T>(mut self, client_id: T) -> Self
+    where
+        T: Into<String>,
+    {
+        self.inner.set_client_id(client_id);
+        self
+    }
+
+    /// Set port number
+    pub fn port(mut self, port: u16) -> Self {
+        self.inner.set_port(port);
+        self
+    }
+
+    /// Set port number
+    pub fn host<T>(mut self, host: T) -> Self
+    where
+        T: Into<String>,
+    {
+        self.inner.set_host(host);
+        self
+    }
+
+    /// Set number of seconds after which client should ping the broker
+    /// if there is no other data exchange
+    pub fn keep_alive(mut self, secs: u64) -> Self {
+        self.inner.set_keep_alive(secs);
+        self
+    }
+
+    /// Set packet size limit (in Kilo Bytes)
+    pub fn max_packet_size(mut self, sz: usize) -> Self {
+        self.inner.set_max_packet_size(sz);
+        self
+    }
+
+    /// `clean_session = true` removes all the state from queues & instructs the broker
+    /// to clean all the client state when client disconnects.
+    ///
+    /// When set `false`, broker will hold the client state and performs pending
+    /// operations on the client when reconnection with same `client_id`
+    /// happens. Local queue state is also held to retransmit packets after reconnection.
+    pub fn clean_session(mut self, clean_session: bool) -> Self {
+        self.inner.set_clean_session(clean_session);
+        self
+    }
+
+    /// Set how to connect to a MQTT Broker (either TCP or Tls)
+    pub fn connection_method(mut self, opts: ConnectionMethod) -> Self {
+        self.inner.set_connection_method(opts);
+        self
+    }
+
+    pub fn proxy(mut self, proxy: Proxy) -> Self {
+        self.inner.set_proxy(proxy);
+        self
+    }
+
+    /// Time interval after which client should retry for new
+    /// connection if there are any disconnections. By default, no retry will happen
+    pub fn reconnect_opts(mut self, opts: ReconnectOptions) -> Self {
+        self.inner.set_reconnect_opts(opts);
+        self
+    }
+
+    /// Set security option
+    /// Supports username-password auth, tls client cert auth, gcloud iotcore jwt auth
+    pub fn security_opts(mut self, opts: SecurityOptions) -> Self {
+        self.inner.set_security_opts(opts);
+        self
+    }
+
+    /// Set last will and testament
+    pub fn last_will(mut self, last_will: LastWill) -> Self {
+        self.inner.set_last_will(last_will);
+        self
+    }
+
+    /// Set notification channel capacity
+    pub fn notification_channel_capacity(mut self, capacity: usize) -> Self {
+        self.inner.set_notification_channel_capacity(capacity);
+        self
+    }
+
+    /// Set request channel capacity
+    pub fn request_channel_capacity(mut self, capacity: usize) -> Self {
+        self.inner.set_request_channel_capacity(capacity);
+        self
+    }
+
+    /// Enables throttling and sets outoing message rate to the specified 'rate'
+    pub fn outgoing_ratelimit(mut self, rate: u64) -> Self {
+        self.inner.set_outgoing_ratelimit(rate);
+        self
+    }
+
+    /// Sleeps for the 'delay' about of time before sending the next message if the
+    /// specified 'queue_size's are hit
+    pub fn outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
+        self.inner.set_outgoing_queuelimit(queue_size, delay);
+        self
+    }
+
+    /// Build the MqttOptions
+    pub fn build(self) -> Result<MqttOptions, Error> {
+        let opts = self.inner;
+
+        if opts.client_id.starts_with(' ') || opts.client_id.is_empty() {
+            return Err(format_err!("invalid client id = '{}'", opts.client_id()));
+        }
+
+        if opts.keep_alive.as_secs() < 10 {
+            return Err(format_err!("invalid keep alive = '{}', should be >= 10 secs", opts.keep_alive().as_secs()));
+        }
+
+        if let Some(0) = opts.outgoing_ratelimit() {
+            return Err(err_msg("invalid outgoing rate, it can't be a zero"));
+        }
+
+        if let (0, _) = opts.outgoing_queuelimit() {
+            return Err(err_msg("invalid outgoing queue size, it can't be a zero"));
+        }
+
+        Ok(opts)
+    }
+
 }
 
 #[cfg(test)]
@@ -300,16 +441,26 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883)
-            .set_reconnect_opts(ReconnectOptions::Always(10))
-            .set_clean_session(true);
+        MqttOptions::builder()
+            .client_id(" client_a")
+            .host("127.0.0.1")
+            .port(1883)
+            .reconnect_opts(ReconnectOptions::Always(10))
+            .clean_session(true)
+            .build()
+            .unwrap();
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883)
-            .set_reconnect_opts(ReconnectOptions::Always(10))
-            .set_clean_session(true);
+        MqttOptions::builder()
+            .client_id("")
+            .host("127.0.0.1")
+            .port(1883)
+            .reconnect_opts(ReconnectOptions::Always(10))
+            .clean_session(true)
+            .build()
+            .unwrap();
     }
 }

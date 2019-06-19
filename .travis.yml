@@ -14,6 +14,22 @@ cache: cargo
 before_cache:
   - chmod -R a+r $HOME/.cargo
 
+jobs:
+  include:
+    - stage: check
+      name: Tests
+      script: cargo test
+    # - stage: check
+    #   name : Rustfmt
+    #   install: rustup component add rustfmt
+    #   script: cargo fmt -- --check
+    # - stage: check
+    #   name: Clippy
+    #   install: rustup component add clippy
+    #   script: cargo clippy
+stages:
+  - name: check
+
 # branches:
 #   only:
 #     - master
