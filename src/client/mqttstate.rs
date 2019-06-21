@@ -58,25 +58,6 @@ impl MqttState {
         }
     }
 
-     /// Method to mock mqtt state in unit tests
-    pub fn mock(opts: MqttOptions, outgoing_pub: VecDeque<Publish>) -> MqttState {
-        MqttState {
-            opts,
-            connection_status: MqttConnectionStatus::Disconnected,
-            await_pingresp: false,
-            last_incoming: Instant::now(),
-            last_outgoing: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            outgoing_pub,
-            outgoing_rel: VecDeque::new(),
-            incoming_pub: VecDeque::new(),
-        }
-    }
-
-    pub fn connection_status(&self) -> MqttConnectionStatus {
-        self.connection_status
-    }
-
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Request, NetworkError> {
         let out = match packet {
             Packet::Publish(publish) => {
@@ -398,7 +379,8 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Result<Connect, ConnectError> {
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
 fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
-    use chrono::{self, Utc};
+    //TODO: Remove chrono for current utc timestamp and use something in standard library
+    use chrono::Utc;
     use jsonwebtoken::{encode, Algorithm, Header};
     use serde_derive::{Deserialize, Serialize};
 
