@@ -76,12 +76,10 @@ pub struct MqttOptions {
     request_channel_capacity: usize,
     /// notification channel capacity
     notification_channel_capacity: usize,
-    /// rate limit for outgoing messages (no. of messages per second)
-    outgoing_ratelimit: Option<u64>,
-    /// rate limit applied after queue size limit (size, sleep time after every message)
-    outgoing_queuelimit: (usize, Duration),
-    /// number of concurrent in flight messages
-    in_flight: usize,
+    /// maximum number of outgoing messages per second
+    throttle: Option<u64>,
+    /// maximum number of outgoing inflight messages
+    inflight: usize,
 }
 
 impl Default for MqttOptions {
@@ -100,9 +98,8 @@ impl Default for MqttOptions {
             last_will: None,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
-            in_flight: 100,
+            throttle: None,
+            inflight: 100,
         }
     }
 }
@@ -130,9 +127,8 @@ impl MqttOptions {
             last_will: None,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
-            in_flight: 100,
+            throttle: None,
+            inflight: 100,
         }
     }
 
@@ -266,33 +262,33 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_outgoing_ratelimit(mut self, rate: u64) -> Self {
+    pub fn set_throttle(mut self, rate: u64) -> Self {
         if rate == 0 {
             panic!("zero rate is not allowed");
         }
 
-        self.outgoing_ratelimit = Some(rate);
+        self.throttle = Some(rate);
         self
     }
 
     /// Outgoing message rate
-    pub fn outgoing_ratelimit(&self) -> Option<u64> {
-        self.outgoing_ratelimit
+    pub fn throttle(&self) -> Option<u64> {
+        self.throttle
     }
 
     /// Set number of concurrent in flight messages
-    pub fn set_in_flight(mut self, in_flight: usize) -> Self {
-        if in_flight == 0 {
+    pub fn set_inflight(mut self, inflight: usize) -> Self {
+        if inflight == 0 {
             panic!("zero in flight is not allowed")
         }
 
-        self.in_flight = in_flight;
+        self.inflight = inflight;
         self
     }
 
     /// Number of concurrent in flight messages
-    pub fn in_flight(&self) -> usize {
-        self.in_flight
+    pub fn inflight(&self) -> usize {
+        self.inflight
     }
 }
 

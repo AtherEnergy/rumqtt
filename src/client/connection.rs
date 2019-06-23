@@ -211,8 +211,8 @@ impl Connection {
         // note: make sure that the order remains (inflight, rate, request handling)
         // or else inflight limiting might face off by one bugs like progressing after
         // receiving 2 acks insteam of 1 ack
-        let network_request_stream = self.limit_in_flight_request_stream(network_request_stream);
-        let network_request_stream = self.rate_limited_network_stream(network_request_stream);
+        let network_request_stream = self.inflight_limited_request_stream(network_request_stream);
+        let network_request_stream = self.throttled_network_stream(network_request_stream);
         let network_request_stream = self.request_stream(network_request_stream);
         let network_request_stream = network_request_stream.and_then(move |packet| future::ok(packet.into()));
 
@@ -374,9 +374,9 @@ impl Connection {
 
     // Apply outgoing queue limit (in flights) by answering stream poll with not ready if queue is full
     // by returning NotReady.
-    fn limit_in_flight_request_stream(&self, requests: impl RequestStream) -> impl RequestStream {
+    fn inflight_limited_request_stream(&self, requests: impl RequestStream) -> impl RequestStream {
         let mqtt_state = self.mqtt_state.clone();
-        let in_flight = self.mqttoptions.in_flight();
+        let in_flight = self.mqttoptions.inflight();
         let mut stream = requests.peekable();
 
         // don't read anything from the user request stream if current queue length
@@ -398,11 +398,10 @@ impl Connection {
     }
 
     /// Apply throttling if configured
-    fn rate_limited_network_stream(&mut self, requests: impl RequestStream) -> impl RequestStream {
-        if let Some(rate) = self.mqttoptions.outgoing_ratelimit() {
+    fn throttled_network_stream(&mut self, requests: impl RequestStream) -> impl RequestStream {
+        if let Some(rate) = self.mqttoptions.throttle() {
             let duration = Duration::from_nanos(1_000_000_000 / rate);
             let throttled = requests.throttle(duration).map_err(|_| NetworkError::Throttle);
-
             EitherStream::A(throttled)
         } else {
             EitherStream::B(requests)
@@ -616,6 +615,7 @@ mod test {
     use std::rc::Rc;
     use std::sync::Arc;
     use std::io;
+    use std::time::Instant;
     use tokio::runtime::current_thread::Runtime;
 
     struct UserHandle {
@@ -790,24 +790,68 @@ mod test {
     }
 
     #[test]
+    fn throttled_stream_operates_at_specified_rate() {
+        let mqttoptions = MqttOptions::default().set_throttle(10);
+        let mqtt_state = MqttState::new(mqttoptions.clone());
+
+        let (mut connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
+
+        // note: maintain order similar to mqtt_future()
+        // generates 100 user requests
+        let user_request_stream = user_requests(Duration::from_millis(1));
+        let user_request_stream = connection.throttled_network_stream(user_request_stream);
+        let user_request_stream = connection.request_stream(user_request_stream);
+        let user_request_stream = user_request_stream.and_then(move |packet| future::ok(packet.into()));
+
+        let f = user_request_stream.fold(Instant::now(), |last, v: Packet| {
+            println!("outgoing = {:?}", v);
+            let now = Instant::now();
+
+            if let Packet::Publish(Publish{pkid, ..}) = v {
+                if pkid.unwrap() > PacketIdentifier(1) {
+                    let elapsed = (now - last).as_millis();
+                    assert!(elapsed > 95 && elapsed < 110)
+                }
+            }  
+            
+            future::ok::<_, NetworkError>(now)
+        });
+        
+        let _ = runtime.block_on(f);
+    }
+
+    #[test]
     fn requests_should_block_during_max_in_flight_messages() {
-        let mqttoptions = MqttOptions::default().set_in_flight(50);
+        let mqttoptions = MqttOptions::default().set_inflight(50);
         let mqtt_state = MqttState::new(mqttoptions.clone());
 
         let (mut connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
         
         // note: maintain order similar to mqtt_future()
-        let user_request_stream = user_requests(Duration::from_millis(10));
-        let user_request_stream = connection.limit_in_flight_request_stream(user_request_stream);
+        // generates 100 user requests
+        let user_request_stream = user_requests(Duration::from_millis(1));
+        let user_request_stream = connection.inflight_limited_request_stream(user_request_stream);
         let user_request_stream = connection.request_stream(user_request_stream);
         let user_request_stream = user_request_stream.and_then(move |packet| future::ok(packet.into()));
 
-        
-        let network_reply_stream = network_incoming_acks(Duration::from_millis(500));
+        // generates 100 acks
+        let network_reply_stream = network_incoming_acks(Duration::from_millis(100));
         let network_reply_stream = connection.network_reply_stream(network_reply_stream);
         
         let network_stream = network_reply_stream.select(user_request_stream);
-        let network_stream = network_stream.for_each(|v| future::ok(println!("{:?}", v)));
+        let network_stream = network_stream.fold(Instant::now(), |last, v| {
+            println!("outgoing = {:?}", v);
+            let now = Instant::now();
+            
+            if let Packet::Publish(Publish{pkid, ..}) = v {
+                if pkid.unwrap() > PacketIdentifier(51) {
+                    let elapsed = (now - last).as_millis();
+                    assert!(elapsed > 90 && elapsed < 110)
+                }
+            }
+            
+            future::ok::<_, NetworkError>(now)
+        });
         let _ = runtime.block_on(network_stream);
     }
 }
