@@ -328,8 +328,7 @@ impl Connection {
                 future::result(reply)
             })
             .and_then(move |(notification, reply)| {
-                handle_notification(notification, &notification_tx);
-                future::ok(reply)
+                handle_notification_and_reply(&notification_tx, notification, reply)
             })
             .filter(|reply| should_forward_packet(reply))
             .and_then(future::ok);
@@ -420,6 +419,21 @@ impl Connection {
     }
 }
 
+fn handle_notification_and_reply(notification_tx: &Sender<Notification>, notification: Notification, reply: Request) -> impl Future<Item = Request, Error = NetworkError> {
+    match notification {
+        Notification::None => future::ok(reply),
+        _ => match notification_tx.try_send(notification) {
+            Ok(()) => {
+                future::ok(reply)
+            }
+            Err(e) => {
+                error!("Notification send failed. Error = {:?}", e);
+                future::err(NetworkError::ReceiverCatchup)
+            }
+        }
+    }
+}
+
 /// Checks if a ping is necessary based on timeout error
 fn handle_stream_timeout_error(error: timeout::Error<NetworkError>, mqtt_state: &mut MqttState) -> impl Future<Item = Request, Error = NetworkError> {
     // check if a ping to the broker is necessary
@@ -443,16 +457,6 @@ fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> imp
             future::err(NetworkError::UserReconnect)
         }
         _ => future::ok(userrequest.into()),
-    }
-}
-
-fn handle_notification(notification: Notification, notification_tx: &Sender<Notification>) {
-    match notification {
-        Notification::None => (),
-        _ => match notification_tx.try_send(notification) {
-            Ok(()) => (),
-            Err(e) => error!("Notification send failed. Error = {:?}", e),
-        },
     }
 }
 
@@ -667,6 +671,29 @@ mod test {
         }).map_err(|e| NetworkError::Timer(e))
     }
 
+    fn network_incoming_publishes(delay: Duration, count: u32) -> impl Stream<Item = Packet, Error = io::Error> {
+        let mut publishes = DelayQueue::new();
+
+        for i in 1..=count {
+            let publish = Publish {
+                dup: false,
+                qos: QoS::AtLeastOnce,
+                retain: false,
+                pkid: Some(PacketIdentifier(i as u16)),
+                topic_name: "hello/world".to_owned(),
+                payload: Arc::new(vec![1, 2, 3]),
+            };
+
+            publishes.insert(Packet::Publish(publish), i * delay);
+        }
+
+        publishes.map(|v| {
+            v.into_inner()
+        }).map_err(|_e| {
+            io::Error::new(io::ErrorKind::Other, "Timer error")
+        })
+    }
+
     fn network_incoming_acks(delay: Duration) -> impl Stream<Item = Packet, Error = io::Error> {
         let mut acks = DelayQueue::new();
 
@@ -853,6 +880,26 @@ mod test {
             future::ok::<_, NetworkError>(now)
         });
         let _ = runtime.block_on(network_stream);
+    }
+
+    #[test]
+    fn reply_stream_results_in_an_error_when_notification_receiver_doesnt_catchup() {
+        let mqttoptions = MqttOptions::default().set_inflight(50);
+        let mqtt_state = MqttState::new(mqttoptions.clone());
+
+        let (connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
+        let network_reply_stream = network_incoming_publishes(Duration::from_millis(100), 11);
+        let network_reply_stream = connection.network_reply_stream(network_reply_stream);
+
+        let network_future = network_reply_stream.for_each(|v| {
+            println!("Incoming = {:?}", v);
+            future::ok(())
+        });
+
+        match runtime.block_on(network_future) {
+            Err(NetworkError::ReceiverCatchup) => (),
+            _ => panic!("Should result in receiver catchup error")
+        }
     }
 }
 
