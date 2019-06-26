@@ -169,37 +169,44 @@ impl Connection {
     /// Err(true) -> Reconnect
     /// Err(false) -> Don't reconnect
     fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
-        match runtime.block_on(mqtt_future) {
-            // don't use user defined reconnection behaviour here
-            Err(NetworkError::UserDisconnect) => {
-                debug!("User commanded for network disconnect");
-                self.is_network_enabled = false;
-                Err(true)
-            }
-            // don't use user defined reconnection behaviour here
-            Err(NetworkError::UserReconnect) => {
-                debug!("User commanded for network reconnect");
-                self.is_network_enabled = true;
-                Err(true)
-            }
-            Err(NetworkError::NetworkStreamClosed) => {
-                let mqtt_state = self.mqtt_state.borrow();
-                if mqtt_state.is_disconnecting() {
-                    debug!("Disconnecting gracefully");
+        let o = runtime.block_on(mqtt_future);
+        if let Err(e) = self.notification_tx.try_send(Notification::Disconnection) {
+            error!("Notification failure. Error = {:?}", e);
+        }
+
+        if let Err(e) = o {
+            debug!("Eventloop stopped with error. {:?}", e);
+
+            return match e {
+                NetworkError::UserDisconnect => {
+                    self.is_network_enabled = false;
+                    Err(true)
+                }
+                NetworkError::UserReconnect => {
+                    self.is_network_enabled = true;
+                    Err(true)
+                }
+                NetworkError::NetworkStreamClosed if self.mqtt_state.borrow().is_disconnecting() => {
+                    self.is_network_enabled = false;
                     Err(false)
-                } else {
+                }
+                NetworkError::NetworkStreamClosed => {
+                    self.is_network_enabled = true;
+                    Err(self.should_reconnect_again())
+                }
+                _ => {
+                    self.is_network_enabled = true;
                     Err(self.should_reconnect_again())
                 }
             }
-            Err(e) => {
-                error!("Event loop returned. Error = {:?}", e);
-                Err(self.should_reconnect_again())
-            }
-            Ok(_v) => {
-                warn!("Strange!! Evenloop finished");
-                Err(self.should_reconnect_again())
-            }
         }
+
+        if let Ok(_v) = o {
+            debug!("Eventloop stopped without error");
+            return Err(self.should_reconnect_again())
+        }
+
+        Ok(())
     }
 
     /// Applies throttling and inflight limiting based on user configuration and returns
@@ -242,15 +249,16 @@ impl Connection {
         }
     }
 
-
     /// Sends connection status on blocked connections status call in `run`
     fn handle_connection_success(&mut self) {
-        self.connection_count += 1;
-
-        if self.connection_count == 1 {
+        if self.connection_count == 0 {
             let connection_tx = self.connection_tx.take().unwrap();
             connection_tx.try_send(Ok(())).unwrap();
+        } else {
+            let _ = self.notification_tx.try_send(Notification::Reconnection);
         }
+
+        self.connection_count += 1;
     }
 
     /// Sends connection status on blocked connections status call in `run`
@@ -620,6 +628,7 @@ mod test {
     use std::sync::Arc;
     use std::io;
     use std::time::Instant;
+    use std::thread;
     use tokio::runtime::current_thread::Runtime;
 
     struct UserHandle {
@@ -632,7 +641,7 @@ mod test {
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(10);
 
         let mqtt_state = Rc::new(RefCell::new(mqtt_state));
-        let connection = Connection {
+        let mut connection = Connection {
             mqtt_state,
             notification_tx,
             connection_tx: Some(connection_tx),
@@ -641,6 +650,7 @@ mod test {
             is_network_enabled: true,
         };
 
+        connection.handle_connection_success();
         let userhandle = UserHandle {
             notification_rx,
             connection_rx
@@ -900,6 +910,37 @@ mod test {
             Err(NetworkError::ReceiverCatchup) => (),
             _ => panic!("Should result in receiver catchup error")
         }
+    }
+
+    #[test]
+    fn connection_success_and_disconnections_should_put_state_change_events_on_notifications() {
+        let mqttoptions = MqttOptions::default().set_inflight(50);
+        let mqtt_state = MqttState::new(mqttoptions.clone());
+
+        let (mut connection, userhandle, runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
+
+        thread::spawn(move || {
+            for (count, notification) in userhandle.notification_rx.iter().enumerate() {
+                println!("Notifiction = {:?}", notification);
+                match notification {
+                    Notification::Reconnection if count == 0 => (),
+                    Notification::Disconnection if count == 21 => (),
+                    Notification::Publish(_) if count != 0 || count != 21 => (),
+                    n => panic!("Not expected notification {:?}", n)
+                }
+            }
+        });
+
+        // puts connection success event on the notifaction channel
+        connection.handle_connection_success();
+        let network_reply_stream = network_incoming_publishes(Duration::from_millis(100), 20);
+        // end of the stream will simulate server disconnection
+        let network_reply_stream = connection.network_reply_stream(network_reply_stream);
+        let network_future = network_reply_stream.for_each(|_v| {
+            future::ok(())
+        });
+
+        let _ = connection.mqtt_io(runtime, network_future);
     }
 }
 

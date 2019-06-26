@@ -18,6 +18,8 @@ pub mod prepend;
 /// Incoming notifications from the broker
 #[derive(Debug)]
 pub enum Notification {
+    Reconnection,
+    Disconnection,
     Publish(Publish),
     PubAck(PacketIdentifier),
     PubRec(PacketIdentifier),
