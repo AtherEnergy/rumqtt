@@ -704,6 +704,20 @@ mod test {
         })
     }
 
+    fn network_incoming_pingresps(delay: Duration, count: u32) -> impl Stream<Item = Packet, Error = io::Error> {
+        let mut acks = DelayQueue::new();
+
+        for i in 1..=count {
+            acks.insert(Packet::Pingresp, i * delay);
+        }
+
+        acks.map(|v| {
+            v.into_inner()
+        }).map_err(|_e| {
+            io::Error::new(io::ErrorKind::Other, "Timer error")
+        })
+    }
+
     fn network_incoming_acks(delay: Duration) -> impl Stream<Item = Packet, Error = io::Error> {
         let mut acks = DelayQueue::new();
 
@@ -824,6 +838,31 @@ mod test {
         let network_future = future::err::<(), _>(NetworkError::NetworkStreamClosed);
         let out = connection.mqtt_io(runtime, network_future);
         assert_eq!(out, Err(false));
+    }
+
+    #[test]
+    fn reply_stream_triggers_pings_on_time() {
+        let mqttoptions = MqttOptions::default().set_keep_alive(5);
+        let mqtt_state = MqttState::new(mqttoptions.clone());
+
+        let (connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
+        let network_reply_stream = network_incoming_pingresps(Duration::from_secs(6), 3);
+        let network_reply_stream = connection.network_reply_stream(network_reply_stream);
+
+        let network_future = network_reply_stream.fold(Instant::now(), |last, packet| {
+            println!("Packet = {:?}", packet);
+            match packet {
+                Packet::Pingreq => {
+                    let elapsed = (Instant::now() - last).as_millis();
+                    assert!(elapsed > 4990 && elapsed < 5010)
+                },
+                _ => panic!("Expecting publish or ping")
+            }
+
+            future::ok::<_, NetworkError>((Instant::now()))
+        });
+
+        let _ = runtime.block_on(network_future);
     }
 
     #[test]
