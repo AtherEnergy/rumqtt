@@ -875,11 +875,11 @@ mod test {
 
             match packet {
                 // publish at 1. 1st pingreq should be at 6
-                Packet::Pingreq if count == 1 =>  assert!(elapsed > 6000 && elapsed < 6010),
+                Packet::Pingreq if count == 1 =>  assert!(elapsed > 6000 && elapsed < 6050),
                 // ping resp at 7. 2nd pingreq should be at 12
-                Packet::Pingreq if count == 2 =>  assert!(elapsed > 12000 && elapsed < 12010),
+                Packet::Pingreq if count == 2 =>  assert!(elapsed > 12000 && elapsed < 12050),
                 // ping resp at 14. 3rd pingreq should be at 19
-                Packet::Pingreq if count == 3 =>  assert!(elapsed > 19000 && elapsed < 19010),
+                Packet::Pingreq if count == 3 =>  assert!(elapsed > 19000 && elapsed < 19050),
                 _ => panic!("Expecting publish or ping")
             }
 
@@ -914,6 +914,7 @@ mod test {
             if let Packet::Publish(Publish{pkid, ..}) = v {
                 if pkid.unwrap() > PacketIdentifier(1) {
                     let elapsed = (now - last).as_millis();
+                    dbg!(elapsed);
                     assert!(elapsed > 95 && elapsed < 110)
                 }
             }  
