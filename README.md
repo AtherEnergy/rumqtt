@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/AtherEnergy/rumqtt.svg)](https://travis-ci.org/AtherEnergy/rumqtt)
+[![Build Status](https://dev.azure.com/kraviteza/kraviteza/_apis/build/status/AtherEnergy.rumqtt?branchName=master)](https://dev.azure.com/kraviteza/kraviteza/_build/latest?definitionId=2&branchName=master)
 [![Documentation](https://docs.rs/rumqtt/badge.svg)](https://docs.rs/rumqtt)
 
 Pure rust [MQTT] client which strives to be simple, robust and performant. This library takes an opinionated approach of spawning an eventloop thread where all the mqtt related network io happens. The eventloop takes care of necessary robustness tasks without user having to rethink of all the necessary stuff to implement
