@@ -742,7 +742,6 @@ mod test {
         }
 
         acks.map(|v| {
-            println!("{:?}", v);
             v.into_inner()
         }).map_err(|_e| {
             io::Error::new(io::ErrorKind::Other, "Timer error")
@@ -871,15 +870,15 @@ mod test {
         // so pingreq should happen at second 6, 12 and 16
         let network_future = network_reply_stream.fold(1, |mut count, packet| {
             let elapsed = start.elapsed().as_millis();
-            println!("Packet = {:?}, Elapsed = {:?}", packet, elapsed);
+            // println!("Packet = {:?}, Elapsed = {:?}", packet, elapsed);
 
             match packet {
                 // publish at 1. 1st pingreq should be at 6
-                Packet::Pingreq if count == 1 =>  assert!(elapsed > 6000 && elapsed < 6050),
+                Packet::Pingreq if count == 1 =>  assert!(elapsed > 6000 && elapsed < 6200),
                 // ping resp at 7. 2nd pingreq should be at 12
-                Packet::Pingreq if count == 2 =>  assert!(elapsed > 12000 && elapsed < 12050),
+                Packet::Pingreq if count == 2 =>  assert!(elapsed > 12000 && elapsed < 12200),
                 // ping resp at 14. 3rd pingreq should be at 19
-                Packet::Pingreq if count == 3 =>  assert!(elapsed > 19000 && elapsed < 19050),
+                Packet::Pingreq if count == 3 =>  assert!(elapsed > 19000 && elapsed < 19200),
                 _ => panic!("Expecting publish or ping")
             }
 
@@ -908,14 +907,13 @@ mod test {
         let user_request_stream = user_request_stream.and_then(move |packet| future::ok(packet.into()));
 
         let f = user_request_stream.fold(Instant::now(), |last, v: Packet| {
-            println!("outgoing = {:?}", v);
+            // println!("outgoing = {:?}", v);
             let now = Instant::now();
 
             if let Packet::Publish(Publish{pkid, ..}) = v {
                 if pkid.unwrap() > PacketIdentifier(1) {
                     let elapsed = (now - last).as_millis();
-                    dbg!(elapsed);
-                    assert!(elapsed > 95 && elapsed < 110)
+                    assert!(elapsed > 90 && elapsed < 120)
                 }
             }  
             
@@ -945,13 +943,13 @@ mod test {
         
         let network_stream = network_reply_stream.select(user_request_stream);
         let network_stream = network_stream.fold(Instant::now(), |last, v| {
-            println!("outgoing = {:?}", v);
+            // println!("outgoing = {:?}", v);
             let now = Instant::now();
             
             if let Packet::Publish(Publish{pkid, ..}) = v {
                 if pkid.unwrap() > PacketIdentifier(51) {
                     let elapsed = (now - last).as_millis();
-                    assert!(elapsed > 90 && elapsed < 110)
+                    assert!(elapsed > 90 && elapsed < 120)
                 }
             }
             
@@ -970,7 +968,7 @@ mod test {
         let network_reply_stream = connection.network_reply_stream(network_reply_stream);
 
         let network_future = network_reply_stream.for_each(|v| {
-            println!("Incoming = {:?}", v);
+            // println!("Incoming = {:?}", v);
             future::ok(())
         });
 
