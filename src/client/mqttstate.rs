@@ -88,6 +88,8 @@ impl MqttState {
 
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
+            // TODO: Remove this with async await. This is just to satisfy combinator rules during timeout
+            Packet::Pingreq => self.handle_incoming_pingreq(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Suback(_pkid) => Ok((Notification::None, Request::None)),
             Packet::Unsuback(_pkid) => Ok((Notification::None, Request::None)),
@@ -171,6 +173,7 @@ impl MqttState {
         }
     }
 
+
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
@@ -187,8 +190,7 @@ impl MqttState {
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
-                let queue: VecDeque<Option<PacketIdentifier>> = self.outgoing_pub.iter().map(|p| p.pkid).collect();
-                println!("queue = {:?}", queue);
+                // let queue: VecDeque<Option<PacketIdentifier>> = self.outgoing_pub.iter().map(|p| p.pkid).collect();
                 Err(NetworkError::Unsolicited)
             }
         }
@@ -303,11 +305,15 @@ impl MqttState {
 
         debug!(
             "Ping = {:?}. keep alive = {},
-            last incoming packet before {} secs,
-            last outgoing packet before {} secs",
-            packet, keep_alive.as_secs(), elapsed_in.as_secs(), elapsed_out.as_secs());
+            last incoming packet before {} millisecs,
+            last outgoing packet before {} millisecs",
+            packet, keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
 
         Ok(packet)
+    }
+
+    pub fn handle_incoming_pingreq(&mut self) -> Result<(Notification, Request), NetworkError> {
+        Ok((Notification::None, Request::Ping))
     }
 
     pub fn handle_incoming_pingresp(&mut self) -> Result<(Notification, Request), NetworkError> {
