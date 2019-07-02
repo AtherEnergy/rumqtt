@@ -10,7 +10,7 @@ use crate::mqttoptions::{MqttOptions, SecurityOptions};
 use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Protocol};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttConnectionStatus {
+pub enum MqttConnectionStatus {
     Handshake,
     Connected,
     Disconnecting,
@@ -64,7 +64,6 @@ impl MqttState {
                 let publish = self.handle_outgoing_publish(publish)?;
                 Request::Publish(publish)
             }
-            Packet::Pingreq => self.handle_outgoing_ping()?,
             Packet::Subscribe(subs) => {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Request::Subscribe(subscription)
@@ -88,6 +87,8 @@ impl MqttState {
 
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
+            // TODO: Remove this with async await. This is just to satisfy combinator rules during timeout
+            Packet::Pingreq => self.handle_incoming_pingreq(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Suback(_pkid) => Ok((Notification::None, Request::None)),
             Packet::Unsuback(_pkid) => Ok((Notification::None, Request::None)),
@@ -171,6 +172,7 @@ impl MqttState {
         }
     }
 
+
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
@@ -187,8 +189,7 @@ impl MqttState {
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
-                let queue: VecDeque<Option<PacketIdentifier>> = self.outgoing_pub.iter().map(|p| p.pkid).collect();
-                println!("queue = {:?}", queue);
+                // let queue: VecDeque<Option<PacketIdentifier>> = self.outgoing_pub.iter().map(|p| p.pkid).collect();
                 Err(NetworkError::Unsolicited)
             }
         }
@@ -282,7 +283,7 @@ impl MqttState {
     // is received and return the status which tells if
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<Request, NetworkError> {
+    pub fn handle_outgoing_ping(&mut self) -> Result<bool, NetworkError> {
         let keep_alive = self.opts.keep_alive();
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
@@ -294,20 +295,24 @@ impl MqttState {
         }
 
 
-        let packet = if elapsed_in > keep_alive || elapsed_out > keep_alive {
+        let ping = if elapsed_in > keep_alive || elapsed_out > keep_alive {
             self.await_pingresp = true;
-            Request::Ping
+            true
         } else {
-            Request::None
+            false
         };
 
         debug!(
             "Ping = {:?}. keep alive = {},
-            last incoming packet before {} secs,
-            last outgoing packet before {} secs",
-            packet, keep_alive.as_secs(), elapsed_in.as_secs(), elapsed_out.as_secs());
+            last incoming packet before {} millisecs,
+            last outgoing packet before {} millisecs",
+            ping, keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
 
-        Ok(packet)
+        Ok(ping)
+    }
+
+    pub fn handle_incoming_pingreq(&mut self) -> Result<(Notification, Request), NetworkError> {
+        Ok((Notification::None, Request::IncomingIdlePing))
     }
 
     pub fn handle_incoming_pingresp(&mut self) -> Result<(Notification, Request), NetworkError> {
@@ -379,7 +384,8 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Result<Connect, ConnectError> {
 #[cfg(feature = "jwt")]
 // Generates a new password for mqtt client authentication
 fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
-    use chrono::{self, Utc};
+    //TODO: Remove chrono for current utc timestamp and use something in standard library
+    use chrono::Utc;
     use jsonwebtoken::{encode, Algorithm, Header};
     use serde_derive::{Deserialize, Serialize};
 
@@ -635,7 +641,7 @@ mod test {
 
         // should ping
          match  mqtt.handle_outgoing_ping().unwrap() {
-            Request::Ping => (),
+            true => (),
             _ => assert!(false, "expecting ping")
         }
 
@@ -665,7 +671,7 @@ mod test {
 
         // should ping
         match  mqtt.handle_outgoing_ping().unwrap() {
-            Request::Ping => (),
+            true => (),
             _ => assert!(false, "expecting ping")
         }
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
@@ -673,7 +679,7 @@ mod test {
         thread::sleep(Duration::from_secs(10));
         // should ping
          match  mqtt.handle_outgoing_ping().unwrap() {
-            Request::Ping => (),
+            true => (),
             _ => assert!(false, "expecting ping")
         }
     }

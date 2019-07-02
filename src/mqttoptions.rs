@@ -76,10 +76,10 @@ pub struct MqttOptions {
     request_channel_capacity: usize,
     /// notification channel capacity
     notification_channel_capacity: usize,
-    /// rate limit for outgoing messages (no. of messages per second)
-    outgoing_ratelimit: Option<u64>,
-    /// rate limit applied after queue size limit (size, sleep time after every message)
-    outgoing_queuelimit: (usize, Duration)
+    /// maximum number of outgoing messages per second
+    throttle: Option<u64>,
+    /// maximum number of outgoing inflight messages
+    inflight: usize,
 }
 
 impl Default for MqttOptions {
@@ -98,8 +98,8 @@ impl Default for MqttOptions {
             last_will: None,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
+            throttle: None,
+            inflight: 100,
         }
     }
 }
@@ -127,8 +127,8 @@ impl MqttOptions {
             last_will: None,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            outgoing_ratelimit: None,
-            outgoing_queuelimit: (100, Duration::from_secs(3)),
+            throttle: None,
+            inflight: 100,
         }
     }
 
@@ -140,8 +140,8 @@ impl MqttOptions {
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(mut self, secs: u16) -> Self {
-        if secs < 10 {
-            panic!("Keep alives should be >= 10 secs");
+        if secs < 5 {
+            panic!("Keep alives should be >= 5  secs");
         }
 
         self.keep_alive = Duration::from_secs(u64::from(secs));
@@ -262,34 +262,33 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_outgoing_ratelimit(mut self, rate: u64) -> Self {
+    pub fn set_throttle(mut self, rate: u64) -> Self {
         if rate == 0 {
             panic!("zero rate is not allowed");
         }
 
-        self.outgoing_ratelimit = Some(rate);
+        self.throttle = Some(rate);
         self
     }
 
     /// Outgoing message rate
-    pub fn outgoing_ratelimit(&self) -> Option<u64> {
-        self.outgoing_ratelimit
+    pub fn throttle(&self) -> Option<u64> {
+        self.throttle
     }
 
-    /// Sleeps for the 'delay' about of time before sending the next message if the
-    /// specified 'queue_size's are hit
-    pub fn set_outgoing_queuelimit(mut self, queue_size: usize, delay: Duration) -> Self {
-        if queue_size == 0 {
-            panic!("zero queue size is not allowed")
+    /// Set number of concurrent in flight messages
+    pub fn set_inflight(mut self, inflight: usize) -> Self {
+        if inflight == 0 {
+            panic!("zero in flight is not allowed")
         }
 
-        self.outgoing_queuelimit = (queue_size, delay);
+        self.inflight = inflight;
         self
     }
 
-    /// Outgoing queue limit
-    pub fn outgoing_queuelimit(&self) -> (usize, Duration) {
-        self.outgoing_queuelimit
+    /// Number of concurrent in flight messages
+    pub fn inflight(&self) -> usize {
+        self.inflight
     }
 }
 

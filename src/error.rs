@@ -84,6 +84,8 @@ pub enum NetworkError {
     NetworkStreamClosed,
     #[fail(display = "Throttle error while rate limiting")]
     Throttle,
+    #[fail(display = "Notification receiver is slower than incoming packets")]
+    ReceiverCatchup,
     #[fail(display = "Dummy error for converting () to network error")]
     Blah,
 }

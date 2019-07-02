@@ -18,6 +18,8 @@ pub mod prepend;
 /// Incoming notifications from the broker
 #[derive(Debug)]
 pub enum Notification {
+    Reconnection,
+    Disconnection,
     Publish(Publish),
     PubAck(PacketIdentifier),
     PubRec(PacketIdentifier),
@@ -40,7 +42,8 @@ pub enum Request {
     PubRec(PacketIdentifier),
     PubRel(PacketIdentifier),
     PubComp(PacketIdentifier),
-    Ping,
+    IncomingIdlePing,
+    OutgoingIdlePing,
     Reconnect(MqttOptions),
     Disconnect,
     None,
