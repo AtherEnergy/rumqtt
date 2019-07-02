@@ -647,7 +647,7 @@ mod test {
     use std::time::Duration;
     use tokio::timer::DelayQueue;
     use mqtt311::PacketIdentifier;
-    use crate::client::Request;
+    #[cfg(target_os = "linux")] use crate::client::Request;
     use crate::client::Notification;
     use super::{Connection, MqttOptions, MqttState, NetworkError, ConnectError, ReconnectOptions};
     use super::MqttFramed;
@@ -662,7 +662,7 @@ mod test {
     use std::rc::Rc;
     use std::sync::Arc;
     use std::io;
-    use std::time::Instant;
+    #[cfg(target_os = "linux")] use std::time::Instant;
     use std::thread;
     use tokio::runtime::current_thread::Runtime;
 
@@ -694,6 +694,7 @@ mod test {
         (connection, userhandle, runtime)
     }
 
+    #[cfg(target_os = "linux")]
     fn user_requests(delay: Duration) -> impl Stream<Item = Request, Error = NetworkError> {
         let mut requests = DelayQueue::new();
 
@@ -738,6 +739,7 @@ mod test {
         })
     }
 
+    #[cfg(target_os = "linux")]
     fn network_incoming_acks(delay: Duration) -> impl Stream<Item = Packet, Error = io::Error> {
         let mut acks = DelayQueue::new();
 
@@ -859,6 +861,7 @@ mod test {
         assert_eq!(out, Err(false));
     }
 
+    #[cfg(target_os = "linux")]
     // incoming puback at second 1 and pingresp at periodic intervals
     fn network_incoming_pingresps() -> impl Stream<Item = Packet, Error = io::Error> {
         let mut acks = DelayQueue::new();
@@ -887,6 +890,7 @@ mod test {
         })
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn reply_stream_triggers_pings_on_time() {
         let mqttoptions = MqttOptions::default().set_keep_alive(5);
@@ -923,6 +927,7 @@ mod test {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn throttled_stream_operates_at_specified_rate() {
         let mqttoptions = MqttOptions::default().set_throttle(5);
@@ -955,6 +960,7 @@ mod test {
         let _ = runtime.block_on(f);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn requests_should_block_during_max_in_flight_messages() {
         let mqttoptions = MqttOptions::default().set_inflight(50);
