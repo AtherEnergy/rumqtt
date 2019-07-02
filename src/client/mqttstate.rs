@@ -64,7 +64,6 @@ impl MqttState {
                 let publish = self.handle_outgoing_publish(publish)?;
                 Request::Publish(publish)
             }
-            Packet::Pingreq => self.handle_outgoing_ping()?,
             Packet::Subscribe(subs) => {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Request::Subscribe(subscription)
@@ -284,7 +283,7 @@ impl MqttState {
     // is received and return the status which tells if
     // keep alive time has exceeded
     // NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<Request, NetworkError> {
+    pub fn handle_outgoing_ping(&mut self) -> Result<bool, NetworkError> {
         let keep_alive = self.opts.keep_alive();
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
@@ -296,24 +295,24 @@ impl MqttState {
         }
 
 
-        let packet = if elapsed_in > keep_alive || elapsed_out > keep_alive {
+        let ping = if elapsed_in > keep_alive || elapsed_out > keep_alive {
             self.await_pingresp = true;
-            Request::Ping
+            true
         } else {
-            Request::None
+            false
         };
 
         debug!(
             "Ping = {:?}. keep alive = {},
             last incoming packet before {} millisecs,
             last outgoing packet before {} millisecs",
-            packet, keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
+            ping, keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
 
-        Ok(packet)
+        Ok(ping)
     }
 
     pub fn handle_incoming_pingreq(&mut self) -> Result<(Notification, Request), NetworkError> {
-        Ok((Notification::None, Request::Ping))
+        Ok((Notification::None, Request::IncomingIdlePing))
     }
 
     pub fn handle_incoming_pingresp(&mut self) -> Result<(Notification, Request), NetworkError> {
@@ -642,7 +641,7 @@ mod test {
 
         // should ping
          match  mqtt.handle_outgoing_ping().unwrap() {
-            Request::Ping => (),
+            true => (),
             _ => assert!(false, "expecting ping")
         }
 
@@ -672,7 +671,7 @@ mod test {
 
         // should ping
         match  mqtt.handle_outgoing_ping().unwrap() {
-            Request::Ping => (),
+            true => (),
             _ => assert!(false, "expecting ping")
         }
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
@@ -680,7 +679,7 @@ mod test {
         thread::sleep(Duration::from_secs(10));
         // should ping
          match  mqtt.handle_outgoing_ping().unwrap() {
-            Request::Ping => (),
+            true => (),
             _ => assert!(false, "expecting ping")
         }
     }

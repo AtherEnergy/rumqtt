@@ -220,7 +220,7 @@ impl Connection {
         // receiving 2 acks insteam of 1 ack
         let network_request_stream = self.inflight_limited_request_stream(network_request_stream);
         let network_request_stream = self.throttled_network_stream(network_request_stream);
-        let network_request_stream = self.request_stream(network_request_stream);
+        let network_request_stream = self.user_requests(network_request_stream);
         let network_request_stream = network_request_stream.and_then(move |packet| future::ok(packet.into()));
 
         // check if the network is enabled and create a future
@@ -236,6 +236,8 @@ impl Connection {
 
         match network {
             Ok((network_reply_stream, network_sink, command_stream)) => {
+                // convert rquests to packets
+                let network_reply_stream = network_reply_stream.map(|r| r.into());
                 let network_stream = network_reply_stream.select(network_request_stream);
                 let stream = command_stream.select(network_stream);
                 let f = stream.forward(network_sink).map(|_| ());
@@ -323,7 +325,7 @@ impl Connection {
 
     /// Handles all incoming network packets (including sending notifications to user over crossbeam
     /// channel) and creates a stream of packets to send on network
-    fn network_reply_stream(&self, network_stream: impl Stream<Item = Packet, Error = io::Error>) -> impl PacketStream {
+    fn network_reply_stream(&self, network_stream: impl Stream<Item = Packet, Error = io::Error>) -> impl Stream<Item = Request, Error = NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
         let mqtt_state_ping = self.mqtt_state.clone();
 
@@ -332,8 +334,9 @@ impl Connection {
 
         let network_stream = network_stream.timeout(keep_alive)
             .or_else(move |e| {
+                debug!("Idle network incoming timeout");
                 let mut mqtt_state = mqtt_state_ping.borrow_mut();
-                handle_stream_timeout_error(e, &mut mqtt_state)
+                handle_incoming_stream_timeout_error(e, &mut mqtt_state)
             })
             .and_then(move |packet| {
                 debug!("Incoming packet = {:?}", packet_info(&packet));
@@ -343,18 +346,26 @@ impl Connection {
             .and_then(move |(notification, reply)| {
                 handle_notification_and_reply(&notification_tx, notification, reply)
             })
-            .filter(|reply| should_forward_packet(reply))
-            .and_then(|packet| future::ok(packet.into()));
+            .filter(|reply| should_forward_packet(reply));
 
-        network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)))
-//        let mqtt_state = self.mqtt_state.clone();
-//        Timeout::new(network_reply_stream, keep_alive)
-//            .or_else(move |e| {
-//                let mut mqtt_state = mqtt_state.borrow_mut();
-//                handle_stream_timeout_error(e, &mut mqtt_state)
-//            })
-//            .filter(|reply| should_forward_packet(reply))
-//            .and_then(move |packet| future::ok(packet.into()))
+        let network_reply_stream = network_stream.chain(stream::once(Err(NetworkError::NetworkStreamClosed)));
+        let mqtt_state = self.mqtt_state.clone();
+
+        // when there are no outgoing replies, timeout should check if a ping is
+        // necessary. E.g If there are only qos0 incoming publishes,
+        // incoming network timeout will never trigger the ping. But broker needs a
+        // ping when there are no outgoing packets. This timeout will take care of that
+        // When network is completely idle, incoming network idle ping triggers first
+        // and this timeout doesn't happen
+        // When there are only qos0 incoming publishes, this timeout alone triggers
+        let timeout = keep_alive + Duration::from_millis(500);
+        network_reply_stream.timeout(timeout)
+            .or_else(move |e| {
+                debug!("Idle network reply timeout");
+                let mut mqtt_state = mqtt_state.borrow_mut();
+                handle_outgoing_stream_timeout_error(e, &mut mqtt_state)
+            })
+            .filter(|reply| should_forward_packet(reply))
     }
 
     /// Handles all incoming user and session requests and creates a stream of packets to send
@@ -363,7 +374,7 @@ impl Connection {
     /// to user request stream to ensure that they are handled first. This cleanly handles last
     /// session stray (even if disconnect happens while sending last session data)because we always
     /// get back this stream from reactor after disconnection.
-    fn request_stream(&mut self, request: impl RequestStream) -> impl RequestStream {
+    fn user_requests(&mut self, request: impl RequestStream) -> impl RequestStream {
         // process user requests and convert them to network packets
         let mqtt_state = self.mqtt_state.clone();
         let request_stream = request
@@ -448,13 +459,30 @@ fn handle_notification_and_reply(notification_tx: &Sender<Notification>, notific
 }
 
 /// Checks if a ping is necessary based on timeout error
-fn handle_stream_timeout_error(error: timeout::Error<io::Error>, mqtt_state: &mut MqttState) -> impl Future<Item = Packet, Error = NetworkError> {
+fn handle_incoming_stream_timeout_error(error: timeout::Error<io::Error>, mqtt_state: &mut MqttState) -> impl Future<Item = Packet, Error = NetworkError> {
     // check if a ping to the broker is necessary
-    let out = mqtt_state.handle_outgoing_mqtt_packet(Packet::Pingreq);
+    let out = mqtt_state.handle_outgoing_ping();
     future::err(error).or_else(move |e| {
         if e.is_elapsed() {
             match out {
                 Ok(_) => future::ok(Packet::Pingreq),
+                Err(e) => future::err(e),
+            }
+        } else {
+            future::err(e.into_inner().unwrap().into())
+        }
+    })
+}
+
+/// Checks if a ping is necessary based on timeout error
+fn handle_outgoing_stream_timeout_error(error: timeout::Error<NetworkError>, mqtt_state: &mut MqttState) -> impl Future<Item = Request, Error = NetworkError> {
+    // check if a ping to the broker is necessary
+    let out = mqtt_state.handle_outgoing_ping();
+    future::err(error).or_else(move |e| {
+        if e.is_elapsed() {
+            match out {
+                Ok(true) => future::ok(Request::OutgoingIdlePing),
+                Ok(false) => future::ok(Request::None),
                 Err(e) => future::err(e),
             }
         } else {
@@ -535,7 +563,8 @@ impl From<Request> for Packet {
             Request::PubRec(pkid) => Packet::Pubrec(pkid),
             Request::PubRel(pkid) => Packet::Pubrel(pkid),
             Request::PubComp(pkid) => Packet::Pubcomp(pkid),
-            Request::Ping => Packet::Pingreq,
+            Request::IncomingIdlePing => Packet::Pingreq,
+            Request::OutgoingIdlePing => Packet::Pingreq,
             Request::Disconnect => Packet::Disconnect,
             Request::Subscribe(subscribe) => Packet::Subscribe(subscribe),
             Request::Unsubscribe(unsubscribe) => Packet::Unsubscribe(unsubscribe),
@@ -709,31 +738,6 @@ mod test {
         })
     }
 
-    // incoming puback at second 1 and pingresp at periodic intervals
-    fn network_incoming_pingresps(delay: Duration, count: u32) -> impl Stream<Item = Packet, Error = io::Error> {
-        let mut acks = DelayQueue::new();
-
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtMostOnce,
-            retain: false,
-            pkid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        };
-
-        acks.insert( Packet::Publish(publish), Duration::from_secs(1));
-        for i in 1..=count {
-            acks.insert(Packet::Pingresp, i * delay);
-        }
-
-        acks.map(|v| {
-            v.into_inner()
-        }).map_err(|_e| {
-            io::Error::new(io::ErrorKind::Other, "Timer error")
-        })
-    }
-
     fn network_incoming_acks(delay: Duration) -> impl Stream<Item = Packet, Error = io::Error> {
         let mut acks = DelayQueue::new();
 
@@ -855,13 +859,41 @@ mod test {
         assert_eq!(out, Err(false));
     }
 
+    // incoming puback at second 1 and pingresp at periodic intervals
+    fn network_incoming_pingresps() -> impl Stream<Item = Packet, Error = io::Error> {
+        let mut acks = DelayQueue::new();
+
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            pkid: None,
+            topic_name: "hello/world".to_owned(),
+            payload: Arc::new(vec![1, 2, 3]),
+        };
+
+        acks.insert( Packet::Publish(publish), Duration::from_secs(2));
+        // out idle ping at 5000 + 500 (out ping delay wrt to keep alive)
+        acks.insert(Packet::Pingresp, Duration::from_millis(5510));
+        // in idle ping at 10520
+        acks.insert(Packet::Pingresp, Duration::from_millis(10520));
+        // in idle ping at 15530
+        acks.insert(Packet::Pingresp, Duration::from_millis(15530));
+
+        acks.map(|v| {
+            v.into_inner()
+        }).map_err(|_e| {
+            io::Error::new(io::ErrorKind::Other, "Timer error")
+        })
+    }
+
     #[test]
     fn reply_stream_triggers_pings_on_time() {
         let mqttoptions = MqttOptions::default().set_keep_alive(5);
         let mqtt_state = MqttState::new(mqttoptions.clone());
 
         let (connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
-        let network_reply_stream = network_incoming_pingresps(Duration::from_secs(7), 3);
+        let network_reply_stream = network_incoming_pingresps();
         let network_reply_stream = connection.network_reply_stream(network_reply_stream);
 
         let start = Instant::now();
@@ -870,15 +902,14 @@ mod test {
         // so pingreq should happen at second 6, 12 and 16
         let network_future = network_reply_stream.fold(1, |mut count, packet| {
             let elapsed = start.elapsed().as_millis();
-            // println!("Packet = {:?}, Elapsed = {:?}", packet, elapsed);
-
+            println!("Packet = {:?}, Elapsed = {:?}", packet, elapsed);
             match packet {
-                // publish at 1. 1st pingreq should be at 6
-                Packet::Pingreq if count == 1 =>  assert!(elapsed > 6000 && elapsed < 6200),
-                // ping resp at 7. 2nd pingreq should be at 12
-                Packet::Pingreq if count == 2 =>  assert!(elapsed > 12000 && elapsed < 12200),
-                // ping resp at 14. 3rd pingreq should be at 19
-                Packet::Pingreq if count == 3 =>  assert!(elapsed > 19000 && elapsed < 19200),
+                // incoming publish at 2000. (in idle, out idle) = (7000, 5000 + 500) ---> out idle ping at 5500
+                Request::OutgoingIdlePing if count == 1 =>  assert!(elapsed > 5500 && elapsed < 5700),
+                // ping resp at 5510. (in idle, out idle) = (10510, 5500 + 5500) ---> in idle ping at 10510
+                Request::IncomingIdlePing if count == 2 =>  assert!(elapsed > 10510 && elapsed < 10700),
+                // ping resp at 10520. (in idl, out idle) = (15520, 10510 + 5500) ---> in idle ping at 15520
+                Request::IncomingIdlePing if count == 3 =>  assert!(elapsed > 15520 && elapsed < 15700),
                 _ => panic!("Expecting publish or ping")
             }
 
@@ -894,7 +925,7 @@ mod test {
 
     #[test]
     fn throttled_stream_operates_at_specified_rate() {
-        let mqttoptions = MqttOptions::default().set_throttle(10);
+        let mqttoptions = MqttOptions::default().set_throttle(5);
         let mqtt_state = MqttState::new(mqttoptions.clone());
 
         let (mut connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
@@ -903,7 +934,7 @@ mod test {
         // generates 100 user requests
         let user_request_stream = user_requests(Duration::from_millis(1));
         let user_request_stream = connection.throttled_network_stream(user_request_stream);
-        let user_request_stream = connection.request_stream(user_request_stream);
+        let user_request_stream = connection.user_requests(user_request_stream);
         let user_request_stream = user_request_stream.and_then(move |packet| future::ok(packet.into()));
 
         let f = user_request_stream.fold(Instant::now(), |last, v: Packet| {
@@ -913,7 +944,8 @@ mod test {
             if let Packet::Publish(Publish{pkid, ..}) = v {
                 if pkid.unwrap() > PacketIdentifier(1) {
                     let elapsed = (now - last).as_millis();
-                    assert!(elapsed > 90 && elapsed < 120)
+                    dbg!(elapsed);
+                    assert!(elapsed > 190 && elapsed < 220)
                 }
             }  
             
@@ -934,13 +966,13 @@ mod test {
         // generates 100 user requests
         let user_request_stream = user_requests(Duration::from_millis(1));
         let user_request_stream = connection.inflight_limited_request_stream(user_request_stream);
-        let user_request_stream = connection.request_stream(user_request_stream);
-        let user_request_stream = user_request_stream.and_then(move |packet| future::ok(packet.into()));
+        let user_request_stream = connection.user_requests(user_request_stream);
+        let user_request_stream = user_request_stream.map(|r| r.into());
 
         // generates 100 acks
-        let network_reply_stream = network_incoming_acks(Duration::from_millis(100));
+        let network_reply_stream = network_incoming_acks(Duration::from_millis(200));
         let network_reply_stream = connection.network_reply_stream(network_reply_stream);
-        
+        let network_reply_stream = network_reply_stream.map(|r| r.into());
         let network_stream = network_reply_stream.select(user_request_stream);
         let network_stream = network_stream.fold(Instant::now(), |last, v| {
             // println!("outgoing = {:?}", v);
@@ -949,7 +981,8 @@ mod test {
             if let Packet::Publish(Publish{pkid, ..}) = v {
                 if pkid.unwrap() > PacketIdentifier(51) {
                     let elapsed = (now - last).as_millis();
-                    assert!(elapsed > 90 && elapsed < 120)
+                    dbg!(elapsed);
+                    assert!(elapsed > 190 && elapsed < 220)
                 }
             }
             
@@ -967,7 +1000,7 @@ mod test {
         let network_reply_stream = network_incoming_publishes(Duration::from_millis(100), 11);
         let network_reply_stream = connection.network_reply_stream(network_reply_stream);
 
-        let network_future = network_reply_stream.for_each(|v| {
+        let network_future = network_reply_stream.for_each(|_v| {
             // println!("Incoming = {:?}", v);
             future::ok(())
         });
