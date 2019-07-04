@@ -157,7 +157,7 @@ impl MqttState {
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        // debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
+        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
         Ok(publish)
     }
 
@@ -324,7 +324,7 @@ impl MqttState {
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
 
-        info!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);   
+        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
         Ok(subscription)
     }
 
