@@ -9,7 +9,7 @@ fn main() {
     let client_cert = include_bytes!("tlsfiles/bike1.cert.pem").to_vec();
     let client_key = include_bytes!("tlsfiles/bike1.key.pem").to_vec();
 
-    let connection_method = ConnectionMethod::Tls(ca, Some((client_cert, client_key)));
+    let connection_method = ConnectionMethod::Tls { ca, cert_and_key: Some((client_cert, client_key)), alpn: vec![] };
 
     let mqtt_options = MqttOptions::new(client_id, "localhost", 8883)
         .set_keep_alive(10)

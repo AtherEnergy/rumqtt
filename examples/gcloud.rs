@@ -34,7 +34,7 @@ fn main() -> Result<(), io::Error> {
 
     let mut ca = vec!();
     File::open(Path::new("../../certs/roots.pem")).and_then(|mut f| f.read_to_end(&mut ca))?;
-    let connection_method = ConnectionMethod::Tls(ca, None);
+    let connection_method = ConnectionMethod::Tls { ca, cert_and_key: None, alpn: vec![] };
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
         .set_keep_alive(10)

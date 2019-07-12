@@ -34,8 +34,15 @@ pub enum SecurityOptions {
 pub enum ConnectionMethod {
     /// Plain text connection
     Tcp,
-    /// Encrypted connection. (ca data, optional client cert and key data)
-    Tls(Vec<u8>, Option<(Vec<u8>, Vec<u8>)>),
+    /// Encrypted connection.
+    Tls {
+        /// ca data
+        ca: Vec<u8>,
+        /// optional client cert and key data
+        cert_and_key: Option<(Vec<u8>, Vec<u8>)>,
+        /// ALPN extension protocols
+        alpn: Vec<Vec<u8>>,
+    },
 }
 
 /// Mqtt through http proxy
