@@ -2,16 +2,16 @@
 name = "rumqtt"
 description = "Mqtt client for your IOT needs"
 version = "0.31.0"
-authors = ["raviteja <mail@raviteja.tech"]
+authors = ["raviteja <kraviteza@gmail.com"]
 documentation = "https://docs.rs/rumqtt"
 repository = "https://github.com/AtherEnergy/rumqtt"
 edition = "2018"
 license = "Unlicense"
 
 [dependencies]
-tokio = { version = "^0.1.21", features = [ "codec", "io", "rt-full", "tcp", "timer" ], default-features = false }
+tokio = { version = "0.1.21", features = [ "codec", "io", "rt-full", "tcp", "timer" ], default-features = false }
 bytes = "0.4"
-futures = "0.1"
+futures = "0.1.28"
 crossbeam-channel = "0.3"
 log = "0.4"
 failure = "0.1"
@@ -19,22 +19,9 @@ derive_more = "0.13"
 base64 = "0.10"
 uuid = {version = "0.7", features = ["serde", "v4"]}
 mqtt311 = "0.2"
+tokio-rustls = ">=0.8, <=0.9"
+webpki = ">=0.8, <=0.19"
 
-[dependencies.native-tls]
-version = "0.2"
-optional = true
-
-[dependencies.tokio-tls]
-version = "0.2"
-optional = true
-
-[dependencies.tokio-rustls]
-version = ">=0.8, <=0.9"
-optional = true
-
-[dependencies.webpki]
-version = ">=0.18, <=0.19"
-optional = true
 
 [dependencies.jsonwebtoken]
 version = ">=5.0.1, <=6.0"
@@ -59,8 +46,6 @@ serde_derive = "1"
 pretty_env_logger = "0.3"
 
 [features]
-default = ["rustls", "jwt"]
+default = ["jwt"]
 acknotify = []
-rustls = ["tokio-rustls", "webpki"]
 jwt = ["jsonwebtoken", "chrono", "serde", "serde_derive"]
-nativetls = ["native-tls", "tokio-tls"]

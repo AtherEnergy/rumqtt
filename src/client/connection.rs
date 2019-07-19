@@ -212,7 +212,10 @@ impl Connection {
     /// Applies throttling and inflight limiting based on user configuration and returns
     /// a statful mqtt event loop future to be run on the reactor. The returned future also
     /// conditionally enable/disables network functionality based on the current `framed` state
-    fn mqtt_future(&mut self, command_stream: impl PacketStream, network_request_stream: impl RequestStream, framed: Option<Framed<NetworkStream, MqttCodec>>) -> impl Future<Item = (), Error = NetworkError> {
+    fn mqtt_future(&mut self,
+                    command_stream: impl Stream<Item = Packet, Error = NetworkError>,
+                    network_request_stream: impl Stream<Item = Request, Error = NetworkError>,
+                    framed: Option<Framed<NetworkStream, MqttCodec>>) -> impl Future<Item = (), Error = NetworkError> {
         // convert a request stream to request packet stream after filtering
         // unnecessary requests and apply inflight limiting and rate limiting
         // note: make sure that the order remains (inflight, rate, request handling)
@@ -380,7 +383,7 @@ impl Connection {
     /// to user request stream to ensure that they are handled first. This cleanly handles last
     /// session stray (even if disconnect happens while sending last session data)because we always
     /// get back this stream from reactor after disconnection.
-    fn user_requests(&mut self, request: impl RequestStream) -> impl RequestStream {
+    fn user_requests(&mut self, request: impl Stream<Item = Request, Error = NetworkError>) -> impl Stream<Item = Request, Error = NetworkError> {
         // process user requests and convert them to network packets
         let mqtt_state = self.mqtt_state.clone();
         let request_stream = request
@@ -403,7 +406,7 @@ impl Connection {
 
     // Apply outgoing queue limit (in flights) by answering stream poll with not ready if queue is full
     // by returning NotReady.
-    fn inflight_limited_request_stream(&self, requests: impl RequestStream) -> impl RequestStream {
+    fn inflight_limited_request_stream(&self, requests: impl Stream<Item = Request, Error = NetworkError>) -> impl Stream<Item = Request, Error = NetworkError> {
         let mqtt_state = self.mqtt_state.clone();
         let in_flight = self.mqttoptions.inflight();
         let mut stream = requests.peekable();
@@ -427,18 +430,18 @@ impl Connection {
     }
 
     /// Apply throttling if configured
-    fn throttled_network_stream(&mut self, requests: impl RequestStream) -> impl RequestStream {
+    fn throttled_network_stream(&mut self, requests: impl Stream<Item = Request, Error = NetworkError>) -> impl Stream<Item = Request, Error = NetworkError> {
         if let Some(rate) = self.mqttoptions.throttle() {
             let duration = Duration::from_nanos(1_000_000_000 / rate);
             let throttled = requests.throttle(duration).map_err(|_| NetworkError::Throttle);
-            EitherStream::A(throttled)
+            Either::A(throttled)
         } else {
-            EitherStream::B(requests)
+            Either::B(requests)
         }
     }
 
     /// Convert commands to errors
-    fn command_stream<'a>(&mut self, commands: &'a mut mpsc::Receiver<Command>) -> impl PacketStream + 'a {
+    fn command_stream<'a>(&mut self, commands: &'a mut mpsc::Receiver<Command>) -> impl Stream<Item = Packet, Error = NetworkError> + 'a {
         // process user commands and raise appropriate error to the event loop
         commands
             .or_else(|_err| Err(NetworkError::Blah))
@@ -497,7 +500,7 @@ fn handle_outgoing_stream_timeout_error(error: timeout::Error<NetworkError>, mqt
     })
 }
 
-fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> impl PacketFuture {
+fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> impl Future<Item = Packet, Error = NetworkError> {
     match userrequest {
         Request::Reconnect(mqttoptions) => {
             mqtt_state.opts = mqttoptions;
@@ -582,49 +585,6 @@ impl From<Request> for Packet {
 
 type MqttFramed = Framed<NetworkStream, MqttCodec>;
 
-trait PacketStream: Stream<Item = Packet, Error = NetworkError> {}
-impl<T> PacketStream for T where T: Stream<Item = Packet, Error = NetworkError> {}
-
-trait PacketSink: Sink<SinkItem = Packet, SinkError = NetworkError> {}
-impl<T> PacketSink for T where T: Sink<SinkItem = Packet, SinkError = NetworkError> {}
-
-trait CommandStream: Stream<Item = Command, Error = NetworkError> {}
-impl<T> CommandStream for T where T: Stream<Item = Command, Error = NetworkError> {}
-
-trait RequestStream: Stream<Item = Request, Error = NetworkError> {}
-impl<T> RequestStream for T where T: Stream<Item = Request, Error = NetworkError> {}
-
-trait PacketFuture: Future<Item = Packet, Error = NetworkError> {}
-impl<T> PacketFuture for T where T: Future<Item = Packet, Error = NetworkError> {}
-
-trait RequestFuture: Future<Item = Request, Error = NetworkError> {}
-impl<T> RequestFuture for T where T: Future<Item = Request, Error = NetworkError> {}
-
-// TODO: Remove if impl Either for Stream is backported to futures 0.1
-// See https://github.com/rust-lang-nursery/futures-rs/issues/614
-#[derive(Debug)]
-pub enum EitherStream<A, B> {
-    /// First branch of the type
-    A(A),
-    /// Second branch of the type
-    B(B),
-}
-
-impl<A, B> Stream for EitherStream<A, B>
-where
-    A: Stream,
-    B: Stream<Item = A::Item, Error = A::Error>,
-{
-    type Item = A::Item;
-    type Error = A::Error;
-
-    fn poll(&mut self) -> Poll<Option<A::Item>, A::Error> {
-        match *self {
-            EitherStream::A(ref mut a) => a.poll(),
-            EitherStream::B(ref mut b) => b.poll(),
-        }
-    }
-}
 
 use futures::{AsyncSink, StartSend};
 
@@ -1057,7 +1017,7 @@ mod test {
 
 
 // fn print_last_session_state(
-//     prepend: &mut Prepend<impl RequestStream>,
+//     prepend: &mut Prepend<impl Stream<Item = Request, Error = NetworkError>>,
 //     state: &MqttState) {
 //         let last_session_data = prepend.session.iter().map(|request| {
 //             match request {

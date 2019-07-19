@@ -6,7 +6,6 @@ use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-#[cfg(feature = "rustls")]
 pub mod stream {
 use crate::client::network::{generate_httpproxy_auth, resolve};
     use crate::codec::MqttCodec;
@@ -231,18 +230,6 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
     }
 }
 
-#[cfg(feature = "nativetls")]
-mod stream {
-    use tokio::net::TcpStream;
-    use tokio_tls::TlsStream;
-
-    pub enum NetworkStream {
-        Tcp(TcpStream),
-        Tls(TlsStream<TcpStream>),
-    }
-
-    impl NetworkStream {}
-}
 
 fn resolve(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
     use std::net::ToSocketAddrs;
