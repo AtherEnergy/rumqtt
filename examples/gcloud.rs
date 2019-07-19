@@ -1,4 +1,4 @@
-use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS, SecurityOptions};
+use rumqtt::{MqttClient, MqttOptions, QoS, SecurityOptions};
 use serde_derive::Deserialize;
 use std::fs::File;
 use std::io::{self, Read};
@@ -34,11 +34,10 @@ fn main() -> Result<(), io::Error> {
 
     let mut ca = vec!();
     File::open(Path::new("../../certs/roots.pem")).and_then(|mut f| f.read_to_end(&mut ca))?;
-    let connection_method = ConnectionMethod::Tls { ca, cert_and_key: None, alpn: vec![] };
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
+        .set_ca(ca)
         .set_keep_alive(10)
-        .set_connection_method(connection_method)
         .set_security_opts(security_options);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();

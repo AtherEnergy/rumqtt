@@ -120,7 +120,7 @@ pub mod error;
 pub mod mqttoptions;
 
 pub use crate::client::{MqttClient, Notification};
-pub use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
+pub use crate::mqttoptions::{MqttOptions, Proxy, ReconnectOptions, SecurityOptions};
 pub use crate::error::{ConnectError, ClientError};
 pub use crossbeam_channel::Receiver;
 #[doc(hidden)]

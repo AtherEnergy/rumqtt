@@ -30,21 +30,6 @@ pub enum SecurityOptions {
     GcloudIot(String, Vec<u8>, i64),
 }
 
-#[derive(Clone, Debug)]
-pub enum ConnectionMethod {
-    /// Plain text connection
-    Tcp,
-    /// Encrypted connection.
-    Tls {
-        /// ca data
-        ca: Vec<u8>,
-        /// optional client cert and key data
-        cert_and_key: Option<(Vec<u8>, Vec<u8>)>,
-        /// ALPN extension protocols
-        alpn: Vec<Vec<u8>>,
-    },
-}
-
 /// Mqtt through http proxy
 #[derive(Clone, Debug)]
 pub enum Proxy {
@@ -68,7 +53,9 @@ pub struct MqttOptions {
     /// client identifier
     client_id: String,
     /// connection method
-    connection_method: ConnectionMethod,
+    ca: Option<Vec<u8>>,
+    client_auth: Option<(Vec<u8>, Vec<u8>)>,
+    alpn: Option<Vec<Vec<u8>>>,
     /// proxy
     proxy: Proxy,
     /// reconnection options
@@ -97,7 +84,9 @@ impl Default for MqttOptions {
             keep_alive: Duration::from_secs(30),
             clean_session: true,
             client_id: "test-client".into(),
-            connection_method: ConnectionMethod::Tcp,
+            ca: None,
+            client_auth: None,
+            alpn: None,
             proxy: Proxy::None,
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
@@ -126,7 +115,9 @@ impl MqttOptions {
             keep_alive: Duration::from_secs(60),
             clean_session: true,
             client_id: id,
-            connection_method: ConnectionMethod::Tcp,
+            ca: None,
+            client_auth: None,
+            alpn: None,
             proxy: Proxy::None,
             reconnect: ReconnectOptions::AfterFirstSuccess(10),
             security: SecurityOptions::None,
@@ -142,6 +133,33 @@ impl MqttOptions {
     /// Broker address
     pub fn broker_address(&self) -> (String, u16) {
         (self.broker_addr.clone(), self.port)
+    }
+
+    pub fn set_ca(mut self, ca: Vec<u8>) -> Self {
+        self.ca = Some(ca);
+        self
+    }
+
+    pub fn ca(&self) -> Option<Vec<u8>> {
+        self.ca.clone()
+    }
+
+    pub fn set_client_auth(mut self, cert: Vec<u8>, key: Vec<u8>) -> Self {
+        self.client_auth = Some((cert, key));
+        self
+    }
+
+    pub fn client_auth(&self) -> Option<(Vec<u8>, Vec<u8>)> {
+        self.client_auth.clone()
+    }
+
+    pub fn set_alpn(mut self, alpn: Vec<Vec<u8>>) -> Self {
+        self.alpn = Some(alpn);
+        self
+    }
+
+    pub fn alpn(&self) -> Option<Vec<Vec<u8>>> {
+        self.alpn.clone()
     }
 
     /// Set number of seconds after which client should ping the broker
@@ -190,16 +208,6 @@ impl MqttOptions {
     /// Clean session
     pub fn clean_session(&self) -> bool {
         self.clean_session
-    }
-
-    /// Set how to connect to a MQTT Broker (either TCP or Tls)
-    pub fn set_connection_method(mut self, opts: ConnectionMethod) -> Self {
-        self.connection_method = opts;
-        self
-    }
-
-    pub fn connection_method(&self) -> ConnectionMethod {
-        self.connection_method.clone()
     }
 
     pub fn set_proxy(mut self, proxy: Proxy) -> Self {

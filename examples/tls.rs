@@ -1,4 +1,4 @@
-use rumqtt::{ConnectionMethod, MqttClient, MqttOptions, QoS};
+use rumqtt::{MqttClient, MqttOptions, QoS};
 use std::{thread, time::Duration};
 
 fn main() {
@@ -9,11 +9,11 @@ fn main() {
     let client_cert = include_bytes!("tlsfiles/bike1.cert.pem").to_vec();
     let client_key = include_bytes!("tlsfiles/bike1.key.pem").to_vec();
 
-    let connection_method = ConnectionMethod::Tls { ca, cert_and_key: Some((client_cert, client_key)), alpn: vec![] };
 
     let mqtt_options = MqttOptions::new(client_id, "localhost", 8883)
-        .set_keep_alive(10)
-        .set_connection_method(connection_method);
+        .set_ca(ca)
+        .set_client_auth(client_cert, client_key)
+        .set_keep_alive(10);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     let topic = "hello/world";

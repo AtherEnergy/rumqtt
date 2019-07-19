@@ -19,7 +19,7 @@ The same is true for slow networks. The channel buffer will nicely smoothen late
 
 #### Throttling
 
-A lot of SAAS brokers will allow messages only at a certain rate. Any spikes and the broker might disconnect the client. Throttling limit will make sure that this doesn't happen. This is true even for retransmission of internal unacked messages during reconnections.
+A lot of managed brokers will allow messages only at a certain rate. Any spikes and the broker might disconnect the client. Throttling limit will make sure that this doesn't happen. This is true even for retransmission of internal unacked messages during reconnections.
 
 #### Automatic reconnections
 

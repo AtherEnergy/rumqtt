@@ -6,7 +6,7 @@ use crate::client::{
 };
 use crate::codec::MqttCodec;
 use crate::error::{ConnectError, NetworkError};
-use crate::mqttoptions::{ConnectionMethod, MqttOptions, Proxy, ReconnectOptions};
+use crate::mqttoptions::{MqttOptions, Proxy, ReconnectOptions};
 use crossbeam_channel::{self, Sender};
 use futures::{
     future::{self, Either},
@@ -285,22 +285,25 @@ impl Connection {
     /// broker
     fn tcp_connect_future(&self) -> impl Future<Item = MqttFramed, Error = ConnectError> {
         let (host, port) = self.mqttoptions.broker_address();
-        let connection_method = self.mqttoptions.connection_method();
         let proxy = self.mqttoptions.proxy();
 
         let builder = NetworkStream::builder();
 
-        let builder = match connection_method {
-            ConnectionMethod::Tls { ca, cert_and_key, alpn } => {
-                let builder = builder.add_certificate_authority(&ca).add_alpn_protocols(&alpn);
-                if let Some((ref cert, ref key)) = cert_and_key {
-                    builder.add_client_auth(cert, key)
-                } else {
-                    builder
-                }
-            },
-            ConnectionMethod::Tcp => builder,
+        let builder = if let Some(ca) = self.mqttoptions.ca() {
+            let mut builder = builder.add_certificate_authority(&ca);
+            if let Some(alpn) = self.mqttoptions.alpn() {
+                builder = builder.add_alpn_protocols(&alpn);
+            }
+
+            if let Some((cert, key)) = self.mqttoptions.client_auth() {
+                builder = builder.add_client_auth(&cert, &key);
+            }
+
+            builder
+        } else {
+            builder
         };
+
 
         let builder = match proxy {
             Proxy::None => builder,
