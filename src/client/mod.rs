@@ -1,4 +1,5 @@
 //! Structs to interact with mqtt eventloop
+pub use crate::client::mqttstate::MqttState;
 use crate::error::{ClientError, ConnectError};
 use crate::MqttOptions;
 use crossbeam_channel;
@@ -59,6 +60,7 @@ pub enum Request {
 pub enum Command {
     Pause,
     Resume,
+    Shutdown
 }
 
 #[doc(hidden)]
@@ -66,6 +68,7 @@ pub enum Command {
 pub struct UserHandle {
     request_tx: mpsc::Sender<Request>,
     command_tx: mpsc::Sender<Command>,
+    shutdown_rx: crossbeam_channel::Receiver<MqttState>,
     notification_rx: crossbeam_channel::Receiver<Notification>,
 }
 
@@ -74,6 +77,7 @@ pub struct UserHandle {
 pub struct MqttClient {
     request_tx: mpsc::Sender<Request>,
     command_tx: mpsc::Sender<Command>,
+    shutdown_rx: crossbeam_channel::Receiver<MqttState>,
     max_packet_size: usize,
 }
 
@@ -84,17 +88,19 @@ impl MqttClient {
     ///
     /// See `select.rs` example
     /// [mqttclient]: struct.MqttClient.html
-    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub fn start(opts: MqttOptions, state: Option<MqttState>) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
         let max_packet_size = opts.max_packet_size();
         let UserHandle {
             request_tx,
             command_tx,
             notification_rx,
-        } = connection::Connection::run(opts)?;
+            shutdown_rx,
+        } = connection::Connection::run(opts, state)?;
 
         let client = MqttClient {
             request_tx,
             command_tx,
+            shutdown_rx,
             max_packet_size,
         };
 
@@ -182,10 +188,20 @@ impl MqttClient {
 
     /// Commands the network eventloop to gracefully shutdown
     /// the connection to the broker.
-    pub fn shutdown(&mut self) -> Result<(), ClientError> {
+    pub fn disconnect(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.request_tx;
         tx.send(Request::Disconnect).wait()?;
         Ok(())
+    }
+
+    /// Commands the network eventloop to gracefully shutdown
+    /// the connection to the broker.
+    pub fn shutdown(&mut self) -> Result<MqttState, ClientError> {
+        let tx = &mut self.command_tx;
+        tx.send(Command::Shutdown).wait()?;
+        let state = self.shutdown_rx.recv()?;
+        
+        Ok(state)
     }
 }
 

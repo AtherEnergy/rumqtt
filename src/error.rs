@@ -21,8 +21,10 @@ pub enum ClientError {
     EmptyClientId,
     #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
     MpscRequestSend(SendError<Request>),
-    #[fail(display = "Failed sending request to connection thread. Error = {}", _0)]
+    #[fail(display = "Failed sending command to connection thread. Error = {}", _0)]
     MpscCommandSend(SendError<Command>),
+    #[fail(display = "Failed receiving shutdown from connection thread. Error = {}", _0)]
+    ShutdownRecv(crossbeam_channel::RecvError),
 }
 
 #[derive(Debug, Fail, From)]
@@ -77,9 +79,11 @@ pub enum NetworkError {
     #[fail(display = "Tokio timer error = {}", _0)]
     TimeOut(timeout::Error<IoError>),
     #[fail(display = "User requested for reconnect")]
-    UserReconnect,
+    Resume,
     #[fail(display = "User requested for disconnect")]
-    UserDisconnect,
+    Pause,
+    #[fail(display = "User requested for shutdown")]
+    Shutdown,
     #[fail(display = "Network stream closed")]
     NetworkStreamClosed,
     #[fail(display = "Throttle error while rate limiting")]

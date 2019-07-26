@@ -3,9 +3,9 @@ use std::{thread, time::Duration};
 
 fn main() {
     pretty_env_logger::init();
-    let mqtt_options = MqttOptions::new("test-id", "127.0.0.1", 1883).set_keep_alive(10);
+    let mqtt_options = MqttOptions::new("test-id", "127.0.0.1", 1883).set_keep_alive(5);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options, None).unwrap();
 
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 
@@ -23,9 +23,9 @@ fn main() {
     });
 
     thread::spawn(move || {
-        let dur = Duration::new(5, 0);
+        let dur = Duration::new(10, 0);
 
-        for i in 0..100 {
+        for i in 1..10 {
             if i % 2 == 0 {
                 c2.pause().unwrap();
             } else {
