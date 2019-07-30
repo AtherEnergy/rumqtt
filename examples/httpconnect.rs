@@ -28,7 +28,7 @@ fn main() {
         .set_reconnect_opts(reconnect_options)
         .set_proxy(proxy);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options, None).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 

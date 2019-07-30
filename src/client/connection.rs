@@ -47,7 +47,7 @@ pub struct Connection {
 impl Connection {
     /// Takes mqtt options and tries to create initial connection on current thread and handles
     /// connection events in a new thread if the initial connection is successful
-    pub fn run(mqttoptions: MqttOptions, mqtt_state: Option<MqttState>) -> Result<UserHandle, ConnectError> {
+    pub fn run(mqttoptions: MqttOptions) -> Result<UserHandle, ConnectError> {
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(mqttoptions.notification_channel_capacity());
         let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded(1);
         let (request_tx, request_rx) = mpsc::channel::<Request>(mqttoptions.request_channel_capacity());
@@ -58,11 +58,8 @@ impl Connection {
 
         // start the network thread to handle all mqtt network io
         thread::spawn(move || {
-            let mqtt_state = if let Some(mqtt_state) = mqtt_state {
-                Rc::new(RefCell::new(mqtt_state))
-            } else {
-                Rc::new(RefCell::new(MqttState::new(mqttoptions.clone()))) 
-            };
+
+            let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone()))); 
 
             let mut connection = Connection {
                 mqtt_state,
@@ -788,21 +785,21 @@ mod test {
         let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
 
         // error in `never connect` case
-        let o = Connection::run(mqttoptions, None);
+        let o = Connection::run(mqttoptions);
         assert!(o.is_err());
 
         let reconnect_opt = ReconnectOptions::AfterFirstSuccess(10);
         let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
 
         // error in `after first success` case
-        let o = Connection::run(mqttoptions, None);
+        let o = Connection::run(mqttoptions);
         assert!(o.is_err());
 
         // no error in `always` case
         let reconnect_opt = ReconnectOptions::Always(10);
         let mqttoptions = MqttOptions::new("mqtt-io-test", "localhost", 1883).set_reconnect_opts(reconnect_opt);
 
-        let o = Connection::run(mqttoptions, None);
+        let o = Connection::run(mqttoptions);
         assert!(o.is_ok());
     }
 

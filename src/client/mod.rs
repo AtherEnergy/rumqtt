@@ -88,14 +88,14 @@ impl MqttClient {
     ///
     /// See `select.rs` example
     /// [mqttclient]: struct.MqttClient.html
-    pub fn start(opts: MqttOptions, state: Option<MqttState>) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
         let max_packet_size = opts.max_packet_size();
         let UserHandle {
             request_tx,
             command_tx,
             notification_rx,
             shutdown_rx,
-        } = connection::Connection::run(opts, state)?;
+        } = connection::Connection::run(opts)?;
 
         let client = MqttClient {
             request_tx,

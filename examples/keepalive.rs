@@ -9,7 +9,7 @@ fn main() {
         .set_keep_alive(10)
         .set_reconnect_opts(reconnect_options);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options, None).unwrap();
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(2));
 
