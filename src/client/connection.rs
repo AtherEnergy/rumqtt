@@ -289,8 +289,8 @@ impl Connection {
 
     /// Sends connection status on blocked connections status call in `run`
     fn handle_connection_success(&mut self) {
-        if self.connection_count == 0 {
-            let connection_tx = self.connection_tx.take().unwrap();
+        // send connection success notification only the first time
+        if let Some(connection_tx) = self.connection_tx.take() {
             connection_tx.try_send(Ok(())).unwrap();
         } else {
             let _ = self.notification_tx.try_send(Notification::Reconnection);
@@ -307,8 +307,8 @@ impl Connection {
             None => Err(ConnectError::Timeout),
         };
 
-        if self.connection_count == 0 {
-            let connection_tx = self.connection_tx.take().unwrap();
+        // send connection error notification only the first time
+        if let Some(connection_tx) = self.connection_tx.take() {
             connection_tx.try_send(error).unwrap();
         }
     }
