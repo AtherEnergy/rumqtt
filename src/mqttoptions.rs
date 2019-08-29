@@ -52,6 +52,8 @@ pub struct MqttOptions {
     clean_session: bool,
     /// client identifier
     client_id: String,
+    /// tcp connection timeout
+    connection_timeout: Duration,
     /// connection method
     ca: Option<Vec<u8>>,
     client_auth: Option<(Vec<u8>, Vec<u8>)>,
@@ -84,6 +86,7 @@ impl Default for MqttOptions {
             keep_alive: Duration::from_secs(30),
             clean_session: true,
             client_id: "test-client".into(),
+            connection_timeout: Duration::from_secs(10),
             ca: None,
             client_auth: None,
             alpn: None,
@@ -114,6 +117,7 @@ impl MqttOptions {
             port,
             keep_alive: Duration::from_secs(60),
             clean_session: true,
+            connection_timeout: Duration::from_secs(10),
             client_id: id,
             ca: None,
             client_auth: None,
@@ -151,6 +155,15 @@ impl MqttOptions {
 
     pub fn client_auth(&self) -> Option<(Vec<u8>, Vec<u8>)> {
         self.client_auth.clone()
+    }
+
+    pub fn set_connection_timeout(mut self, secs: u16) -> Self {
+        self.connection_timeout =  Duration::from_secs(u64::from(secs));
+        self
+    }
+
+    pub fn connection_timeout(&self) -> Duration {
+        self.connection_timeout
     }
 
     pub fn set_alpn(mut self, alpn: Vec<Vec<u8>>) -> Self {

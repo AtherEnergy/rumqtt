@@ -10,6 +10,8 @@ fn main() {
     let reconnection_options = ReconnectOptions::Always(10);
     let mqtt_options = MqttOptions::new("test-pubsub2", broker, port)
                                     .set_keep_alive(10)
+                                    .set_inflight(3)
+                                    .set_request_channel_capacity(3)
                                     .set_reconnect_opts(reconnection_options)
                                     .set_clean_session(false);
 
@@ -19,7 +21,7 @@ fn main() {
     thread::spawn(move || {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(1000));
             mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
         }
     });

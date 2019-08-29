@@ -115,8 +115,7 @@ impl Connection {
     /// the connection when `is_network_enabled` flag is set true
     fn connect_or_not(&mut self, mqtt_connect_future: impl Future<Item = MqttFramed, Error = ConnectError>) -> Result<(Runtime, Option<MqttFramed>), bool> {
         let mut rt = Runtime::new().unwrap();
-        let timeout = Duration::from_secs(30);
-        let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, timeout);
+        let mqtt_connect_deadline = Timeout::new(mqtt_connect_future, self.mqttoptions.connection_timeout());
 
         if !self.is_network_enabled {
             return Ok((rt, None));
