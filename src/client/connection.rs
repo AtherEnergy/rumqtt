@@ -898,7 +898,7 @@ mod test {
     #[cfg(target_os = "linux")]
     #[test]
     fn throttled_stream_operates_at_specified_rate() {
-        let mqttoptions = MqttOptions::default().set_throttle(5);
+        let mqttoptions = MqttOptions::default().set_throttle(5.0);
         let mqtt_state = MqttState::new(mqttoptions.clone());
 
         let (mut connection, _userhandle, mut runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
