@@ -73,7 +73,7 @@ pub struct MqttOptions {
     /// notification channel capacity
     notification_channel_capacity: usize,
     /// maximum number of outgoing messages per second
-    throttle: Option<u64>,
+    throttle: Option<f32>,
     /// maximum number of outgoing inflight messages
     inflight: usize,
 }
@@ -290,9 +290,9 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_throttle(mut self, rate: u64) -> Self {
-        if rate == 0 {
-            panic!("zero rate is not allowed");
+    pub fn set_throttle(mut self, rate: f32) -> Self {
+        if rate <= 0.0 {
+            panic!("throttle rate should be a positive number.");
         }
 
         self.throttle = Some(rate);
@@ -300,7 +300,7 @@ impl MqttOptions {
     }
 
     /// Outgoing message rate
-    pub fn throttle(&self) -> Option<u64> {
+    pub fn throttle(&self) -> Option<f32> {
         self.throttle
     }
 
