@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod stream {
-use crate::client::network::{generate_httpproxy_auth, resolve};
+    use crate::client::network::{generate_httpproxy_auth, resolve};
     use crate::codec::MqttCodec;
     use crate::error::ConnectError;
     use futures::{
@@ -213,7 +213,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
             match tls_connector {
                 Ok(tls_connector) => {
                     let domain = DNSNameRef::try_from_ascii_str(&host).unwrap().to_owned();
-                    Either::A(
+                    Either::A(Either::A(
                         stream
                             .and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
                             .map_err(ConnectError::from)
@@ -221,17 +221,20 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
                                 let stream = NetworkStream::Tls(stream);
                                 future::ok(MqttCodec.framed(stream))
                             }),
-                    )
+                    ))
                 }
-                Err(ConnectError::NoCertificateAuthority) => Either::B(
-                    stream
-                        .and_then(|stream| {
-                            let stream = NetworkStream::Tcp(stream);
-                            future::ok(MqttCodec.framed(stream))
-                        })
-                        .map_err(ConnectError::from),
-                ),
-                _ => unimplemented!(),
+                Err(ConnectError::NoCertificateAuthority) =>
+                    Either::A(Either::B(
+                        stream
+                            .and_then(|stream| {
+                                let stream = NetworkStream::Tcp(stream);
+                                future::ok(MqttCodec.framed(stream))
+                            })
+                            .map_err(ConnectError::from),
+                    )),
+                Err(e) => {
+                    Either::B(future::err(e))
+                }
             }
         }
     }
