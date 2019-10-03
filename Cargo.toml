@@ -1,7 +1,7 @@
 [package]
 name = "rumqtt"
 description = "Mqtt client for your IOT needs"
-version = "0.31.0"
+version = "0.32.0"
 authors = ["raviteja <kraviteza@gmail.com"]
 documentation = "https://docs.rs/rumqtt"
 repository = "https://github.com/AtherEnergy/rumqtt"
