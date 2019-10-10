@@ -2,14 +2,20 @@ use std::io::{self, Read, Write};
 
 use crate::client::network::stream::NetworkStream;
 use futures::Poll;
+
+#[cfg(feature = "jwt")]
 use serde_derive::{Deserialize, Serialize};
+
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod stream {
-use crate::client::network::{generate_httpproxy_auth, resolve};
-    use crate::codec::MqttCodec;
-    use crate::error::ConnectError;
+
+    #[cfg(feature = "jwt")]
+    use crate::client::network::generate_httpproxy_auth;
+
+    use crate::{client::network::resolve, codec::MqttCodec, error::ConnectError};
+
     use futures::{
         future::{self, Either},
         sink::Sink,
@@ -17,16 +23,17 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         Future,
     };
     use std::{
-        io::{
-            self, {BufReader, Cursor},
-        },
+        io::{self, BufReader, Cursor},
         sync::Arc,
     };
-    use tokio::net::TcpStream;
-    use tokio::codec::{Decoder, Framed, LinesCodec};
+    use tokio::{
+        codec::{Decoder, Framed, LinesCodec},
+        net::TcpStream,
+    };
     use tokio_rustls::{
         rustls::{internal::pemfile, ClientConfig, ClientSession},
-        TlsConnector, TlsStream,
+        TlsConnector,
+        TlsStream,
     };
     use webpki::DNSNameRef;
 
@@ -54,7 +61,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         proxy_host: String,
         proxy_port: u16,
         key: Vec<u8>,
-        expiry: i64
+        expiry: i64,
     }
 
     pub struct NetworkStreamBuilder {
@@ -96,7 +103,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
                 proxy_host: proxy_host.to_owned(),
                 proxy_port: proxy_port,
                 key: key.to_owned(),
-                expiry
+                expiry,
             });
 
             self
@@ -133,6 +140,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         }
 
         #[allow(clippy::too_many_arguments)]
+        #[cfg(feature = "jwt")]
         pub fn http_connect(
             &self,
             id: &str,
@@ -179,9 +187,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
             let addr = resolve(host, port);
             let addr = future::result(addr);
 
-            addr.and_then(|addr| {
-                TcpStream::connect(&addr)
-            })
+            addr.and_then(|addr| TcpStream::connect(&addr))
         }
 
         pub fn connect(
@@ -193,9 +199,24 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
             let host_tcp = host.to_owned();
             let http_proxy = self.http_proxy.clone();
             let stream = match http_proxy {
-                Some(HttpProxy{id, proxy_host, proxy_port, key, expiry}) => {
-                    let s = self.http_connect(&id, &proxy_host, proxy_port, &host_tcp, port, &key, expiry);
-                    Either::A(s)
+                Some(HttpProxy {
+                    id,
+                    proxy_host,
+                    proxy_port,
+                    key,
+                    expiry,
+                }) => {
+                    // http connect requires jwt
+                    #[cfg(feature = "jwt")]
+                    {
+                        let s = self.http_connect(&id, &proxy_host, proxy_port, &host_tcp, port, &key, expiry);
+                        Either::A(s)
+                    }
+                    #[cfg(not(feature = "jwt"))]
+                    {
+                        let s = self.tcp_connect(host, port);
+                        Either::A(s)
+                    }
                 }
                 None => {
                     let s = self.tcp_connect(host, port);
@@ -230,25 +251,27 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
     }
 }
 
-
 fn resolve(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
     use std::net::ToSocketAddrs;
 
-    (host, port).to_socket_addrs()
-        .and_then(|mut addrs| {
-            addrs.next().ok_or_else(|| {
-                let err_msg = format!("invalid hostname '{}'", host);
-                io::Error::new(io::ErrorKind::Other, err_msg)
-            })
+    (host, port).to_socket_addrs().and_then(|mut addrs| {
+        addrs.next().ok_or_else(|| {
+            let err_msg = format!("invalid hostname '{}'", host);
+            io::Error::new(io::ErrorKind::Other, err_msg)
         })
+    })
 }
 
+/// Json WebToken helper functions
+#[cfg(feature = "jwt")]
 fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
     use chrono::{Duration, Utc};
+
     use jsonwebtoken::{encode, Algorithm, Header};
     use uuid::Uuid;
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "jwt", derive(Serialize, Deserialize))]
     struct Claims {
         iat: i64,
         exp: i64,
@@ -308,7 +331,6 @@ impl AsyncWrite for NetworkStream {
         }
     }
 }
-
 
 mod test {
     #[test]
