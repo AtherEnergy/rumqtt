@@ -7,7 +7,7 @@ use std::{
 use crate::client::{Notification, Request};
 use crate::error::{ConnectError, NetworkError};
 use crate::mqttoptions::{MqttOptions, SecurityOptions};
-use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Protocol};
+use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Unsubscribe, Protocol};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
@@ -67,6 +67,10 @@ impl MqttState {
             Packet::Subscribe(subs) => {
                 let subscription = self.handle_outgoing_subscribe(subs)?;
                 Request::Subscribe(subscription)
+            }
+            Packet::Unsubscribe(unsubs) => {
+                let unsubscription = self.handle_outgoing_unsubscribe(unsubs)?;
+                Request::Unsubscribe(unsubscription)
             }
             Packet::Disconnect => self.handle_outgoing_disconnect()?,
             _ => unimplemented!(),
@@ -326,6 +330,14 @@ impl MqttState {
 
         debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
         Ok(subscription)
+    }
+
+    pub fn handle_outgoing_unsubscribe(&mut self, mut unsubscription: Unsubscribe) -> Result<Unsubscribe, NetworkError> {
+        let pkid = self.next_pkid();
+        unsubscription.pkid = pkid;
+
+        debug!("Unsubscribe. Topics = {:?}, Pkid = {:?}", unsubscription.topics, unsubscription.pkid);
+        Ok(unsubscription)
     }
 
     // pub fn handle_incoming_suback(&mut self, ack: Suback) -> Result<(), SubackError> {
