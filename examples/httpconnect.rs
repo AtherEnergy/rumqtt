@@ -1,8 +1,8 @@
+use futures::stream::StreamExt;
 use rumqtt::{MqttClient, MqttOptions, Proxy, QoS, ReconnectOptions};
 use serde_derive::Deserialize;
-
-use std::thread;
 use std::time::Duration;
+use tokio::time::delay_for;
 
 #[derive(Deserialize, Debug)]
 struct Config {
@@ -12,7 +12,8 @@ struct Config {
     main_port: u16,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
     let config: Config = envy::from_env().unwrap();
     let key = include_bytes!("tlsfiles/server.key.pem");
@@ -28,19 +29,23 @@ fn main() {
         .set_reconnect_opts(reconnect_options)
         .set_proxy(proxy);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, mut notifications) = MqttClient::start(mqtt_options).await.unwrap();
 
-    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
+    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).await.unwrap();
 
-    thread::spawn(move || {
+    let thread = tokio::spawn(async move {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_millis(100));
-            mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
+            delay_for(Duration::from_millis(100)).await;
+            mqtt_client
+                .publish("hello/world", QoS::AtLeastOnce, false, payload)
+                .await
+                .unwrap();
         }
     });
 
-    for notification in notifications {
+    while let Some(notification) = notifications.next().await {
         println!("{:?}", notification)
     }
+    thread.await.unwrap();
 }

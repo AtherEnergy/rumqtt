@@ -1,9 +1,10 @@
 //! Structs to interact with mqtt eventloop
-use crate::error::{ClientError, ConnectError};
-use crate::MqttOptions;
-use crossbeam_channel;
-use futures::{sync::mpsc, Future, Sink};
-use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, Unsubscribe, SubscribeTopic};
+use crate::{
+    error::{ClientError, ConnectError},
+    MqttOptions,
+};
+use futures::{channel::mpsc, sink::SinkExt};
+use mqtt311::{PacketIdentifier, Publish, QoS, Subscribe, SubscribeTopic, Unsubscribe};
 use std::sync::Arc;
 
 #[doc(hidden)]
@@ -66,7 +67,7 @@ pub enum Command {
 pub struct UserHandle {
     request_tx: mpsc::Sender<Request>,
     command_tx: mpsc::Sender<Command>,
-    notification_rx: crossbeam_channel::Receiver<Notification>,
+    notification_rx: mpsc::Receiver<Notification>,
 }
 
 /// Handle to send requests and commands to the network eventloop
@@ -84,13 +85,13 @@ impl MqttClient {
     ///
     /// See `select.rs` example
     /// [mqttclient]: struct.MqttClient.html
-    pub fn start(opts: MqttOptions) -> Result<(Self, crossbeam_channel::Receiver<Notification>), ConnectError> {
+    pub async fn start(opts: MqttOptions) -> Result<(Self, mpsc::Receiver<Notification>), ConnectError> {
         let max_packet_size = opts.max_packet_size();
         let UserHandle {
             request_tx,
             command_tx,
             notification_rx,
-        } = connection::Connection::run(opts)?;
+        } = connection::Connection::run(opts).await?;
 
         let client = MqttClient {
             request_tx,
@@ -102,7 +103,7 @@ impl MqttClient {
     }
 
     /// Requests the eventloop for mqtt publish
-    pub fn publish<S, V, B>(&mut self, topic: S, qos: QoS, retained: B, payload: V) -> Result<(), ClientError>
+    pub async fn publish<S, V, B>(&mut self, topic: S, qos: QoS, retained: B, payload: V) -> Result<(), ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -123,12 +124,14 @@ impl MqttClient {
         };
 
         let tx = &mut self.request_tx;
-        tx.send(Request::Publish(publish)).wait()?;
+        tx.send(Request::Publish(publish))
+            .await
+            .map_err(ClientError::MpscRequestSend)?;
         Ok(())
     }
 
     /// Requests the eventloop for mqtt subscribe
-    pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
+    pub async fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
     where
         S: Into<String>,
     {
@@ -142,14 +145,16 @@ impl MqttClient {
         };
 
         let tx = &mut self.request_tx;
-        tx.send(Request::Subscribe(subscribe)).wait()?;
+        tx.send(Request::Subscribe(subscribe))
+            .await
+            .map_err(ClientError::MpscRequestSend)?;
         Ok(())
     }
 
     /// Requests the eventloop for mqtt unsubscribe
-    pub fn unsubscribe<S>(&mut self, topic: S) -> Result<(), ClientError>
-        where
-            S: Into<String>,
+    pub async fn unsubscribe<S>(&mut self, topic: S) -> Result<(), ClientError>
+    where
+        S: Into<String>,
     {
         let unsubscribe = Unsubscribe {
             pkid: PacketIdentifier::zero(),
@@ -157,7 +162,9 @@ impl MqttClient {
         };
 
         let tx = &mut self.request_tx;
-        tx.send(Request::Unsubscribe(unsubscribe)).wait()?;
+        tx.send(Request::Unsubscribe(unsubscribe))
+            .await
+            .map_err(ClientError::MpscRequestSend)?;
         Ok(())
     }
 
@@ -166,25 +173,25 @@ impl MqttClient {
     /// network for reconnection
     ///
     /// [Resume]: struct.MqttClient.html#method.resume
-    pub fn pause(&mut self) -> Result<(), ClientError> {
+    pub async fn pause(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.command_tx;
-        tx.send(Command::Pause).wait()?;
+        tx.send(Command::Pause).await.map_err(ClientError::MpscCommandSend)?;
         Ok(())
     }
 
     /// Commands the network eventloop to reconnect to the broker and
     /// resume network io
-    pub fn resume(&mut self) -> Result<(), ClientError> {
+    pub async fn resume(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.command_tx;
-        tx.send(Command::Resume).wait()?;
+        tx.send(Command::Resume).await.map_err(ClientError::MpscCommandSend)?;
         Ok(())
     }
 
     /// Commands the network eventloop to gracefully shutdown
     /// the connection to the broker.
-    pub fn shutdown(&mut self) -> Result<(), ClientError> {
+    pub async fn shutdown(&mut self) -> Result<(), ClientError> {
         let tx = &mut self.request_tx;
-        tx.send(Request::Disconnect).wait()?;
+        tx.send(Request::Disconnect).await.map_err(ClientError::MpscCommandSend)?;
         Ok(())
     }
 }

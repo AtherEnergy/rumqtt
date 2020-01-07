@@ -1,8 +1,13 @@
-use futures::{Async, Poll, Stream};
-use std::collections::VecDeque;
-use std::iter::IntoIterator;
+use futures::Stream;
+use std::{
+    collections::VecDeque,
+    iter::IntoIterator,
+    marker::Unpin,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-pub trait Prepend: Stream {
+pub trait Prepend: Stream + Unpin {
     fn prependable(self) -> Prependable<Self>
     where
         Self: Sized,
@@ -11,20 +16,22 @@ pub trait Prepend: Stream {
     }
 }
 
-impl<T: ?Sized> Prepend for T where T: Stream {}
+impl<T: ?Sized> Prepend for T where T: Stream + Unpin {}
 
 #[must_use = "streams do nothing unless polled"]
 pub struct Prependable<S>
 where
-    S: Stream,
+    S: Stream + Unpin,
 {
     stream: S,
     items: VecDeque<<S as Stream>::Item>,
 }
 
+impl<S> Unpin for Prependable<S> where S: Stream + Unpin {}
+
 pub fn new<S>(stream: S) -> Prependable<S>
 where
-    S: Stream,
+    S: Stream + Unpin,
 {
     Prependable {
         stream,
@@ -34,7 +41,7 @@ where
 
 impl<S> Prependable<S>
 where
-    S: futures::Stream,
+    S: Stream + Unpin,
 {
     /// Insert items in between present items and wrapped stream
     pub fn insert(&mut self, items: impl IntoIterator<Item = <S as Stream>::Item>) {
@@ -44,16 +51,16 @@ where
 
 impl<S> Stream for Prependable<S>
 where
-    S: Stream,
+    S: Stream + Unpin,
 {
-    type Item = <S as Stream>::Item;
-    type Error = <S as Stream>::Error;
+    type Item = S::Item;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if let Some(v) = self.items.pop_front() {
-            Ok(Async::Ready(Some(v)))
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let Prependable { items, stream } = Pin::into_inner(self);
+        if let Some(v) = items.pop_front() {
+            Poll::Ready(Some(v))
         } else {
-            self.stream.poll()
+            Pin::new(stream).poll_next(cx)
         }
     }
 }

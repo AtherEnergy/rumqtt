@@ -158,7 +158,7 @@ impl MqttOptions {
     }
 
     pub fn set_connection_timeout(mut self, secs: u16) -> Self {
-        self.connection_timeout =  Duration::from_secs(u64::from(secs));
+        self.connection_timeout = Duration::from_secs(u64::from(secs));
         self
     }
 

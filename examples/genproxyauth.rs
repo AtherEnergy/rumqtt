@@ -9,7 +9,8 @@ struct Claims {
     aud: String,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let key = include_bytes!("tlsfiles/server.key.pem");
     let time = Utc::now();
     let jwt_header = Header::new(Algorithm::RS256);

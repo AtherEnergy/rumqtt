@@ -1,39 +1,38 @@
-use std::io::{self, Read, Write};
+use std::io;
 
 use crate::client::network::stream::NetworkStream;
-use futures::Poll;
 use serde_derive::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod stream {
-use crate::client::network::{generate_httpproxy_auth, resolve};
-    use crate::codec::MqttCodec;
-    use crate::error::ConnectError;
-    use futures::{
-        future::{self, Either},
-        sink::Sink,
-        stream::Stream,
-        Future,
+    use crate::{
+        client::network::{generate_httpproxy_auth, resolve},
+        codec::MqttCodec,
+        error::ConnectError,
     };
+    use futures::sink::SinkExt;
     use std::{
-        io::{
-            self, {BufReader, Cursor},
-        },
+        io::{self, BufReader, Cursor},
         sync::Arc,
     };
     use tokio::net::TcpStream;
-    use tokio::codec::{Decoder, Framed, LinesCodec};
     use tokio_rustls::{
-        rustls::{internal::pemfile, ClientConfig, ClientSession},
-        TlsConnector, TlsStream,
+        client::TlsStream,
+        rustls::{internal::pemfile, ClientConfig},
+        TlsConnector,
     };
+    use tokio_util::codec::{Decoder, Framed, LinesCodec};
     use webpki::DNSNameRef;
 
     #[allow(clippy::large_enum_variant)]
     pub enum NetworkStream {
         Tcp(TcpStream),
-        Tls(TlsStream<TcpStream, ClientSession>),
+        Tls(TlsStream<TcpStream>),
     }
 
     impl NetworkStream {
@@ -54,7 +53,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         proxy_host: String,
         proxy_port: u16,
         key: Vec<u8>,
-        expiry: i64
+        expiry: i64,
     }
 
     pub struct NetworkStreamBuilder {
@@ -96,7 +95,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
                 proxy_host: proxy_host.to_owned(),
                 proxy_port: proxy_port,
                 key: key.to_owned(),
-                expiry
+                expiry,
             });
 
             self
@@ -133,7 +132,7 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
         }
 
         #[allow(clippy::too_many_arguments)]
-        pub fn http_connect(
+        pub async fn http_connect(
             &self,
             id: &str,
             proxy_host: &str,
@@ -142,7 +141,8 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
             port: u16,
             key: &[u8],
             expiry: i64,
-        ) -> impl Future<Item = TcpStream, Error = io::Error> {
+        ) -> Result<TcpStream, io::Error> {
+            use tokio_util::codec::LinesCodecError;
             let proxy_auth = generate_httpproxy_auth(id, key, expiry);
             let connect = format!(
                 "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\nProxy-Authorization: {}\r\n\r\n",
@@ -151,96 +151,66 @@ use crate::client::network::{generate_httpproxy_auth, resolve};
             debug!("{}", connect);
 
             let codec = LinesCodec::new();
-            let addr = future::result(resolve(proxy_host, proxy_port));
+            let proxy_address = resolve(proxy_host, proxy_port)?;
 
-            addr.and_then(|proxy_address| TcpStream::connect(&proxy_address))
-                .and_then(|tcp| {
-                    let framed = Decoder::framed(codec, tcp);
-                    future::ok(framed)
-                })
-                .and_then(|f| f.send(connect))
-                .and_then(|f| f.into_future().map_err(|(e, _f)| e))
-                .and_then(|(s, f)| {
-                    debug!("{:?}", s);
-                    f.into_future().map_err(|(e, _f)| e)
-                })
-                .and_then(|(s, f)| {
-                    debug!("{:?}", s);
-                    f.into_future().map_err(|(e, _f)| e)
-                })
-                .and_then(|(s, f)| {
-                    debug!("{:?}", s);
-                    let stream = f.into_inner();
-                    future::ok(stream)
-                })
+            let mut tcp = TcpStream::connect(&proxy_address).await?;
+            let mut f = Decoder::framed(codec, &mut tcp);
+            f.send(connect).await.map_err(|e| match e {
+                LinesCodecError::MaxLineLengthExceeded => unreachable!(),
+                LinesCodecError::Io(e) => e,
+            })?;
+            Ok(tcp)
         }
 
-        pub fn tcp_connect(&self, host: &str, port: u16) -> impl Future<Item = TcpStream, Error = io::Error> {
-            let addr = resolve(host, port);
-            let addr = future::result(addr);
-
-            addr.and_then(|addr| {
-                TcpStream::connect(&addr)
-            })
+        pub async fn tcp_connect(&self, host: &str, port: u16) -> Result<TcpStream, io::Error> {
+            let addr = resolve(host, port)?;
+            TcpStream::connect(&addr).await
         }
 
-        pub fn connect(
-            mut self,
-            host: &str,
-            port: u16,
-        ) -> impl Future<Item = Framed<NetworkStream, MqttCodec>, Error = ConnectError> {
+        pub async fn connect(mut self, host: &str, port: u16) -> Result<Framed<NetworkStream, MqttCodec>, ConnectError> {
             let tls_connector = self.create_stream();
             let host_tcp = host.to_owned();
             let http_proxy = self.http_proxy.clone();
             let stream = match http_proxy {
-                Some(HttpProxy{id, proxy_host, proxy_port, key, expiry}) => {
-                    let s = self.http_connect(&id, &proxy_host, proxy_port, &host_tcp, port, &key, expiry);
-                    Either::A(s)
+                Some(HttpProxy {
+                    id,
+                    proxy_host,
+                    proxy_port,
+                    key,
+                    expiry,
+                }) => {
+                    self.http_connect(&id, &proxy_host, proxy_port, &host_tcp, port, &key, expiry)
+                        .await?
                 }
-                None => {
-                    let s = self.tcp_connect(host, port);
-                    Either::B(s)
-                }
+                None => self.tcp_connect(host, port).await?,
             };
 
-            match tls_connector {
+            Ok(match tls_connector {
                 Ok(tls_connector) => {
                     let domain = DNSNameRef::try_from_ascii_str(&host).unwrap().to_owned();
-                    Either::A(
-                        stream
-                            .and_then(move |stream| tls_connector.connect(domain.as_ref(), stream))
-                            .map_err(ConnectError::from)
-                            .and_then(|stream| {
-                                let stream = NetworkStream::Tls(stream);
-                                future::ok(MqttCodec.framed(stream))
-                            }),
-                    )
+                    let stream = tls_connector.connect(domain.as_ref(), stream).await?;
+                    let stream = NetworkStream::Tls(stream);
+                    MqttCodec.framed(stream)
                 }
-                Err(ConnectError::NoCertificateAuthority) => Either::B(
-                    stream
-                        .and_then(|stream| {
-                            let stream = NetworkStream::Tcp(stream);
-                            future::ok(MqttCodec.framed(stream))
-                        })
-                        .map_err(ConnectError::from),
-                ),
+                Err(ConnectError::NoCertificateAuthority) => {
+                    let stream = NetworkStream::Tcp(stream);
+                    MqttCodec.framed(stream)
+                }
                 _ => unimplemented!(),
-            }
+            })
         }
     }
 }
 
-
 fn resolve(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
     use std::net::ToSocketAddrs;
 
-    (host, port).to_socket_addrs()
-        .and_then(|mut addrs| {
-            addrs.next().ok_or_else(|| {
-                let err_msg = format!("invalid hostname '{}'", host);
-                io::Error::new(io::ErrorKind::Other, err_msg)
-            })
+    (host, port).to_socket_addrs().and_then(|mut addrs| {
+        addrs.next().ok_or_else(|| {
+            let err_msg = format!("invalid hostname '{}'", host);
+            io::Error::new(io::ErrorKind::Other, err_msg)
         })
+    })
 }
 
 fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
@@ -274,41 +244,37 @@ fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
     format!("Basic {}", auth)
 }
 
-impl Read for NetworkStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+impl AsyncRead for NetworkStream {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
         match *self {
-            NetworkStream::Tcp(ref mut s) => s.read(buf),
-            NetworkStream::Tls(ref mut s) => s.read(buf),
+            NetworkStream::Tcp(ref mut s) => Pin::new(s).poll_read(cx, buf),
+            NetworkStream::Tls(ref mut s) => Pin::new(s).poll_read(cx, buf),
         }
     }
 }
 
-impl Write for NetworkStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
-            NetworkStream::Tcp(ref mut s) => s.write(buf),
-            NetworkStream::Tls(ref mut s) => s.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match *self {
-            NetworkStream::Tcp(ref mut s) => s.flush(),
-            NetworkStream::Tls(ref mut s) => s.flush(),
-        }
-    }
-}
-
-impl AsyncRead for NetworkStream {}
 impl AsyncWrite for NetworkStream {
-    fn shutdown(&mut self) -> Poll<(), io::Error> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
         match *self {
-            NetworkStream::Tcp(ref mut s) => s.shutdown(),
-            NetworkStream::Tls(ref mut s) => s.shutdown(),
+            NetworkStream::Tcp(ref mut s) => Pin::new(s).poll_write(cx, buf),
+            NetworkStream::Tls(ref mut s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        match *self {
+            NetworkStream::Tcp(ref mut s) => Pin::new(s).poll_flush(cx),
+            NetworkStream::Tls(ref mut s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        match *self {
+            NetworkStream::Tcp(ref mut s) => Pin::new(s).poll_shutdown(cx),
+            NetworkStream::Tls(ref mut s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }
-
 
 mod test {
     #[test]

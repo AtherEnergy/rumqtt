@@ -1,7 +1,10 @@
+use futures::stream::StreamExt;
 use rumqtt::{MqttClient, MqttOptions, QoS, ReconnectOptions};
-use std::{thread, time::Duration};
+use std::time::Duration;
+use tokio::time::delay_for;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
     //let broker = "prod-mqtt-broker.atherengineering.in";
     let broker = "test.mosquitto.org";
@@ -9,24 +12,28 @@ fn main() {
 
     let reconnection_options = ReconnectOptions::Always(10);
     let mqtt_options = MqttOptions::new("test-pubsub2", broker, port)
-                                    .set_keep_alive(10)
-                                    .set_inflight(3)
-                                    .set_request_channel_capacity(3)
-                                    .set_reconnect_opts(reconnection_options)
-                                    .set_clean_session(false);
+        .set_keep_alive(10)
+        .set_inflight(3)
+        .set_request_channel_capacity(3)
+        .set_reconnect_opts(reconnection_options)
+        .set_clean_session(false);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
-    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
+    let (mut mqtt_client, mut notifications) = MqttClient::start(mqtt_options).await.unwrap();
+    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).await.unwrap();
 
-    thread::spawn(move || {
+    let thread = tokio::spawn(async move {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_millis(1000));
-            mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
+            delay_for(Duration::from_millis(1000)).await;
+            mqtt_client
+                .publish("hello/world", QoS::AtLeastOnce, false, payload)
+                .await
+                .unwrap();
         }
     });
 
-    for notification in notifications {
+    while let Some(notification) = notifications.next().await {
         println!("{:?}", notification)
     }
+    thread.await.unwrap();
 }

@@ -1,9 +1,13 @@
+use futures::stream::StreamExt;
 use rumqtt::{MqttClient, MqttOptions, QoS, SecurityOptions};
 use serde_derive::Deserialize;
-use std::fs::File;
-use std::io::{self, Read};
-use std::path::Path;
-use std::{thread, time::Duration};
+use std::{
+    fs::File,
+    io::{self, Read},
+    path::Path,
+    time::Duration,
+};
+use tokio::time::delay_for;
 
 // NOTES:
 // ---------
@@ -17,7 +21,8 @@ struct Config {
     registry: String,
 }
 
-fn main() -> Result<(), io::Error> {
+#[tokio::main]
+async fn main() -> Result<(), io::Error> {
     pretty_env_logger::init();
     let config: Config = envy::from_env().unwrap();
 
@@ -28,11 +33,11 @@ fn main() -> Result<(), io::Error> {
         + "/devices/"
         + &config.id;
 
-    let mut rsa_private = vec!();
+    let mut rsa_private = vec![];
     File::open(Path::new("../../certs/rsa_private.der")).and_then(|mut f| f.read_to_end(&mut rsa_private))?;
     let security_options = SecurityOptions::GcloudIot(config.project, rsa_private, 60);
 
-    let mut ca = vec!();
+    let mut ca = vec![];
     File::open(Path::new("../../certs/roots.pem")).and_then(|mut f| f.read_to_end(&mut ca))?;
 
     let mqtt_options = MqttOptions::new(client_id, "mqtt.googleapis.com", 8883)
@@ -40,19 +45,23 @@ fn main() -> Result<(), io::Error> {
         .set_keep_alive(10)
         .set_security_opts(security_options);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, mut notifications) = MqttClient::start(mqtt_options).await.unwrap();
     let topic = "/devices/".to_owned() + &config.id + "/events/imu";
 
-    thread::spawn(move || {
+    let thread = tokio::spawn(async move {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_secs(1));
-            mqtt_client.publish(topic.clone(), QoS::AtLeastOnce, false, payload).unwrap();
+            delay_for(Duration::from_secs(1)).await;
+            mqtt_client
+                .publish(topic.clone(), QoS::AtLeastOnce, false, payload)
+                .await
+                .unwrap();
         }
     });
 
-    for notification in notifications {
+    while let Some(notification) = notifications.next().await {
         println!("{:?}", notification)
     }
+    thread.await.unwrap();
     Ok(())
 }
