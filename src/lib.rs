@@ -137,6 +137,6 @@ pub use crate::{
     error::{ClientError, ConnectError},
     mqttoptions::{MqttOptions, Proxy, ReconnectOptions, SecurityOptions},
 };
-pub use crossbeam_channel::Receiver;
+pub use futures::channel::mpsc::Receiver;
 #[doc(hidden)]
 pub use mqtt311::*;
