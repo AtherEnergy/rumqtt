@@ -3,7 +3,7 @@
 //! * Provides several reconnection options to automate reconnections
 //! * All the network requests are done using channels and bad networks can
 //!   be detected through back pressure
-//! * Incoming notifications are delivered to the user through crossbeam channel
+//! * Incoming notifications are delivered to the user through a `futures:channel::mpsc` channel
 //!   which provides a flexible `select!` macro
 //! * Clone the client to access mqtt eventloop from multiple threads
 //! * Dynamically start and stop the network eventloop (Useful when you want the other network services to have more bandwidth)
@@ -41,7 +41,7 @@
 //! ```
 //!
 //!
-//! ## Select on incoming notifications using crossbeam select!
+//! ## Select on incoming notifications using select!
 //! ```no_run
 //! use futures::{channel::oneshot, select, FutureExt, StreamExt};
 //! use rumqtt::{MqttClient, MqttOptions, QoS};

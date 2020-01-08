@@ -80,7 +80,7 @@ pub struct MqttClient {
 
 impl MqttClient {
     /// Starts a new mqtt connection in a thread and returns [mqttclient]
-    /// instance to send requests/commands to the event loop and a crossbeam
+    /// instance to send requests/commands to the event loop and a
     /// channel receiver to receive notifications sent by the event loop.
     ///
     /// See `select.rs` example
@@ -123,11 +123,9 @@ impl MqttClient {
             payload: Arc::new(payload),
         };
 
-        let tx = &mut self.request_tx;
-        tx.send(Request::Publish(publish))
+        self.request_tx.send(Request::Publish(publish))
             .await
-            .map_err(ClientError::MpscRequestSend)?;
-        Ok(())
+            .map_err(ClientError::MpscRequestSend)
     }
 
     /// Requests the eventloop for mqtt subscribe
@@ -144,11 +142,9 @@ impl MqttClient {
             topics: vec![topic],
         };
 
-        let tx = &mut self.request_tx;
-        tx.send(Request::Subscribe(subscribe))
+        self.request_tx.send(Request::Subscribe(subscribe))
             .await
-            .map_err(ClientError::MpscRequestSend)?;
-        Ok(())
+            .map_err(ClientError::MpscRequestSend)
     }
 
     /// Requests the eventloop for mqtt unsubscribe

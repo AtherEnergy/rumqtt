@@ -361,7 +361,7 @@ impl Connection {
         }
     }
 
-    /// Handles all incoming network packets (including sending notifications to user over crossbeam
+    /// Handles all incoming network packets (including sending notifications to user over a
     /// channel) and creates a stream of packets to send on network
     async fn network_reply_stream(
         &self,
