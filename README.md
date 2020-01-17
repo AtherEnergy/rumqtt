@@ -1,3 +1,6 @@
+## NOTE: Archived. No further development under this repo. 
+## Follow progress of a different implementation [here](https://github.com/tekjar/rumq)
+
 [![Build Status](https://dev.azure.com/kraviteza/kraviteza/_apis/build/status/AtherEnergy.rumqtt?branchName=master)](https://dev.azure.com/kraviteza/kraviteza/_build/latest?definitionId=2&branchName=master)
 [![Documentation](https://docs.rs/rumqtt/badge.svg)](https://docs.rs/rumqtt)
 
