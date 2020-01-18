@@ -19,7 +19,7 @@ derive_more = "0.13"
 base64 = "0.10"
 uuid = {version = "0.7", features = ["serde", "v4"]}
 mqtt311 = "0.2"
-tokio-rustls = ">=0.8, <=0.9"
+tokio-rustls = "0.9"
 webpki = ">=0.8, <=0.19"
 
 
