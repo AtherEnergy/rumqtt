@@ -25,6 +25,16 @@ use tokio::timer::{timeout, Timeout};
 //         are ok with blocking code. It might cause deadlocks
 //  https://github.com/tokio-rs/tokio-core/issues/182
 
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum EventloopStatus {
+    // mqtt disconnect packet
+    MqttDisconnection,
+    NetworkPause,
+    NetworkResume,
+    Shutdown,
+    Spurious
+}
+
 pub struct Connection {
     mqtt_state: Rc<RefCell<MqttState>>,
     notification_tx: Sender<Notification>,
@@ -39,6 +49,7 @@ impl Connection {
     /// connection events in a new thread if the initial connection is successful
     pub fn run(mqttoptions: MqttOptions) -> Result<UserHandle, ConnectError> {
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(mqttoptions.notification_channel_capacity());
+        let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded(1);
         let (request_tx, request_rx) = mpsc::channel::<Request>(mqttoptions.request_channel_capacity());
         let (command_tx, command_rx) = mpsc::channel::<Command>(5);
 
@@ -47,7 +58,9 @@ impl Connection {
 
         // start the network thread to handle all mqtt network io
         thread::spawn(move || {
-            let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone())));
+
+            let mqtt_state = Rc::new(RefCell::new(MqttState::new(mqttoptions.clone()))); 
+
             let mut connection = Connection {
                 mqtt_state,
                 notification_tx,
@@ -57,13 +70,19 @@ impl Connection {
                 is_network_enabled: true,
             };
 
-            connection.mqtt_eventloop(request_rx, command_rx)
+            match connection.mqtt_eventloop(request_rx, command_rx) {
+                Ok(state) => shutdown_tx.send(state).unwrap(),
+                Err(e) => {
+                    error!("Shutdown error = {:?}", e);
+                }
+            }
         });
 
         // return user handle to client to send requests and handle notifications
         let user_handle = UserHandle {
             request_tx,
             command_tx,
+            shutdown_rx,
             notification_rx,
         };
 
@@ -78,16 +97,20 @@ impl Connection {
             }
         }
 
+
+
         Ok(user_handle)
     }
 
     /// Main mqtt event loop. Handles reconnection requests from `connect_or_not` and `mqtt_io`
-    fn mqtt_eventloop(&mut self, request_rx: Receiver<Request>, mut command_rx: Receiver<Command>) {
-        let network_request_stream = request_rx.map_err(|_| NetworkError::Blah);
-        let mut network_request_stream = network_request_stream.prependable();
-        let mut command_stream = self.command_stream(command_rx.by_ref());
+    fn mqtt_eventloop(&mut self, mut request_rx: Receiver<Request>, mut command_rx: Receiver<Command>) -> Result<MqttState, NetworkError> {
+        let request_rx = &mut request_rx;
 
         'reconnection: loop {
+            let network_request_stream = request_rx.map_err(|_| NetworkError::Blah);
+            let mut network_request_stream = network_request_stream.prependable();
+            let mut command_stream = self.command_stream(command_rx.by_ref());
+
             let mqtt_connect_future = self.mqtt_connect();
             let (runtime, framed) = match self.connect_or_not(mqtt_connect_future) {
                 Ok(f) => f,
@@ -105,9 +128,17 @@ impl Connection {
             match self.mqtt_io(runtime, mqtt_future) {
                 Err(true) => continue 'reconnection,
                 Err(false) => break 'reconnection,
-                Ok(_v) => continue 'reconnection,
+                Ok(EventloopStatus::MqttDisconnection) => break 'reconnection,
+                Ok(EventloopStatus::Shutdown) => break 'reconnection,
+                Ok(EventloopStatus::NetworkPause) => continue 'reconnection,
+                Ok(EventloopStatus::NetworkResume) => continue 'reconnection,
+                Ok(EventloopStatus::Spurious) => continue 'reconnection,
             }
         }
+
+        request_rx.close();
+        let network_request_stream = request_rx.map_err(|_| NetworkError::Blah);
+        self.handle_shutdown(network_request_stream)
     }
 
 
@@ -167,7 +198,7 @@ impl Connection {
     /// options.
     /// Err(true) -> Reconnect
     /// Err(false) -> Don't reconnect
-    fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<(), bool> {
+    fn mqtt_io(&mut self, mut runtime: Runtime, mqtt_future: impl Future<Item = (), Error = NetworkError>) -> Result<EventloopStatus, bool> {
         let o = runtime.block_on(mqtt_future);
         if let Err(e) = self.notification_tx.try_send(Notification::Disconnection) {
             error!("Notification failure. Error = {:?}", e);
@@ -177,22 +208,24 @@ impl Connection {
             debug!("Eventloop stopped with error. {:?}", e);
 
             return match e {
-                NetworkError::UserDisconnect => {
+                // list of user controlled errors
+                NetworkError::Pause => {
                     self.is_network_enabled = false;
-                    Err(true)
+                    Ok(EventloopStatus::NetworkPause)
                 }
-                NetworkError::UserReconnect => {
+                NetworkError::Resume => {
                     self.is_network_enabled = true;
-                    Err(true)
+                    Ok(EventloopStatus::NetworkResume)
+                }
+                NetworkError::Shutdown => {
+                    self.is_network_enabled = true;
+                    Ok(EventloopStatus::Shutdown)
                 }
                 NetworkError::NetworkStreamClosed if self.mqtt_state.borrow().is_disconnecting() => {
                     self.is_network_enabled = false;
-                    Err(false)
+                    Ok(EventloopStatus::MqttDisconnection)
                 }
-                NetworkError::NetworkStreamClosed => {
-                    self.is_network_enabled = true;
-                    Err(self.should_reconnect_again())
-                }
+                // all other errors and returns
                 _ => {
                     self.is_network_enabled = true;
                     Err(self.should_reconnect_again())
@@ -201,11 +234,11 @@ impl Connection {
         }
 
         if let Ok(_v) = o {
-            debug!("Eventloop stopped without error");
-            return Err(self.should_reconnect_again())
+            error!("Eventloop stopped without error");
+            return Ok(EventloopStatus::Spurious)
         }
 
-        Ok(())
+        Ok(EventloopStatus::Spurious)
     }
 
     /// Applies throttling and inflight limiting based on user configuration and returns
@@ -277,6 +310,22 @@ impl Connection {
         if let Some(connection_tx) = self.connection_tx.take() {
             connection_tx.try_send(error).unwrap();
         }
+    }
+
+    fn handle_shutdown(&mut self, network_request_stream: impl Stream<Item = Request, Error = NetworkError>) -> Result<MqttState, NetworkError> {
+        // non inflight limited stream. We should not stop receiving data
+        // from stream 
+        let network_request_stream = self.user_requests(network_request_stream);
+        let mut runtime = Runtime::new().unwrap();
+
+        let shutdown_future = network_request_stream.for_each(|_v| {
+            future::ok(())
+        });
+        
+        runtime.block_on(shutdown_future)?;
+        let state = self.mqtt_state.clone();
+        let state: MqttState = state.borrow_mut().clone();
+        Ok(state)
     }
 
     /// Resolves dns with blocking API and composes a future which makes a new tcp
@@ -448,8 +497,9 @@ impl Connection {
         commands
             .or_else(|_err| Err(NetworkError::Blah))
             .and_then(|usercommand| match usercommand {
-                Command::Pause => Err(NetworkError::UserDisconnect),
-                Command::Resume => Err(NetworkError::UserReconnect),
+                Command::Pause => Err(NetworkError::Pause),
+                Command::Resume => Err(NetworkError::Resume),
+                Command::Shutdown => Err(NetworkError::Shutdown)
             })
     }
 }
@@ -506,7 +556,7 @@ fn validate_userrequest(userrequest: Request, mqtt_state: &mut MqttState) -> imp
     match userrequest {
         Request::Reconnect(mqttoptions) => {
             mqtt_state.opts = mqttoptions;
-            future::err(NetworkError::UserReconnect)
+            future::err(NetworkError::Resume)
         }
         _ => future::ok(userrequest.into()),
     }
@@ -612,16 +662,21 @@ impl Sink for BlackHole {
 
 #[cfg(test)]
 mod test {
+    use crate::client::Command;
+    use crate::client::Request;
     use std::time::Duration;
     use tokio::timer::DelayQueue;
     use mqtt311::PacketIdentifier;
-    #[cfg(target_os = "linux")] use crate::client::Request;
     use crate::client::Notification;
     use super::{Connection, MqttOptions, MqttState, NetworkError, ConnectError, ReconnectOptions};
     use super::MqttFramed;
+    use super::EventloopStatus;
     use futures::{
+        Future,
         future,
         stream::Stream,
+        sink::Sink,
+        sync::mpsc,
     };
     use mqtt311::Packet;
     use mqtt311::Publish;
@@ -826,7 +881,57 @@ mod test {
         connection.mqtt_state.borrow_mut().handle_outgoing_disconnect().unwrap();
         let network_future = future::err::<(), _>(NetworkError::NetworkStreamClosed);
         let out = connection.mqtt_io(runtime, network_future);
-        assert_eq!(out, Err(false));
+        assert_eq!(out, Ok(EventloopStatus::MqttDisconnection));
+    }
+
+    #[test]
+    fn mqtt_io_returs_current_state_during_shutdown() {
+        let reconnect_opt = ReconnectOptions::Always(10);
+        let mqttoptions = MqttOptions::new("mqtt-io-test", "broker.hivemq.com", 1883).set_reconnect_opts(reconnect_opt);
+        let mqtt_state = MqttState::new(mqttoptions.clone());
+
+        // user shutdown should not take reconnection options into consideration
+        let (mut connection, _userhandle, _runtime) = mock_mqtt_connection(mqttoptions.clone(), mqtt_state);
+        let (requests_tx, requests_rx) = mpsc::channel(10);
+        let (commands_tx, commands_rx) = mpsc::channel(10);
+
+        thread::spawn(move || {
+            let mut requests_tx = requests_tx;
+            let mut commands_tx = commands_tx;
+            commands_tx = commands_tx.send(Command::Pause).wait().unwrap();
+
+            for i in 1..=100 {
+                let publish = Publish {
+                    dup: false,
+                    qos: QoS::AtLeastOnce,
+                    retain: false,
+                    pkid: None,
+                    topic_name: "hello/world".to_owned(),
+                    payload: Arc::new(vec![1, 2, 3]),
+                };
+
+                requests_tx = requests_tx.send(Request::Publish(publish)).wait().unwrap();
+
+                if i % 10 == 0 {
+                    commands_tx.send(Command::Shutdown).wait().unwrap();
+                    break;
+                }
+
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+
+        // verifies next session reuse of state
+        let mqtt_state = connection.mqtt_eventloop(requests_rx, commands_rx).unwrap();
+        assert_eq!(mqtt_state.publish_queue_len(), 10);
+
+        let (mut connection, _userhandle, _runtime) = mock_mqtt_connection(mqttoptions, mqtt_state);
+        let (_requests_tx, requests_rx) = mpsc::channel(10);
+        let (commands_tx, commands_rx) = mpsc::channel(10);
+
+        commands_tx.send(Command::Shutdown).wait().unwrap();
+        let mqtt_state = connection.mqtt_eventloop(requests_rx, commands_rx).unwrap();
+        assert_eq!(mqtt_state.publish_queue_len(), 0);
     }
 
     #[cfg(target_os = "linux")]

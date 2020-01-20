@@ -17,8 +17,8 @@ pub enum MqttConnectionStatus {
     Disconnected,
 }
 
-#[derive(Debug)]
-pub(crate) struct MqttState {
+#[derive(Debug, Clone)]
+pub struct MqttState {
     pub opts: MqttOptions,
 
     // --------  State  ----------
@@ -29,7 +29,7 @@ pub(crate) struct MqttState {
     last_pkid: PacketIdentifier,
 
     // Stores outgoing data to handle quality of service
-    outgoing_pub: VecDeque<Publish>, // QoS1 & 2 publishes
+    pub outgoing_pub: VecDeque<Publish>, // QoS1 & 2 publishes
     outgoing_rel: VecDeque<PacketIdentifier>,
 
     // Store incoming data to handle quality of service
