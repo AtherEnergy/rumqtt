@@ -15,7 +15,7 @@ fn main() {
         .set_client_auth(client_cert, client_key)
         .set_keep_alive(10);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
     let topic = "hello/world";
 
     thread::spawn(move || {

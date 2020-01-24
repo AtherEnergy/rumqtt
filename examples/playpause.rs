@@ -5,12 +5,12 @@ fn main() {
     pretty_env_logger::init();
     let mqtt_options = MqttOptions::new("test-id", "127.0.0.1", 1883).set_keep_alive(10);
 
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
 
     mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
 
-    let mut c1 = mqtt_client.clone();
-    let mut c2 = mqtt_client.clone();
+    let c1 = mqtt_client.clone();
+    let c2 = mqtt_client.clone();
 
     thread::spawn(move || {
         let dur = Duration::new(1, 0);

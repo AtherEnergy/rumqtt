@@ -102,7 +102,7 @@ impl MqttClient {
     }
 
     /// Requests the eventloop for mqtt publish
-    pub fn publish<S, V, B>(&mut self, topic: S, qos: QoS, retained: B, payload: V) -> Result<(), ClientError>
+    pub fn publish<S, V, B>(&self, topic: S, qos: QoS, retained: B, payload: V) -> Result<(), ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -122,13 +122,13 @@ impl MqttClient {
             payload: Arc::new(payload),
         };
 
-        let tx = &mut self.request_tx;
+        let tx = self.request_tx.clone();
         tx.send(Request::Publish(publish)).wait()?;
         Ok(())
     }
 
     /// Requests the eventloop for mqtt subscribe
-    pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError>
+    pub fn subscribe<S>(&self, topic: S, qos: QoS) -> Result<(), ClientError>
     where
         S: Into<String>,
     {
@@ -141,13 +141,13 @@ impl MqttClient {
             topics: vec![topic],
         };
 
-        let tx = &mut self.request_tx;
+        let tx = self.request_tx.clone();
         tx.send(Request::Subscribe(subscribe)).wait()?;
         Ok(())
     }
 
     /// Requests the eventloop for mqtt unsubscribe
-    pub fn unsubscribe<S>(&mut self, topic: S) -> Result<(), ClientError>
+    pub fn unsubscribe<S>(&self, topic: S) -> Result<(), ClientError>
         where
             S: Into<String>,
     {
@@ -156,7 +156,7 @@ impl MqttClient {
             topics: vec![topic.into()],
         };
 
-        let tx = &mut self.request_tx;
+        let tx = self.request_tx.clone();
         tx.send(Request::Unsubscribe(unsubscribe)).wait()?;
         Ok(())
     }
@@ -166,24 +166,24 @@ impl MqttClient {
     /// network for reconnection
     ///
     /// [Resume]: struct.MqttClient.html#method.resume
-    pub fn pause(&mut self) -> Result<(), ClientError> {
-        let tx = &mut self.command_tx;
+    pub fn pause(&self) -> Result<(), ClientError> {
+        let tx = self.command_tx.clone();
         tx.send(Command::Pause).wait()?;
         Ok(())
     }
 
     /// Commands the network eventloop to reconnect to the broker and
     /// resume network io
-    pub fn resume(&mut self) -> Result<(), ClientError> {
-        let tx = &mut self.command_tx;
+    pub fn resume(&self) -> Result<(), ClientError> {
+        let tx = self.command_tx.clone();
         tx.send(Command::Resume).wait()?;
         Ok(())
     }
 
     /// Commands the network eventloop to gracefully shutdown
     /// the connection to the broker.
-    pub fn shutdown(&mut self) -> Result<(), ClientError> {
-        let tx = &mut self.request_tx;
+    pub fn shutdown(&self) -> Result<(), ClientError> {
+        let tx = self.request_tx.clone();
         tx.send(Request::Disconnect).wait()?;
         Ok(())
     }
