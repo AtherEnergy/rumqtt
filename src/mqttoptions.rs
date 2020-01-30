@@ -71,7 +71,7 @@ pub struct MqttOptions {
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// notification channel capacity
-    notification_channel_capacity: usize,
+    notification_channel_capacity: Option<usize>,
     /// maximum number of outgoing messages per second
     throttle: Option<f32>,
     /// maximum number of outgoing inflight messages
@@ -96,7 +96,7 @@ impl Default for MqttOptions {
             max_packet_size: 256 * 1024,
             last_will: None,
             request_channel_capacity: 10,
-            notification_channel_capacity: 10,
+            notification_channel_capacity: None,
             throttle: None,
             inflight: 100,
         }
@@ -128,7 +128,7 @@ impl MqttOptions {
             max_packet_size: 256 * 1024,
             last_will: None,
             request_channel_capacity: 10,
-            notification_channel_capacity: 10,
+            notification_channel_capacity: None,
             throttle: None,
             inflight: 100,
         }
@@ -158,7 +158,7 @@ impl MqttOptions {
     }
 
     pub fn set_connection_timeout(mut self, secs: u16) -> Self {
-        self.connection_timeout =  Duration::from_secs(u64::from(secs));
+        self.connection_timeout = Duration::from_secs(u64::from(secs));
         self
     }
 
@@ -269,12 +269,12 @@ impl MqttOptions {
 
     /// Set notification channel capacity
     pub fn set_notification_channel_capacity(mut self, capacity: usize) -> Self {
-        self.notification_channel_capacity = capacity;
+        self.notification_channel_capacity = Some(capacity);
         self
     }
 
     /// Notification channel capacity
-    pub fn notification_channel_capacity(&self) -> usize {
+    pub fn notification_channel_capacity(&self) -> Option<usize> {
         self.notification_channel_capacity
     }
 
