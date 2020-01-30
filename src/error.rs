@@ -47,6 +47,10 @@ pub enum ConnectError {
     Recv(RecvError),
     #[fail(display = "Empty dns list")]
     DnsListEmpty,
+    #[fail(display = "The client certificate was in an invalid format.")]
+    ParseClientCertError,
+    #[fail(display = "The client key was in an invalid format.")]
+    ParseClientKeyError,
     #[fail(display = "Couldn't create mqtt connection in time")]
     Timeout,
     #[fail(
