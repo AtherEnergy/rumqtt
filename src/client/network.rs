@@ -215,7 +215,7 @@ fn resolve(host: &str, port: u16) -> Result<SocketAddr, io::Error> {
 
 fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
     use chrono::{Duration, Utc};
-    use jsonwebtoken::{encode, Algorithm, Header};
+    use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
     use uuid::Uuid;
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -237,7 +237,7 @@ fn generate_httpproxy_auth(id: &str, key: &[u8], expiry: i64) -> String {
 
     let claims = Claims { iat, exp, jti };
 
-    let jwt = encode(&jwt_header, &claims, &key).unwrap();
+    let jwt = encode(&jwt_header, &claims, &EncodingKey::from_secret(&key)).unwrap();
     let userid_password = format!("{}:{}", id, jwt);
     let auth = base64::encode(userid_password.as_bytes());
 
