@@ -9,22 +9,23 @@ edition = "2018"
 license = "Unlicense"
 
 [dependencies]
-tokio = { version = "0.1.21", features = [ "codec", "io", "rt-full", "tcp", "timer" ], default-features = false }
-bytes = "0.4"
-futures = "0.1.28"
-crossbeam-channel = "0.3"
+tokio = { version = "0.2.6", features = [ "io-util", "stream", "sync", "rt-threaded", "tcp", "time" ], default-features = false }
+bytes = "0.5"
+futures = "0.3.1"
 log = "0.4"
 failure = "0.1"
-derive_more = "0.13"
-base64 = "0.10"
-uuid = {version = "0.7", features = ["serde", "v4"]}
-mqtt311 = "0.2"
-tokio-rustls = ">=0.8, <=0.9"
-webpki = ">=0.8, <=0.19"
-
+derive_more = "0.99"
+base64 = "0.11"
+uuid = {version = "0.8", features = ["serde", "v4"]}
+mqtt311 = { git = "https://github.com/vivint-smarthome/mqtt311", branch = "update-deps", version = "0.2.0" }
+tokio-rustls = "0.12"
+tokio-util = { version = "0.2.0", features = ["codec"] }
+webpki = "0.21"
+rental = "0.5.5"
+stable_deref_trait = "1.1.1"
 
 [dependencies.jsonwebtoken]
-version = ">=5.0.1, <=6.0"
+version = "7.0.0-alpha.2"
 optional = true
 
 [dependencies.chrono]
@@ -39,10 +40,15 @@ optional = true
 version = "1"
 optional = true
 
+[target.'cfg(test)'.dependencies]
+tokio = { version = "0.2.6", features = [ "macros", "stream" ] }
+
 [dev-dependencies]
 envy = "0.3"
+futures = "0.3.1"
 serde = "1"
 serde_derive = "1"
+tokio = { version = "0.2.6", features = [ "macros" ], default-features = false }
 pretty_env_logger = "0.3"
 
 [features]

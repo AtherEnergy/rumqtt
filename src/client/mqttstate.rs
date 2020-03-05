@@ -1,13 +1,11 @@
-use std::{
-    collections::VecDeque,
-    result::Result,
-    time::Instant,
-};
+use std::{collections::VecDeque, result::Result, time::Instant};
 
-use crate::client::{Notification, Request};
-use crate::error::{ConnectError, NetworkError};
-use crate::mqttoptions::{MqttOptions, SecurityOptions};
-use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Publish, QoS, Subscribe, Protocol};
+use crate::{
+    client::{Notification, Request},
+    error::{ConnectError, NetworkError},
+    mqttoptions::{MqttOptions, SecurityOptions},
+};
+use mqtt311::{Connack, Connect, ConnectReturnCode, Packet, PacketIdentifier, Protocol, Publish, QoS, Subscribe};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
@@ -84,7 +82,6 @@ impl MqttState {
     // E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     // be forwarded to user and Pubck packet will be written to network
     pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Notification, Request), NetworkError> {
-
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             // TODO: Remove this with async await. This is just to satisfy combinator rules during timeout
@@ -151,13 +148,17 @@ impl MqttState {
     /// Sets next packet id if pkid is None (fresh publish) and adds it to the
     /// outgoing publish queue
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Publish, NetworkError> {
-        
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
+        debug!(
+            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic_name,
+            publish.pkid,
+            publish.payload.len()
+        );
         Ok(publish)
     }
 
@@ -168,10 +169,9 @@ impl MqttState {
     pub fn is_disconnecting(&self) -> bool {
         match self.connection_status {
             MqttConnectionStatus::Disconnecting => true,
-            _ => false
+            _ => false,
         }
     }
-
 
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Notification, Request), NetworkError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
@@ -294,7 +294,6 @@ impl MqttState {
             return Err(NetworkError::AwaitPingResp);
         }
 
-
         let ping = if elapsed_in > keep_alive || elapsed_out > keep_alive {
             self.await_pingresp = true;
             true
@@ -306,7 +305,11 @@ impl MqttState {
             "Ping = {:?}. keep alive = {},
             last incoming packet before {} millisecs,
             last outgoing packet before {} millisecs",
-            ping, keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
+            ping,
+            keep_alive.as_millis(),
+            elapsed_in.as_millis(),
+            elapsed_out.as_millis()
+        );
 
         Ok(ping)
     }
@@ -320,11 +323,14 @@ impl MqttState {
         Ok((Notification::None, Request::None))
     }
 
-    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {        
+    pub fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Subscribe, NetworkError> {
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
 
-        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
+        debug!(
+            "Subscribe. Topics = {:?}, Pkid = {:?}",
+            subscription.topics, subscription.pkid
+        );
         Ok(subscription)
     }
 
@@ -386,7 +392,7 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Result<Connect, ConnectError> {
 fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<String, ConnectError> {
     //TODO: Remove chrono for current utc timestamp and use something in standard library
     use chrono::Utc;
-    use jsonwebtoken::{encode, Algorithm, Header};
+    use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
     use serde_derive::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -406,7 +412,7 @@ fn gen_iotcore_password(project: String, key: &[u8], expiry: i64) -> Result<Stri
 
     let claims = Claims { iat, exp, aud: project };
 
-    Ok(encode(&jwt_header, &claims, &key)?)
+    Ok(encode(&jwt_header, &claims, &EncodingKey::from_secret(&key))?)
 }
 
 #[cfg(test)]
@@ -414,9 +420,11 @@ mod test {
     use std::{sync::Arc, thread, time::Duration};
 
     use super::{MqttConnectionStatus, MqttState};
-    use crate::client::{Notification, Request};
-    use crate::error::NetworkError;
-    use crate::mqttoptions::MqttOptions;
+    use crate::{
+        client::{Notification, Request},
+        error::NetworkError,
+        mqttoptions::MqttOptions,
+    };
     use mqtt311::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
@@ -640,9 +648,9 @@ mod test {
         thread::sleep(Duration::from_secs(10));
 
         // should ping
-         match  mqtt.handle_outgoing_ping().unwrap() {
+        match mqtt.handle_outgoing_ping().unwrap() {
             true => (),
-            _ => assert!(false, "expecting ping")
+            _ => assert!(false, "expecting ping"),
         }
 
         // network activity other than pingresp
@@ -670,17 +678,17 @@ mod test {
         thread::sleep(Duration::from_secs(10));
 
         // should ping
-        match  mqtt.handle_outgoing_ping().unwrap() {
+        match mqtt.handle_outgoing_ping().unwrap() {
             true => (),
-            _ => assert!(false, "expecting ping")
+            _ => assert!(false, "expecting ping"),
         }
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
 
         thread::sleep(Duration::from_secs(10));
         // should ping
-         match  mqtt.handle_outgoing_ping().unwrap() {
+        match mqtt.handle_outgoing_ping().unwrap() {
             true => (),
-            _ => assert!(false, "expecting ping")
+            _ => assert!(false, "expecting ping"),
         }
     }
 

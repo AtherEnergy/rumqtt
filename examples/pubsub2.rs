@@ -1,22 +1,29 @@
+use futures::stream::StreamExt;
 use rumqtt::{MqttClient, MqttOptions, QoS};
-use std::{thread, time::Duration};
+use std::time::Duration;
+use tokio::time::delay_for;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
     let mqtt_options = MqttOptions::new("test-pubsub2", "127.0.0.1", 1883).set_keep_alive(10);
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    let (mut mqtt_client, mut notifications) = MqttClient::start(mqtt_options).await.unwrap();
 
-   //mqtt_client.subscribe("hello/world", QoS::ExactlyOnce).unwrap();
+    //mqtt_client.subscribe("hello/world", QoS::ExactlyOnce).await.unwrap();
 
-    thread::spawn(move || {
+    let thread = tokio::spawn(async move {
         for i in 0..100 {
             let payload = format!("publish {}", i);
-            thread::sleep(Duration::from_secs(1));
-            mqtt_client.publish("hello/world", QoS::AtMostOnce, false, payload).unwrap();
+            delay_for(Duration::from_secs(1)).await;
+            mqtt_client
+                .publish("hello/world", QoS::AtMostOnce, false, payload)
+                .await
+                .unwrap();
         }
     });
 
-    for notification in notifications {
+    while let Some(notification) = notifications.next().await {
         println!("{:?}", notification)
     }
+    thread.await.unwrap();
 }

@@ -1,36 +1,45 @@
-use crossbeam_channel::select;
+use futures::{channel::oneshot, future::FutureExt, select, stream::StreamExt};
 use rumqtt::{MqttClient, MqttOptions, QoS};
+use std::time::Duration;
+use tokio::time::delay_for;
 
-use std::{thread, time::Duration};
-
-fn main() {
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
     let mqtt_options = MqttOptions::new("test-id", "127.0.0.1", 1883).set_keep_alive(30);
-    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
-    let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+    let (mut mqtt_client, mut notifications) = MqttClient::start(mqtt_options).await.unwrap();
+    let (done_tx, done_rx) = oneshot::channel();
 
-    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
+    mqtt_client.subscribe("hello/world", QoS::AtLeastOnce).await.unwrap();
 
     let sleep_time = Duration::from_millis(100);
 
-    thread::spawn(move || {
+    let thread = tokio::spawn(async move {
         for i in 0..1000 {
             let payload = format!("publish {}", i);
-            thread::sleep(sleep_time);
+            delay_for(sleep_time).await;
 
-            mqtt_client.publish("hello/world", QoS::AtLeastOnce, false, payload).unwrap();
+            mqtt_client
+                .publish("hello/world", QoS::AtLeastOnce, false, payload)
+                .await
+                .unwrap();
         }
 
-        thread::sleep(sleep_time * 10);
-        done_tx.send(true).unwrap();
+        delay_for(sleep_time * 10).await;
+        done_tx.send(()).unwrap();
     });
 
+    let mut done_rx = done_rx.fuse();
     loop {
         select! {
-            recv(notifications) -> notification => {
+            notification = notifications.next() => {
                 println!("{:?}", notification)
-            }
-            recv(done_rx) -> _done => break
+            },
+            res = done_rx => {
+                let () = res.unwrap();
+                break;
+            },
         }
     }
+    thread.await.unwrap();
 }
